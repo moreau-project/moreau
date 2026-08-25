@@ -1,0 +1,325 @@
+# Build C API shared libraries for all platforms.
+#
+# Produces versioned tarballs:
+#   - moreau-0.1.5-cpu-macos-arm64.tar.gz
+#   - moreau-0.1.5-cpu-linux-x86_64.tar.gz
+#   - moreau-0.1.5-cpu-linux-aarch64.tar.gz
+#   - moreau-0.1.5-cuda12-linux-x86_64.tar.gz
+#   - moreau-0.1.5-cuda12-linux-aarch64.tar.gz
+#   - moreau-0.1.5-cuda13-linux-x86_64.tar.gz
+#   - moreau-0.1.5-cuda13-linux-aarch64.tar.gz
+#
+# Trigger manually:
+#   gh workflow run build-c-lib.yml
+#   gh workflow run build-c-lib.yml -f version=0.1.5
+
+name: Build C Libraries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., 0.1.5). Leave empty to read from Cargo.toml.'
+        required: false
+        type: string
+env:
+  CUDSS_VERSION: "0.7.1.4"
+
+jobs:
+  # =========================================================================
+  # Resolve version from input or Cargo.toml
+  # =========================================================================
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            VER=$(grep '^version = ' packages/moreau-cpu/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+            echo "version=$VER" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Version: $(grep version= "$GITHUB_OUTPUT" | cut -d= -f2)"
+
+  # =========================================================================
+  # CPU: macOS ARM64
+  # =========================================================================
+  build-cpu-macos-arm64:
+    needs: [resolve-version]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build CPU C API
+        run: packages/moreau-c/build.sh cpu
+
+      - name: Package tarball
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          mkdir -p dist
+          tar czf "dist/moreau-${VERSION}-cpu-macos-arm64.tar.gz" -C dist/c-api .
+          echo "Built: moreau-${VERSION}-cpu-macos-arm64.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-lib-cpu-macos-arm64
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  # =========================================================================
+  # CPU: Linux x86_64 + aarch64
+  # =========================================================================
+  build-cpu-linux:
+    needs: [resolve-version]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build CPU C API in manylinux container
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -e MOREAU_OUT_DIR=/workspace/dist/c-api \
+            -w /workspace \
+            "quay.io/pypa/manylinux_2_28_${ARCH}" \
+            bash -c '
+              set -e
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+              source $HOME/.cargo/env
+              packages/moreau-c/build.sh cpu
+              chmod -R 777 dist/
+            '
+
+          mkdir -p dist
+          tar czf "dist/moreau-${VERSION}-cpu-linux-${ARCH}.tar.gz" -C dist/c-api .
+          echo "Built: moreau-${VERSION}-cpu-linux-${ARCH}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-lib-cpu-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  # =========================================================================
+  # CUDA: Linux x86_64 + aarch64 (per CUDA version)
+  # =========================================================================
+  build-cuda-linux:
+    needs: [resolve-version]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_version: "12.2"
+            cuda_label: "cuda12"
+            cuda_major: "12"
+            cudss_suffix: "cuda12"
+            gcc_toolset: "12"
+            cuda_architectures: "75;80;86;89;90"
+            arch: "x86_64"
+            cuda_arch_label: "x86_64"
+            runner: ubuntu-latest
+          - cuda_version: "12.2"
+            cuda_label: "cuda12"
+            cuda_major: "12"
+            cudss_suffix: "cuda12"
+            gcc_toolset: "12"
+            cuda_architectures: "87;90"
+            arch: "aarch64"
+            cuda_arch_label: "sbsa"
+            runner: ubuntu-24.04-arm
+          - cuda_version: "13.0"
+            cuda_label: "cuda13"
+            cuda_major: "13"
+            cudss_suffix: "cuda13"
+            gcc_toolset: "13"
+            cuda_architectures: "75;80;86;89;90;120"
+            arch: "x86_64"
+            cuda_arch_label: "x86_64"
+            runner: ubuntu-latest
+          - cuda_version: "13.0"
+            cuda_label: "cuda13"
+            cuda_major: "13"
+            cudss_suffix: "cuda13"
+            gcc_toolset: "13"
+            cuda_architectures: "87;90;120"
+            arch: "aarch64"
+            cuda_arch_label: "sbsa"
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - uses: actions/checkout@v4
+
+      - name: Build CUDA C API in Docker
+        env:
+          CUDSS_VER: ${{ env.CUDSS_VERSION }}
+          CUDA_VER: ${{ matrix.cuda_version }}
+          CUDA_MAJ: ${{ matrix.cuda_major }}
+          CUDSS_SUF: ${{ matrix.cudss_suffix }}
+          GCC_TS: ${{ matrix.gcc_toolset }}
+          CUDA_ARCHS: ${{ matrix.cuda_architectures }}
+          CUDA_LABEL: ${{ matrix.cuda_label }}
+          ARCH: ${{ matrix.arch }}
+          CUDA_ARCH_LABEL: ${{ matrix.cuda_arch_label }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          # Dockerfile.c-lib uses scripts/build-c-lib.sh internally
+          DOCKER_BUILDKIT=1 docker build \
+            --build-arg ARCH="$ARCH" \
+            --build-arg CUDA_ARCH_LABEL="$CUDA_ARCH_LABEL" \
+            --build-arg CUDSS_VERSION="$CUDSS_VER" \
+            --build-arg CUDA_VERSION="$CUDA_VER" \
+            --build-arg CUDA_MAJOR="$CUDA_MAJ" \
+            --build-arg CUDSS_SUFFIX="$CUDSS_SUF" \
+            --build-arg GCC_TOOLSET="$GCC_TS" \
+            --build-arg CUDA_ARCHITECTURES="$CUDA_ARCHS" \
+            -f packages/moreau-cuda/Dockerfile.c-lib \
+            --target output \
+            --output type=local,dest=staging \
+            .
+
+          # Package into versioned tarball
+          TARBALL="moreau-${VERSION}-${CUDA_LABEL}-linux-${ARCH}.tar.gz"
+          mkdir -p dist
+          tar czf "dist/${TARBALL}" -C staging .
+          echo "Built: $TARBALL ($(du -h "dist/$TARBALL" | cut -f1))"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-lib-${{ matrix.cuda_label }}-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  # =========================================================================
+  # Generate manifest and create GitHub Release
+  # =========================================================================
+  publish:
+    needs: [resolve-version, build-cpu-macos-arm64, build-cpu-linux, build-cuda-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: c-lib-*
+          merge-multiple: true
+
+      - name: Generate manifest
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          # Generate moreau-manifest.json with version, sha256, and file info
+          echo "{" > dist/moreau-manifest.json
+          echo "  \"version\": \"${VERSION}\"," >> dist/moreau-manifest.json
+          echo "  \"artifacts\": {" >> dist/moreau-manifest.json
+
+          FIRST=true
+          for tarball in dist/*.tar.gz; do
+            NAME="$(basename "$tarball")"
+            SHA256="$(sha256sum "$tarball" | cut -d' ' -f1)"
+            SIZE="$(stat --format=%s "$tarball")"
+
+            # Derive platform info from filename: moreau-VERSION-VARIANT.tar.gz
+            # e.g. moreau-0.1.5-cpu-linux-x86_64.tar.gz -> cpu-linux-x86_64
+            VARIANT="${NAME#moreau-${VERSION}-}"
+            VARIANT="${VARIANT%.tar.gz}"
+
+            # Map variant to os/arch/backend
+            case "$VARIANT" in
+              cpu-macos-arm64)      OS="macos";  ARCH="aarch64"; BACKEND="cpu" ;;
+              cpu-linux-x86_64)     OS="linux";  ARCH="x86_64";  BACKEND="cpu" ;;
+              cpu-linux-aarch64)    OS="linux";  ARCH="aarch64"; BACKEND="cpu" ;;
+              cuda12-linux-x86_64)  OS="linux";  ARCH="x86_64";  BACKEND="cuda12" ;;
+              cuda12-linux-aarch64) OS="linux";  ARCH="aarch64"; BACKEND="cuda12" ;;
+              cuda13-linux-x86_64)  OS="linux";  ARCH="x86_64";  BACKEND="cuda13" ;;
+              cuda13-linux-aarch64) OS="linux";  ARCH="aarch64"; BACKEND="cuda13" ;;
+              *) OS="unknown"; ARCH="unknown"; BACKEND="unknown" ;;
+            esac
+
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              echo "    ," >> dist/moreau-manifest.json
+            fi
+
+            cat >> dist/moreau-manifest.json <<ENTRY
+              "${VARIANT}": {
+                "filename": "${NAME}",
+                "sha256": "${SHA256}",
+                "size": ${SIZE},
+                "os": "${OS}",
+                "arch": "${ARCH}",
+                "backend": "${BACKEND}"
+              }
+          ENTRY
+          done
+
+          echo "  }" >> dist/moreau-manifest.json
+          echo "}" >> dist/moreau-manifest.json
+
+          echo "=== Manifest ==="
+          cat dist/moreau-manifest.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: c-api-v${{ needs.resolve-version.outputs.version }}
+          name: c-api-v${{ needs.resolve-version.outputs.version }}
+          files: |
+            dist/*.tar.gz
+            dist/moreau-manifest.json
+          body: |
+            ## Moreau C API Libraries v${{ needs.resolve-version.outputs.version }}
+
+            ### Artifacts
+
+            | Archive | Platform | Backend |
+            |---------|----------|---------|
+            | `moreau-${{ needs.resolve-version.outputs.version }}-cpu-macos-arm64.tar.gz` | macOS ARM64 | CPU |
+            | `moreau-${{ needs.resolve-version.outputs.version }}-cpu-linux-x86_64.tar.gz` | Linux x86_64 | CPU |
+            | `moreau-${{ needs.resolve-version.outputs.version }}-cpu-linux-aarch64.tar.gz` | Linux aarch64 | CPU |
+            | `moreau-${{ needs.resolve-version.outputs.version }}-cuda12-linux-x86_64.tar.gz` | Linux x86_64 | CUDA 12 |
+            | `moreau-${{ needs.resolve-version.outputs.version }}-cuda12-linux-aarch64.tar.gz` | Linux aarch64 | CUDA 12 |
+            | `moreau-${{ needs.resolve-version.outputs.version }}-cuda13-linux-x86_64.tar.gz` | Linux x86_64 | CUDA 13 |
+            | `moreau-${{ needs.resolve-version.outputs.version }}-cuda13-linux-aarch64.tar.gz` | Linux aarch64 | CUDA 13 |
+
+            Each tarball contains `include/moreau.h` and `lib/libmoreau_cpu.{so,dylib,a}` or `lib/libmoreau_cuda.so`.
+
+            See `moreau-manifest.json` for SHA256 hashes and metadata.
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

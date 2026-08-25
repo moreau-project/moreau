@@ -1,0 +1,291 @@
+# Test wheels from a GitHub Release.
+#
+# Run this after release.yml creates a GitHub Release to validate the artifacts.
+# Can be re-triggered after updating test code.
+#
+# Usage:
+#   gh workflow run test-release.yml -f release_tag=v0.2.0
+#   gh workflow run test-release.yml -f release_tag=dev-20260313-120000
+
+name: Test Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'GitHub Release tag to test (e.g., v0.2.0 or dev-20260313-120000)'
+        required: true
+        type: string
+
+jobs:
+  # GPU tests: install wheels in Docker with CUDA runtime, run full test suite
+  test-gpu:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_short: "cu122"
+            cuda_major: "12"
+            cuda_runtime: "nvidia/cuda:12.2.0-runtime-ubuntu22.04"
+            pytorch_index: "cu121"
+            jax_cuda: "cuda12"
+            runner: gpu-t4
+          - cuda_short: "cu130"
+            cuda_major: "13"
+            cuda_runtime: "nvidia/cuda:13.0.0-runtime-ubuntu22.04"
+            pytorch_index: "cu130"
+            jax_cuda: "cuda13"
+            runner: gpu-instance
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gh CLI
+        run: |
+          if ! command -v gh &>/dev/null; then
+            GH_VERSION=$(curl -s https://api.github.com/repos/cli/cli/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
+            curl -sSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" | sudo tar xz -C /usr/local --strip-components=1
+          fi
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          mkdir -p dist-cpu dist-gpu dist-wrapper
+          gh release download "$RELEASE_TAG" --dir dist-all
+
+          # Sort wheels by type. GPU test runners are x86_64, so filter CPU
+          # and CUDA wheels to x86_64 to avoid picking up the aarch64 wheel
+          # (which pip would reject with "not supported on this platform").
+          CUDA_MAJOR="${{ matrix.cuda_short }}"
+          CUDA_MAJOR="${CUDA_MAJOR#cu}"
+          CUDA_MAJOR="${CUDA_MAJOR:0:2}"
+
+          for whl in dist-all/*.whl; do
+            name="$(basename "$whl")"
+            case "$name" in
+              moreau_cpu-*manylinux*x86_64*)        cp "$whl" dist-cpu/ ;;
+              moreau_cuda${CUDA_MAJOR}-*x86_64*)    cp "$whl" dist-gpu/ ;;
+              moreau-*py3-none-any*)                cp "$whl" dist-wrapper/ ;;
+            esac
+          done
+
+          echo "=== CPU wheels ===" && ls -la dist-cpu/
+          echo "=== GPU wheels ===" && ls -la dist-gpu/
+          echo "=== Wrapper wheels ===" && ls -la dist-wrapper/
+
+      - name: Test wheel installation and run tests (${{ matrix.cuda_short }})
+        run: |
+          echo "Testing wheels with Python 3.12 and ${{ matrix.cuda_short }}..."
+
+          # Create abi3 test script (avoids quoting issues in docker heredoc)
+          cat > /tmp/test_abi3.py << 'PYEOF'
+          import sys
+          pyver = f"{sys.version_info.major}.{sys.version_info.minor}"
+          # Test CPU native extension
+          import moreau_cpu._cpu_solver as mc
+          print(f"Python {pyver}: CPU native extension OK: {mc}")
+          # Test CUDA native extension (via __init__.py which preloads nvidia libs)
+          try:
+              import moreau_cuda
+              print(f"Python {pyver}: CUDA native extension OK: {moreau_cuda}")
+          except ImportError as e:
+              print(f"Python {pyver}: CUDA import failed: {e}")
+          PYEOF
+
+          docker run --rm --gpus all \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e TZ=UTC \
+            -v ${{ github.workspace }}/dist-cpu:/dist-cpu:ro \
+            -v ${{ github.workspace }}/dist-gpu:/dist-gpu:ro \
+            -v ${{ github.workspace }}/dist-wrapper:/dist-wrapper:ro \
+            -v ${{ github.workspace }}/packages/moreau/tests/python:/tests_py:ro \
+            -v /tmp/test_abi3.py:/test_abi3.py:ro \
+            ${{ matrix.cuda_runtime }} \
+            bash -c '
+              set -e
+              # g++ is needed by torch.compile/Inductor (cvxpylayers test_torch_compile_*)
+              apt-get update && apt-get install -y curl ca-certificates git gcc g++
+
+              # Install uv → standalone Python distributions (no Launchpad/PPA dependency)
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
+              uv python install 3.12 3.13 3.14
+
+              uv venv --seed --python 3.12 /test_env
+              source /test_env/bin/activate
+              pip install --upgrade pip
+
+              # Install CPU wheel and moreau wrapper package (built wheels)
+              pip install /dist-cpu/*.whl
+              pip install /dist-wrapper/*.whl
+              python -c "import moreau; print('"'"'CPU package OK:'"'"', moreau.__file__)"
+
+              # Install GPU wheel (pulls nvidia-cudss, nvidia-cusolver, etc. from PyPI)
+              pip install /dist-gpu/*.whl
+              python -c "import moreau; print('"'"'GPU available:'"'"', moreau.device_available('"'"'cuda'"'"'))"
+
+              # === abi3 import tests (frontloaded - fast check before heavy deps) ===
+              echo ""
+              echo "=== Testing abi3 wheel import on Python 3.13 and 3.14 ==="
+              for PYVER in 3.13 3.14; do
+                uv venv --seed --python ${PYVER} /test_env_${PYVER}
+                /test_env_${PYVER}/bin/pip install --upgrade pip -q
+                /test_env_${PYVER}/bin/pip install numpy scipy -q
+                /test_env_${PYVER}/bin/pip install /dist-cpu/*.whl -q
+                /test_env_${PYVER}/bin/pip install /dist-wrapper/*.whl -q
+                /test_env_${PYVER}/bin/pip install /dist-gpu/*.whl -q
+                /test_env_${PYVER}/bin/python /test_abi3.py
+                echo "Python ${PYVER}: abi3 import test passed"
+              done
+
+              # Install torch and verify torch bindings
+              pip install torch --index-url https://download.pytorch.org/whl/${{ matrix.pytorch_index }}
+              python -c "from moreau.torch import Solver; print('"'"'Torch bindings OK'"'"')"
+
+              # Install JAX with CUDA support
+              pip install jax[${{ matrix.jax_cuda }}]
+              python -c "import jax; print('"'"'JAX backend:'"'"', jax.default_backend())"
+
+              # Run tests — each file in its own process to prevent GPU OOM on T4 (16GB)
+              pip install pytest numpy scipy hypothesis cvxpy clarabel
+              pip install git+https://github.com/cvxpy/cvxpylayers.git@v1.1.0
+              git clone --depth 1 --branch release/1.8.x https://github.com/cvxpy/cvxpy.git /tmp/cvxpy
+              git clone --depth 1 --branch v1.1.0 https://github.com/cvxpy/cvxpylayers.git /tmp/cvxpylayers
+              cp -r /tmp/cvxpy/cvxpy/tests /tmp/cvxpy-tests
+              FAILED=0
+              FAILED_FILES=""
+              for f in /tests_py/test_*.py; do
+                echo "=== Running $f ==="
+                rc=0; pytest "$f" -v --tb=short || rc=$?
+                if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then
+                  FAILED=1
+                  FAILED_FILES="$FAILED_FILES $f"
+                fi
+              done
+              if [ "$FAILED" -ne 0 ]; then
+                echo "Failed test files:$FAILED_FILES"
+                exit 1
+              fi
+              pytest /tmp/cvxpy-tests/test_conic_solvers.py -v --tb=short -k "Moreau"
+              pytest /tmp/cvxpylayers/tests/test_moreau.py /tmp/cvxpylayers/tests/test_moreau_dual_variables.py -v --tb=short
+            '
+
+          echo "All tests passed for ${{ matrix.cuda_short }}!"
+
+  # macOS CPU tests
+  test-cpu-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          mkdir -p dist-cpu dist-wrapper
+          gh release download "$RELEASE_TAG" --dir dist-all
+
+          for whl in dist-all/*.whl; do
+            name="$(basename "$whl")"
+            case "$name" in
+              moreau_cpu-*macosx*) cp "$whl" dist-cpu/ ;;
+              moreau-*)            cp "$whl" dist-wrapper/ ;;
+            esac
+          done
+
+          echo "=== CPU wheels ===" && ls -la dist-cpu/
+          echo "=== Wrapper wheels ===" && ls -la dist-wrapper/
+
+      - name: Set up Python 3.13 and 3.14 for abi3 tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: |
+            3.13
+            3.14
+
+      - name: Test abi3 wheel import on Python 3.13 and 3.14
+        run: |
+          echo "=== Testing abi3 wheel import on Python 3.13 and 3.14 ==="
+          for PYVER in 3.13 3.14; do
+            echo "--- Python ${PYVER} ---"
+            "python${PYVER}" -m venv /tmp/test_env_${PYVER}
+            /tmp/test_env_${PYVER}/bin/pip install --upgrade pip -q
+            /tmp/test_env_${PYVER}/bin/pip install numpy scipy -q
+            /tmp/test_env_${PYVER}/bin/pip install --no-deps dist-cpu/*.whl -q
+            /tmp/test_env_${PYVER}/bin/python -c "import moreau_cpu._cpu_solver as mc; print(f'Python ${PYVER}: CPU native extension OK: {mc}')"
+            echo "Python ${PYVER}: abi3 import test passed"
+            rm -rf /tmp/test_env_${PYVER}
+          done
+
+      - name: Install and test (Python 3.12)
+        run: |
+          python3.12 -m venv /tmp/test_env_main
+          /tmp/test_env_main/bin/pip install --upgrade pip
+          /tmp/test_env_main/bin/pip install dist-cpu/*.whl dist-wrapper/*.whl
+          /tmp/test_env_main/bin/python -c "import moreau; print('moreau OK:', moreau.__file__)"
+          /tmp/test_env_main/bin/pip install pytest numpy scipy hypothesis cvxpy clarabel
+          /tmp/test_env_main/bin/pytest packages/moreau/tests/python/ -v --tb=short
+
+  # Julia tests: install Julia packages from release tarball + C lib tarball, run Pkg.test
+  test-julia:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release download "$RELEASE_TAG" --dir dist-all
+
+          echo "=== Release assets ==="
+          ls -la dist-all/
+
+      - name: Extract Julia source and C library
+        run: |
+          # Extract Julia source tarball
+          mkdir -p julia-src
+          tar xzf dist-all/moreau-julia-src.tar.gz -C julia-src
+          echo "=== Julia source ==="
+          find julia-src -type f | head -30
+
+          # Extract CPU .so from C lib tarball (Linux x86_64)
+          mkdir -p lib-root
+          tar xzf dist-all/moreau-cpu-linux-x86_64.tar.gz -C lib-root
+          echo "=== Extracted library ==="
+          ls -la lib-root/lib/
+
+      - name: Setup Julia
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+
+      - name: Run Julia tests
+        env:
+          MOREAU_CPU_LIB: ${{ github.workspace }}/lib-root/lib/libmoreau_cpu.so
+        run: |
+          # Run Moreau.jl tests using its own Project.toml as the environment
+          # (so [sources] relative paths to JLL packages resolve correctly)
+          julia --project=julia-src/Moreau.jl -e '
+            using Pkg
+            Pkg.Registry.add("General")
+            Pkg.resolve()
+            Pkg.test()
+          '
+
+          # Run internal tests from the repo checkout
+          julia --project=packages/moreau-julia/MoreauTests.jl -e '
+            using Pkg
+            Pkg.resolve()
+            Pkg.test()
+          '

@@ -1,0 +1,99 @@
+# Dockerfile.c-lib - Build manylinux-compatible C API shared library (no Python needed)
+#
+# Usage:
+#   # Extract library + header:
+#   DOCKER_BUILDKIT=1 docker build \
+#     -f packages/moreau-cuda/Dockerfile.c-lib \
+#     --target output \
+#     --output type=local,dest=dist/c-api-cuda \
+#     .
+#
+#   # Specific CUDA version:
+#   DOCKER_BUILDKIT=1 docker build \
+#     -f packages/moreau-cuda/Dockerfile.c-lib \
+#     --build-arg CUDA_VERSION=13.0 \
+#     --build-arg CUDA_MAJOR=13 \
+#     --build-arg CUDSS_SUFFIX=cuda13 \
+#     --build-arg GCC_TOOLSET=13 \
+#     --target output \
+#     --output type=local,dest=dist/c-api-cuda-13 \
+#     .
+
+# Architecture parameters (declared before FROM for image tag interpolation).
+ARG ARCH=x86_64
+# NVIDIA redist paths use "sbsa" for aarch64 server SoCs. Override to "sbsa"
+# when ARCH=aarch64.
+ARG CUDA_ARCH_LABEL=x86_64
+
+FROM quay.io/pypa/manylinux_2_28_${ARCH} AS builder
+
+ARG ARCH
+ARG CUDA_ARCH_LABEL
+ARG CUDSS_VERSION=0.7.1.4
+ARG CUDA_VERSION=12.2
+ARG CUDA_MAJOR=12
+ARG CUDSS_SUFFIX=cuda12
+ARG GCC_TOOLSET=12
+ARG CUDA_ARCHITECTURES=75;80;86;89;90
+
+ARG CUDA_TOOLKIT_PKG=cuda-toolkit-${CUDA_VERSION/./-}
+
+# Install build tools
+RUN dnf install -y \
+        gcc-toolset-${GCC_TOOLSET}-gcc \
+        gcc-toolset-${GCC_TOOLSET}-gcc-c++ \
+        gcc-toolset-${GCC_TOOLSET}-libstdc++-devel \
+    && dnf clean all
+
+# Install CUDA toolkit (per-arch repo under rhel8/<x86_64|sbsa>/).
+RUN dnf install -y dnf-plugins-core \
+    && dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/${CUDA_ARCH_LABEL}/cuda-rhel8.repo \
+    && dnf install -y ${CUDA_TOOLKIT_PKG} \
+    && dnf clean all
+
+# Set GCC toolset
+ENV PATH="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/lib64:/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/lib:${LD_LIBRARY_PATH}"
+ENV CC="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/bin/gcc"
+ENV CXX="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/bin/g++"
+
+# Set CUDA paths
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+ENV CUDA_HOME="/usr/local/cuda"
+
+# Install cuDSS (redist path mirrors the CUDA repo per-arch layout).
+WORKDIR /opt
+RUN CUDSS_TARBALL="libcudss-linux-${CUDA_ARCH_LABEL}-${CUDSS_VERSION}_${CUDSS_SUFFIX}-archive.tar.xz" \
+    && case "${CUDSS_VERSION}-${CUDA_ARCH_LABEL}-${CUDSS_SUFFIX}" in \
+        0.7.1.4-x86_64-cuda12) CUDSS_SHA256="946571d9ea164f948e402dd97a14541cb90fbec800336cfa7ae644af5937632f" ;; \
+        0.7.1.4-x86_64-cuda13) CUDSS_SHA256="84b34ebe7fad40ec10f2aab2957a63b6070bd8ce16e3ada3e6bcac7317256347" ;; \
+        0.7.1.4-sbsa-cuda12)   CUDSS_SHA256="a4ddd47ad711243bbea0da2d6520799595cc8d79aa740927e0855c0b8cb69cf8" ;; \
+        0.7.1.4-sbsa-cuda13)   CUDSS_SHA256="de8295cb6773992bd1ca7e2ad93caae1fd18eba39175f0101b85d53abd3e0179" ;; \
+        *) echo "No pinned cuDSS sha256 for ${CUDSS_VERSION} ${CUDA_ARCH_LABEL}/${CUDSS_SUFFIX}; update the checksum table." >&2; exit 1 ;; \
+    esac \
+    && curl -sL -o "${CUDSS_TARBALL}" "https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-${CUDA_ARCH_LABEL}/${CUDSS_TARBALL}" \
+    && echo "${CUDSS_SHA256}  ${CUDSS_TARBALL}" | sha256sum -c - \
+    && tar -xJf "${CUDSS_TARBALL}" \
+    && cp -r libcudss-*/lib/* /usr/local/lib/ \
+    && cp -r libcudss-*/include/* /usr/local/include/ \
+    && ldconfig \
+    && rm -rf libcudss-* "${CUDSS_TARBALL}"
+
+WORKDIR /workspace
+COPY . .
+
+# Build using the shared build script
+ENV MOREAU_OUT_DIR=/out
+ENV MOREAU_CUDA_ARCH="${CUDA_ARCHITECTURES}"
+RUN packages/moreau-c/build.sh cuda
+
+# Verify symbol exports
+RUN echo "=== Exported symbols ===" \
+    && nm -D /out/lib/libmoreau_cuda.so | grep ' T ' | head -20 \
+    && echo "=== Symbol count ===" \
+    && nm -D /out/lib/libmoreau_cuda.so | grep ' T ' | wc -l
+
+# Output stage
+FROM scratch AS output
+COPY --from=builder /out/ /

@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "moreau"
+version = "0.3.3"
+description = "Moreau: Conic optimization solver with CPU and optional GPU backends"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [{name = "Parth Nobel", email = "parthnobel@berkeley.edu"}, {name = "Steven Diamond", email = "diamond@cs.stanford.edu"}, {name = "Shane Barratt"}]
+# CPU path supports Python 3.9+. The [cuda]/[cuda13] extras pull in moreau-cuda,
+# which requires Python 3.12+.
+requires-python = ">=3.9"
+keywords = ["convex", "optimization", "conic", "solver", "gpu", "cuda"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "moreau-cpu>=0.3.3",
+    "numpy>=1.19.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+# The cuda extras require Python 3.12+ (moreau-cuda's floor).
+cuda = ["moreau-cuda12>=0.3.3"]
+cuda12 = ["moreau-cuda12>=0.3.3"]
+cuda13 = ["moreau-cuda13>=0.3.3"]
+torch = ["torch>=2.4.0"]
+test = ["pytest>=7.0.0", "cvxpy>=1.4.0"]
+all = ["moreau[cuda,torch]"]
+
+[project.urls]
+Homepage = "https://github.com/moreau-project/moreau"
+Repository = "https://github.com/moreau-project/moreau"
+Documentation = "https://github.com/moreau-project/moreau"
+
+[tool.uv.sources]
+moreau-cpu = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/moreau"]
+
+[tool.hatch.build.targets.sdist]
+include = ["python/moreau", "README.md", "LICENSE", "NOTICE"]

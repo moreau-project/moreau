@@ -1,0 +1,101 @@
+name: CI (CPU)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'packages/moreau-cpu/**'
+      - 'packages/moreau/**'
+      - '.github/workflows/ci-cpu.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'packages/moreau-cpu/**'
+      - 'packages/moreau/**'
+      - '.github/workflows/ci-cpu.yml'
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.12']
+      fail-fast: false
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+        cache: 'pip'
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
+
+    - name: Check formatting
+      working-directory: packages/moreau-cpu
+      run: cargo fmt --check
+
+    - name: Cache Rust build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          packages/moreau-cpu/target
+        key: rust-${{ runner.os }}-${{ hashFiles('packages/moreau-cpu/Cargo.lock') }}
+        restore-keys: |
+          rust-${{ runner.os }}-
+
+    - name: Install maturin
+      run: pip install maturin
+
+    - name: Build and install CPU package
+      working-directory: packages/moreau-cpu
+      run: |
+        rm -f target/wheels/*.whl
+        maturin build --release
+        pip install target/wheels/*.whl
+
+    - name: Install wrapper package and test dependencies
+      run: |
+        pip install -e packages/moreau
+        pip install pytest numpy scipy hypothesis
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        pip install jax
+        pip install git+https://github.com/cvxpy/cvxpy.git@release/1.8.x
+        pip install git+https://github.com/cvxpy/cvxpylayers.git@v1.1.0
+
+    - name: Test import
+      run: |
+        python -c "import moreau; print(f'Version: {moreau.__version__}')"
+        python -c "from moreau import Cones, Solver; print('Imports OK')"
+
+    - name: Clone upstream test repos
+      run: |
+        git clone --depth 1 --branch release/1.8.x https://github.com/cvxpy/cvxpy.git /tmp/cvxpy
+        git clone --depth 1 --branch v1.1.0 https://github.com/cvxpy/cvxpylayers.git /tmp/cvxpylayers
+        # Copy cvxpy tests out so pytest doesn't shadow the installed package
+        cp -r /tmp/cvxpy/cvxpy/tests /tmp/cvxpy-tests
+
+    - name: Run moreau tests
+      id: moreau_tests
+      run: pytest packages/moreau/tests/python/ -v --tb=short -k "not Torch and not cuda"
+
+    - name: Run moreau-cpu tests
+      if: always()
+      run: pytest packages/moreau-cpu/tests/python/ -v --tb=short
+
+    - name: Run cvxpy Moreau tests
+      if: always()
+      run: pytest /tmp/cvxpy-tests/test_conic_solvers.py -v --tb=short -k "Moreau"
+
+    - name: Run cvxpylayers Moreau tests
+      if: always()
+      run: pytest /tmp/cvxpylayers/tests/test_moreau.py /tmp/cvxpylayers/tests/test_moreau_dual_variables.py -v --tb=short -k "not cuda"

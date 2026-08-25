@@ -1,0 +1,46 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "moreau-cpu"
+version = "0.3.3"
+description = "Moreau CPU solver: Conic interior-point optimization in Rust"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [{name = "Parth Nobel", email = "parthnobel@berkeley.edu"}, {name = "Steven Diamond", email = "diamond@cs.stanford.edu"}, {name = "Shane Barratt"}]
+requires-python = ">=3.9"
+keywords = ["convex", "optimization", "conic", "solver", "linear-programming"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "numpy>=1.19.0",
+    "scipy>=1.6.0",
+]
+
+[project.optional-dependencies]
+torch = ["torch>=2.4.0"]
+test = ["pytest>=7.0.0", "cvxpy>=1.4.0"]
+
+[project.urls]
+Homepage = "https://github.com/moreau-project/moreau"
+Repository = "https://github.com/moreau-project/moreau"
+Documentation = "https://github.com/moreau-project/moreau"
+
+[tool.maturin]
+features = ["python"]
+python-source = "python"
+module-name = "moreau_cpu._cpu_solver"
+exclude = ["**/tests/**"]
+# LICENSE and NOTICE are auto-detected by maturin and bundled into the wheel.

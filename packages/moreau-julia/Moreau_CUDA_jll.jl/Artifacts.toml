@@ -1,0 +1,10 @@
+# Placeholder — platform-specific tarballs will be added by CI.
+# For local development, set MOREAU_CUDA_LIB environment variable
+# to the path of the locally-built libmoreau_cuda shared library.
+#
+# [moreau_cuda]
+# git-tree-sha1 = "..."
+#
+#     [[moreau_cuda.download]]
+#     url = "https://..."
+#     sha256 = "..."

@@ -1,0 +1,41 @@
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CUDSS_VERSION=0.7.1.4
+
+# Install system dependencies and Python 3.12
+RUN rm -f /etc/apt/sources.list.d/cuda*.list && \
+    apt-get update && apt-get install -y \
+    cmake g++ wget software-properties-common \
+    curl libsuitesparse-dev libgtest-dev pkg-config git \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y \
+    python3.12 python3.12-venv python3.12-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
+
+# Install cuDSS
+RUN wget -q https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-x86_64/libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz \
+    && echo "946571d9ea164f948e402dd97a14541cb90fbec800336cfa7ae644af5937632f  libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz" | sha256sum -c - \
+    && tar -xf libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz \
+    && cp -r libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive/lib/* /usr/local/lib/ \
+    && cp -r libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive/include/* /usr/local/include/ \
+    && rm -rf libcudss-* \
+    && ldconfig
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install Python build dependencies
+RUN pip install --no-cache-dir nanobind scikit-build-core numpy wheel maturin pytest scipy
+
+# Install PyTorch with CUDA support (largest download, do last for better caching)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu124
+
+# Verify installations
+RUN python3 -c "import torch; print(f'PyTorch {torch.__version__}')" && \
+    python3 -c "import nanobind; print(f'nanobind {nanobind.__version__}')" && \
+    rustc --version && \
+    cmake --version

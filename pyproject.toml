@@ -1,0 +1,40 @@
+[project]
+name = "moreau-workspace"
+version = "0.3.3"
+description = "Moreau workspace root"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+# moreau-cuda12/cuda13 are published separately, not part of this workspace
+override-dependencies = [
+    "moreau-cuda12>=0.0.1",
+    "moreau-cuda13>=0.0.1",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/moreau",
+    "packages/moreau-cpu",
+    "packages/moreau-cuda",
+]
+
+[tool.uv.sources]
+moreau = { workspace = true }
+moreau-cpu = { workspace = true }
+moreau-cuda = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "moreau",
+    "moreau-cuda",
+    "scikit-build-core>=0.5",
+    "nanobind>=2.0",
+    "jax",
+    "pytest>=7.0.0",
+    "cvxpy>=1.4.0",
+]
+
+[tool.black]
+# Matches the codebase's existing ~100-col convention (minimizes reformat churn).
+line-length = 100

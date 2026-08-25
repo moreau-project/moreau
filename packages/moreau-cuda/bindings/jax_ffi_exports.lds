@@ -1,0 +1,9 @@
+{
+  global:
+    MoreauSolveFwd;
+    MoreauSolveFwdWarm;
+    MoreauSolveBwd;
+    moreau_jax_clear_cache;
+  local:
+    *;
+};

@@ -1,0 +1,39 @@
+name = "Moreau"
+uuid = "c8b129f6-74e5-4f0d-b2d8-2ea10d91a548"
+version = "0.1.0"
+
+[deps]
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
+Moreau_CPU_jll = "86198e50-5f62-4a36-ad76-2092ace74372"
+Moreau_CUDA_jll = "8300562c-07d5-42e2-bc97-74014b4096bd"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
+# Dev-only: resolve JLL packages from the monorepo.
+# When installed from a registry, these are resolved normally via UUID.
+[sources]
+Moreau_CPU_jll = {path = "../Moreau_CPU_jll.jl"}
+Moreau_CUDA_jll = {path = "../Moreau_CUDA_jll.jl"}
+
+[weakdeps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+
+[extensions]
+MoreauCUDAExt = "CUDA"
+MoreauChainRulesExt = "ChainRulesCore"
+
+[compat]
+ChainRulesCore = "1"
+JuMP = "1.30.0"
+MathOptInterface = "1"
+SparseArrays = "1.12.0"
+julia = "1.12"
+
+[extras]
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test", "JuMP"]

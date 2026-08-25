@@ -1,0 +1,223 @@
+name: CI (CUDA)
+
+env:
+  CI_IMAGE: ghcr.io/${{ github.repository }}/cuda-ci:latest
+  PYTORCH_INDEX: "https://download.pytorch.org/whl/cu124"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/moreau-cuda/**'
+      - 'packages/moreau-cpu/**'
+      - 'packages/moreau/python/moreau/**'
+      - 'packages/moreau-cpu/tests/python/**'
+      - 'packages/moreau-cuda/tests/**'
+      - '.github/workflows/ci-cuda.yml'
+  pull_request:
+    paths:
+      - 'packages/moreau-cuda/**'
+      - 'packages/moreau-cpu/**'
+      - 'packages/moreau/python/moreau/**'
+      - 'packages/moreau-cpu/tests/python/**'
+      - 'packages/moreau-cuda/tests/**'
+      - '.github/workflows/ci-cuda.yml'
+  workflow_dispatch:  # Manual trigger from GitHub UI
+
+jobs:
+  # Build on GitHub-hosted CPU runner using Docker (CUDA cross-compilation - no GPU needed).
+  # Gated to trusted branches in the canonical repo: external pull requests must
+  # not receive the private CI image or dispatch work to the self-hosted runner.
+  build:
+    if: >-
+      github.repository == 'moreau-project/moreau' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    name: Build (CPU)
+
+    steps:
+    # Free up disk space - CUDA PyTorch needs ~2.5GB and runner has limited space
+    - name: Free disk space
+      uses: jlumbroso/free-disk-space@v1.3.1
+      with:
+        tool-cache: false  # Keep tool cache for faster builds
+        android: true      # Free ~9GB
+        dotnet: true       # Free ~2GB
+        haskell: true      # Free ~5GB
+        large-packages: false  # Keep to save time
+        swap-storage: false    # Keep swap
+        docker-images: false   # We need Docker
+
+    - uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Cache ccache directory for faster incremental builds
+    - name: Cache ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-cuda-${{ hashFiles('packages/moreau-cuda/src/**', 'packages/moreau-cuda/include/**', 'packages/moreau-cuda/CMakeLists.txt') }}
+        restore-keys: |
+          ccache-cuda-
+
+    - name: Build in Docker (CUDA cross-compilation)
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}:/workspace \
+          -v ${{ github.workspace }}/.ccache:/root/.ccache \
+          -w /workspace \
+          ${{ env.CI_IMAGE }} \
+          bash -c '
+            set -e
+            # Install build dependencies not yet in the CI image
+            apt-get update && apt-get install -y ccache libsuitesparse-dev >/dev/null 2>&1
+            export PATH="/usr/lib/ccache:$PATH"
+            export CCACHE_DIR=/root/.ccache
+            export CCACHE_MAXSIZE=2G
+            ccache --zero-stats
+
+            # Build C++ library and tests (GPU package)
+            cd packages/moreau-cuda
+            cmake -B build -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
+              -Dnanobind_DIR=$(python3 -c "import nanobind; print(nanobind.cmake_dir())")
+            cmake --build build -j$(nproc)
+
+            # Show ccache stats
+            ccache --show-stats
+
+            # Build Python wheel
+            pip wheel . -w dist/ --no-deps --no-build-isolation
+            cd ../..
+
+            # Fix permissions for artifacts
+            chmod -R 777 packages/moreau-cuda/build packages/moreau-cuda/dist /root/.ccache
+          '
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: moreau-cuda-build
+        path: |
+          packages/moreau-cuda/build/test_*
+          packages/moreau-cuda/build/*_example
+          packages/moreau-cuda/build/benchmark_*
+          packages/moreau-cuda/build/libmoreau*
+          packages/moreau-cuda/build/CTestTestfile.cmake
+          packages/moreau-cuda/dist/*.whl
+        retention-days: 1
+
+  # Test on self-hosted GPU runner (download pre-built artifacts).
+  # Uses the same trusted-branch gate as the build job because downloaded
+  # artifacts are executed on a self-hosted GPU runner.
+  test:
+    if: >-
+      github.repository == 'moreau-project/moreau' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    needs: build
+    runs-on: gpu-t4
+    name: Test (CUDA)
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: moreau-cuda-build
+        path: packages/moreau-cuda
+
+    - name: Verify GPU availability
+      run: nvidia-smi
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Cache Rust/Cargo for faster CPU package builds
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          .cargo-cache/registry
+          .cargo-cache/git
+          packages/moreau-cpu/target
+        key: cargo-cuda-test-${{ hashFiles('packages/moreau-cpu/Cargo.lock') }}
+        restore-keys: |
+          cargo-cuda-test-
+
+    - name: Run tests in Docker
+      run: |
+        docker run --rm --gpus all \
+          -e CARGO_HOME=/workspace/.cargo-cache \
+          -v ${{ github.workspace }}:/workspace \
+          -w /workspace \
+          ${{ env.CI_IMAGE }} \
+          bash -c '
+            set -e
+
+            # Install runtime dependencies not yet in the CI image
+            apt-get update && apt-get install -y libsuitesparse-dev >/dev/null 2>&1
+
+            # Run C++ tests - chmod needed as GitHub artifacts lose permissions
+            chmod +x packages/moreau-cuda/build/test_* packages/moreau-cuda/build/*_example packages/moreau-cuda/build/benchmark_* 2>/dev/null || true
+            cd packages/moreau-cuda/build
+            ctest --output-on-failure -j4
+            cd /workspace
+
+            # Build and install CPU package (uses cached cargo registry)
+            cd packages/moreau-cpu
+            rm -f target/wheels/*.whl
+            maturin build --release
+            pip install target/wheels/*.whl
+            cd /workspace
+
+            # Install wrapper first (moreau-cuda depends on it), then GPU wheel
+            pip install -e packages/moreau
+            pip install packages/moreau-cuda/dist/*.whl
+
+            # Verify imports
+            python3 -c "import moreau; print(f\"devices: {moreau.available_devices()}\")"
+
+            # Install test dependencies and run Python tests (CUDA-enabled)
+            pip install hypothesis
+            pip install git+https://github.com/cvxpy/cvxpy.git@release/1.8.x
+            pip install git+https://github.com/cvxpy/cvxpylayers.git@v1.1.0
+            git clone --depth 1 --branch release/1.8.x https://github.com/cvxpy/cvxpy.git /tmp/cvxpy
+            git clone --depth 1 --branch v1.1.0 https://github.com/cvxpy/cvxpylayers.git /tmp/cvxpylayers
+            cp -r /tmp/cvxpy/cvxpy/tests /tmp/cvxpy-tests
+            # Run each test file in its own process to prevent GPU OOM on T4 (16GB).
+            # Accumulated CUDA memory from many tests in one process causes crashes.
+            FAILED=0
+            FAILED_FILES=""
+            for f in packages/moreau/tests/python/test_*.py; do
+              echo "=== Running $f ==="
+              rc=0; pytest "$f" -v --tb=short || rc=$?
+              # rc=5 means no tests collected (e.g. JAX not installed), treat as pass
+              if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then
+                FAILED=1
+                FAILED_FILES="$FAILED_FILES $f"
+              fi
+            done
+            if [ "$FAILED" -ne 0 ]; then
+              echo "Failed test files:$FAILED_FILES"
+              exit 1
+            fi
+            pytest /tmp/cvxpy-tests/test_conic_solvers.py -v --tb=short -k "Moreau"
+            pytest /tmp/cvxpylayers/tests/test_moreau.py /tmp/cvxpylayers/tests/test_moreau_dual_variables.py -v --tb=short
+
+            # Fix permissions for cache (may fail if paths dont exist yet)
+            chmod -R 777 /workspace/.cargo-cache /workspace/packages/moreau-cpu/target || echo "Note: chmod failed (ok if cache dirs dont exist)"
+          '

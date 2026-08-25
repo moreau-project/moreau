@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts (will be rebuilt in container)
+build/
+**/build/
+**/build-*/
+**/build_*/
+target/
+**/*.so
+**/*.so.*
+*.o
+*.a
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv*/
+*.egg-info/
+dist/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Documentation and plans
+*.md
+!README.md
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# UV lock (will use fresh deps)
+uv.lock

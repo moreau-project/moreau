@@ -1,0 +1,7 @@
+# Sphinx documentation dependencies
+# Using Sphinx 7.x for Python 3.9 compatibility (Vercel)
+sphinx>=7.0.0,<8.0.0
+furo>=2024.1.29
+myst-parser>=3.0.0,<4.0.0
+sphinx-design>=0.6.1
+sphinx-copybutton>=0.5.2

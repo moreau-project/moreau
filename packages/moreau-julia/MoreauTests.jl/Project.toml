@@ -1,0 +1,16 @@
+name = "MoreauTests"
+uuid = "c48686a0-ab7e-45b5-948a-1fca1b2ae6a6"
+version = "0.1.0"
+
+[deps]
+ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+Moreau = "c8b129f6-74e5-4f0d-b2d8-2ea10d91a548"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+Moreau = {path = "../Moreau.jl"}
+
+[compat]
+ChainRulesCore = "1"
+julia = "1.12"

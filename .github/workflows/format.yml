@@ -1,0 +1,27 @@
+name: Format (Python)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'
+      - pyproject.toml
+      - .github/workflows/format.yml
+  pull_request:
+    paths:
+      - '**.py'
+      - pyproject.toml
+      - .github/workflows/format.yml
+
+jobs:
+  black:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install black
+        run: pip install 'black==26.5.1'
+      - name: Check formatting (line-length from pyproject [tool.black])
+        run: git ls-files '*.py' | xargs black --check

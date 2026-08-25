@@ -1,0 +1,144 @@
+# Test wheels without rebuilding - for faster iteration on test scripts
+#
+# Usage:
+#   gh workflow run test-wheels.yml --ref main -f run_id=<release-run-id>
+#
+# The run_id should be from a previous release.yml run that has wheel artifacts.
+
+name: Test Wheels Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Run ID from release.yml to download artifacts from'
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  test-wheels:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_short: "cu122"
+            cuda_runtime: "nvidia/cuda:12.2.0-runtime-ubuntu22.04"
+            pytorch_index: "cu121"
+            jax_cuda: "cuda12"
+            runner: gpu-t4
+          - cuda_short: "cu130"
+            cuda_runtime: "nvidia/cuda:13.0.0-runtime-ubuntu22.04"
+            pytorch_index: "cu130"
+            jax_cuda: "cuda13"
+            runner: gpu-instance
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CPU wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-cpu-linux-x86_64
+          path: dist-cpu
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Download GPU wheel artifact (${{ matrix.cuda_short }})
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-gpu-${{ matrix.cuda_short }}-x86_64
+          path: dist-gpu
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Download wrapper wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-wrapper
+          path: dist-wrapper
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Test wheel installation and run tests (${{ matrix.cuda_short }})
+        run: |
+          echo "Testing wheels with Python 3.12 and ${{ matrix.cuda_short }}..."
+
+          # Create abi3 test script (avoids quoting issues in docker heredoc)
+          cat > /tmp/test_abi3.py << 'PYEOF'
+          import importlib.util, glob, sys, os
+          pyver = f"{sys.version_info.major}.{sys.version_info.minor}"
+          # Test CPU native extension
+          import moreau_cpu._cpu_solver as mc
+          print(f"Python {pyver}: CPU native extension OK: {mc}")
+          # Test CUDA native extension (load .so directly to skip __init__.py deps)
+          site = os.path.join(sys.prefix, "lib", f"python{pyver}", "site-packages")
+          sos = glob.glob(os.path.join(site, "moreau_cuda", "_moreau_cuda*.so"))
+          if sos:
+              spec = importlib.util.spec_from_file_location("_moreau_cuda", sos[0])
+              mod = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(mod)
+              print(f"Python {pyver}: CUDA native extension OK: {mod}")
+          else:
+              print(f"Python {pyver}: No CUDA .so found (skipping)")
+          PYEOF
+
+          docker run --rm --gpus all \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e TZ=UTC \
+            -v ${{ github.workspace }}/dist-cpu:/dist-cpu:ro \
+            -v ${{ github.workspace }}/dist-gpu:/dist-gpu:ro \
+            -v ${{ github.workspace }}/dist-wrapper:/dist-wrapper:ro \
+            -v ${{ github.workspace }}/packages/moreau/tests/python:/tests_py:ro \
+            -v /tmp/test_abi3.py:/test_abi3.py:ro \
+            ${{ matrix.cuda_runtime }} \
+            bash -c '
+              set -e
+              apt-get update && apt-get install -y software-properties-common
+              add-apt-repository -y ppa:deadsnakes/ppa || true
+              apt-get update && apt-get install -y python3.12 python3.12-venv python3.13 python3.13-venv python3.14 python3.14-venv python3-pip || true
+
+              python3.12 -m venv /test_env
+              source /test_env/bin/activate
+              pip install --upgrade pip
+
+              # Install CPU wheel and moreau wrapper package
+              pip install /dist-cpu/*.whl
+              pip install /dist-wrapper/*.whl
+              python -c "import moreau; print('"'"'CPU package OK:'"'"', moreau.__file__)"
+
+              # Install GPU wheel (--no-deps to avoid pulling stub moreau from PyPI)
+              pip install --no-deps /dist-gpu/*.whl
+              python -c "import moreau; print('"'"'GPU available:'"'"', moreau.device_available('"'"'cuda'"'"'))"
+
+              # === abi3 import tests (frontloaded - fast check before heavy deps) ===
+              echo ""
+              echo "=== Testing abi3 wheel import on Python 3.13 and 3.14 ==="
+              for PYVER in 3.13 3.14; do
+                python${PYVER} -m venv /test_env_${PYVER}
+                /test_env_${PYVER}/bin/pip install --upgrade pip -q
+                /test_env_${PYVER}/bin/pip install numpy scipy -q
+                /test_env_${PYVER}/bin/pip install --no-deps /dist-cpu/*.whl -q
+                /test_env_${PYVER}/bin/pip install --no-deps /dist-gpu/*.whl -q
+                /test_env_${PYVER}/bin/python /test_abi3.py
+                echo "Python ${PYVER}: abi3 import test passed"
+              done
+
+              # Install torch and verify torch bindings
+              pip install torch --index-url https://download.pytorch.org/whl/${{ matrix.pytorch_index }}
+              python -c "from moreau.torch import Solver; print('"'"'Torch bindings OK'"'"')"
+
+              # Install JAX with CUDA support
+              pip install jax[${{ matrix.jax_cuda }}]
+              python -c "import jax; print('"'"'JAX backend:'"'"', jax.default_backend())"
+
+              # Run tests
+              pip install pytest numpy scipy hypothesis cvxpy clarabel
+              pytest /tests_py/ -v --tb=short
+            '
+
+          echo "All tests passed for ${{ matrix.cuda_short }}!"

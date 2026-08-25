@@ -1,0 +1,5 @@
+include CMakeLists.txt
+include LICENSE
+recursive-include moreau_cuda *.py
+recursive-include include *.hpp *.h
+recursive-include bindings *.cpp *.cu *.lds
