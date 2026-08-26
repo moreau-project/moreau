@@ -88,6 +88,7 @@ source_suffix = {
 # -- Options for HTML output -------------------------------------------------
 html_theme = "furo"
 html_static_path = ["_static"]
+html_extra_path = ["CNAME"]
 html_title = "Moreau Docs"
 html_favicon = "_static/favicon.svg"
 html_logo = None
