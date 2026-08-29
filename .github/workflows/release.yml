@@ -673,6 +673,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.release.outputs.name }}
+          RELEASE_REF: ${{ github.ref_name }}
         run: |
           echo "Triggering test-release for tag: $RELEASE_TAG"
-          gh workflow run test-release.yml -f "release_tag=$RELEASE_TAG"
+          gh workflow run test-release.yml --ref "$RELEASE_REF" -f "release_tag=$RELEASE_TAG"
