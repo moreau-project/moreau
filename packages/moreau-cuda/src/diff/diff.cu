@@ -450,6 +450,21 @@ void compute_cone_projection(
         offset += cones.totalSocDim;
     }
 
+    // PSD cones - self-dual: project eigenvalues to max(0,λ)
+    // Note: This standalone path doesn't cache eigendecomp for the derivative.
+    // The backward path uses project_psd_cone_dual with ConeDerivatives for caching.
+    if (cones.numPsdCones > 0) {
+        // For standalone projection (forward path), create a temporary ConeDerivatives
+        // just for workspace. This is only called from the forward differentiation path.
+        ConeDerivatives temp_derivs(cones, batchSize, stream);
+        project_psd_cone_dual(
+            pi_u.data(), u.data(),
+            offset, cones, temp_derivs,
+            batchSize, m, stream
+        );
+        offset += cones.totalPsdSvecDim;
+    }
+
     // Exponential cones
     if (cones.numExpCones > 0) {
         project_exp_cone_dual(
@@ -467,21 +482,6 @@ void compute_cone_projection(
             offset, cones.numPowerCones, batchSize, m, stream
         );
         offset += cones.numPowerCones * 3;
-    }
-
-    // PSD cones - self-dual: project eigenvalues to max(0,λ)
-    // Note: This standalone path doesn't cache eigendecomp for the derivative.
-    // The backward path uses project_psd_cone_dual with ConeDerivatives for caching.
-    if (cones.numPsdCones > 0) {
-        // For standalone projection (forward path), create a temporary ConeDerivatives
-        // just for workspace. This is only called from the forward differentiation path.
-        ConeDerivatives temp_derivs(cones, batchSize, stream);
-        project_psd_cone_dual(
-            pi_u.data(), u.data(),
-            offset, cones, temp_derivs,
-            batchSize, m, stream
-        );
-        offset += cones.totalPsdSvecDim;
     }
 
     // GenPowerCones
@@ -564,6 +564,16 @@ void compute_cone_derivative(
         offset += cones.totalSocDim;
     }
 
+    // PSD cones - self-dual: derivative uses Ω matrix
+    if (cones.numPsdCones > 0) {
+        compute_psd_derivative(
+            derivs.psd_H.data(), u.data(),
+            offset, cones, derivs,
+            batchSize, m, stream
+        );
+        offset += cones.totalPsdSvecDim;
+    }
+
     // Exponential cones
     if (cones.numExpCones > 0) {
         compute_exp_derivative(
@@ -581,16 +591,6 @@ void compute_cone_derivative(
             offset, cones.numPowerCones, batchSize, m, stream
         );
         offset += cones.numPowerCones * 3;
-    }
-
-    // PSD cones - self-dual: derivative uses Ω matrix
-    if (cones.numPsdCones > 0) {
-        compute_psd_derivative(
-            derivs.psd_H.data(), u.data(),
-            offset, cones, derivs,
-            batchSize, m, stream
-        );
-        offset += cones.totalPsdSvecDim;
     }
 
     // GenPowerCones (sparse decomposition)
@@ -723,13 +723,14 @@ void cache_solution_for_backward(
         cones_fwd.numSocCones, cones_fwd.d_soc_dims, cones_fwd.d_soc_offsets,
         cones_fwd.d_soc_sz_offsets,
         cones_fwd.totalSocDim,
+        cones_fwd.totalPsdSvecDim,
         cones_fwd.numExpCones, cones_fwd.numPowerCones,
         m, batchSize, stream
     );
 
-    // Compute cone projection Π_K*(u) for GenPowerCones (not covered by fused kernel)
-    // Use work_m as scratch (totalGenPowerDim <= m)
-    if (solver.data.cones.numGenPowerCones > 0) {
+    // PSD and GenPower projections use their dedicated, non-fused paths.
+    // Use work_m as scratch (totalGenPowerDim <= m).
+    if (solver.data.cones.numPsdCones > 0 || solver.data.cones.numGenPowerCones > 0) {
         compute_cone_projection(state.u, state.pi_u, solver.data.cones, stream,
             state.work_m.data(), solver.data.cones.totalGenPowerDim);
     }
@@ -1039,6 +1040,7 @@ static void backward_impl(
             cones.numSocCones, cones.d_soc_dims, cones.d_soc_offsets,
             cones.d_soc_sz_offsets,
             cones.totalSocDim,
+            cones.totalPsdSvecDim,
             cones.numExpCones, cones.numPowerCones,
             m, batchSize, stream
         );
@@ -1058,8 +1060,7 @@ static void backward_impl(
 
     // PSD cones: separate projection + derivative (uses cuSOLVER, can't fuse)
     if (cones.numPsdCones > 0) {
-        int64_t psd_offset = cones.numZeroCones + cones.numNonnegCones + cones.totalSocDim
-                           + cones.numExpCones * 3 + cones.numPowerCones * 3;
+        int64_t psd_offset = cones.psdOffset();
 
         // Compute u_eq = z_eq - s_eq for the PSD region, per batch (stride m).
         for (int64_t b = 0; b < batchSize; b++) {

@@ -105,6 +105,7 @@ bool update_scaling_all_cones(
     const int64_t* d_soc_offsets = nullptr,
     const int64_t* d_soc_Hs_offsets = nullptr,
     int64_t totalSocDim = 0,
+    int64_t totalPsdSvecDim = 0,
     int64_t totalSocHsEntries = 0,
     int32_t* d_scaling_success = nullptr,
     const int64_t* d_soc_sz_offsets = nullptr,
@@ -221,6 +222,7 @@ void compute_margins_batched_kernel(
     const int64_t* d_soc_dims = nullptr,
     const int64_t* d_soc_offsets = nullptr,
     int64_t totalSocDim = 0,
+    int64_t totalPsdSvecDim = 0,
     const int64_t* d_soc_sz_offsets = nullptr
 );
 
@@ -256,6 +258,7 @@ void scaled_unit_shift_batched_kernel(
     cudaStream_t stream,
     const int64_t* d_soc_offsets = nullptr,
     int64_t totalSocDim = 0,
+    int64_t totalPsdSvecDim = 0,
     const int64_t* d_soc_sz_offsets = nullptr
 );
 
@@ -288,6 +291,7 @@ void fused_margins_and_shift_kernel(
     const int64_t* d_soc_dims = nullptr,
     const int64_t* d_soc_offsets = nullptr,
     int64_t totalSocDim = 0,
+    int64_t totalPsdSvecDim = 0,
     const int64_t* d_soc_sz_offsets = nullptr
 );
 
@@ -326,6 +330,7 @@ void smoothing_all_cones(
     const int64_t* d_soc_dims = nullptr,
     const int64_t* d_soc_offsets = nullptr,
     int64_t totalSocDim = 0,
+    int64_t totalPsdSvecDim = 0,
     const int64_t* d_soc_sz_offsets = nullptr,
     // GenPowerCone params
     int64_t numGenPowerCones = 0,

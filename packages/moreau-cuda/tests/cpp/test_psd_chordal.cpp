@@ -127,6 +127,56 @@ TEST_F(ChordalTest, BlockDiagonalDecomposition) {
     }
 }
 
+TEST_F(ChordalTest, MixedConeOrderKeepsPsdBeforeExpAndPower) {
+    // zero(1) | nonneg(1) | SOC(3) | PSD(4)(10) | EXP(3) | POW3D(3)
+    const int64_t prefix_rows = 5;
+    const int64_t psd_rows = 10;
+    const int64_t suffix_rows = 6;
+    const int64_t m = prefix_rows + psd_rows + suffix_rows;
+    const int64_t n = 2;
+
+    // Touch two disconnected diagonal blocks in the PSD cone so it decomposes.
+    std::vector<int64_t> A_colptr = {0, 1, 2};
+    std::vector<int64_t> A_rowind = {prefix_rows, prefix_rows + 5};
+    std::vector<int64_t> psd_dims = {4};
+    std::unique_ptr<bool[]> b_mask(new bool[m]);
+    for (int64_t i = 0; i < m; ++i) b_mask[i] = false;
+
+    auto info = ChordalInfo::analyze(
+        A_colptr.data(), A_rowind.data(), n, m,
+        psd_dims.data(), 1,
+        1, 1, 3, 1, 1,
+        b_mask.get()
+    );
+    ASSERT_TRUE(info.is_decomposed());
+
+    int64_t augmented_psd_rows = 0;
+    for (int64_t dim : info.decomposed_psd_dims) {
+        augmented_psd_rows += dim * (dim + 1) / 2;
+    }
+    const int64_t augmented_suffix_start = prefix_rows + augmented_psd_rows;
+
+    // Prefix and suffix rows are copied around the decomposed PSD block.
+    for (int64_t i = 0; i < prefix_rows; ++i) {
+        EXPECT_EQ(info.b_row_map[i], i);
+    }
+    for (int64_t i = 0; i < suffix_rows; ++i) {
+        EXPECT_EQ(info.b_row_map[augmented_suffix_start + i], prefix_rows + psd_rows + i);
+    }
+
+    std::vector<double> augmented(info.m_aug, 0.0);
+    std::vector<double> original(m, 0.0);
+    for (int64_t i = 0; i < prefix_rows; ++i) augmented[i] = 10.0 + i;
+    for (int64_t i = 0; i < suffix_rows; ++i) {
+        augmented[augmented_suffix_start + i] = 20.0 + i;
+    }
+    info.reverse_s(augmented.data(), original.data());
+    for (int64_t i = 0; i < prefix_rows; ++i) EXPECT_EQ(original[i], 10.0 + i);
+    for (int64_t i = 0; i < suffix_rows; ++i) {
+        EXPECT_EQ(original[prefix_rows + psd_rows + i], 20.0 + i);
+    }
+}
+
 // Non-PSD cones should pass through unchanged
 TEST_F(ChordalTest, NonPsdConesUnchanged) {
     // 2 nonneg + PSD(3) = m = 2 + 6 = 8

@@ -421,7 +421,8 @@ double Cones::computeBarrier(
     int64_t offset_zero = 0;
     int64_t offset_nonneg = offset_zero + numZeroCones;
     int64_t offset_soc = offset_nonneg + numNonnegCones;
-    int64_t offset_exp = offset_soc + totalSocDim;
+    int64_t offset_psd = offset_soc + totalSocDim;
+    int64_t offset_exp = offset_psd + totalPsdSvecDim;
     int64_t offset_power = offset_exp + numExpCones * 3;
     int64_t offset_genpow = offset_power + numPowerCones * 3;
 

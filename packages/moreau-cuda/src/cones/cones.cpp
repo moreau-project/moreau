@@ -89,6 +89,7 @@ bool Cones::update_scaling(const BatchedVector& s, const BatchedVector& z, const
         d_soc_offsets,
         d_soc_Hs_offsets,
         totalSocDim,
+        totalPsdSvecDim,
         totalSocHsEntries,
         d_scaling_success,
         d_soc_sz_offsets,
@@ -151,8 +152,7 @@ bool Cones::update_scaling(const BatchedVector& s, const BatchedVector& z, const
     // skip rank-6 entirely and write the inactive defaults.
     if (numGenPowerCones > 0 && scaling == ScalingStrategy::PrimalDual) {
         const int64_t m_total_int = totalConstraints();
-        const int64_t offset_genpow = numZeroCones + numNonnegCones + totalSocDim
-                                    + numExpCones * 3 + numPowerCones * 3;
+        const int64_t offset_genpow = genPowerOffset();
         compute_genpow_pd_axes(
             s.data(), z.data(),
             genpow_grad.data(),
@@ -198,6 +198,7 @@ void Cones::smoothing(BatchedVector& z, const BatchedVector& work, const Batched
         d_soc_dims,
         d_soc_offsets,
         totalSocDim,
+        totalPsdSvecDim,
         d_soc_sz_offsets,
         // GenPowerCone params
         numGenPowerCones,
@@ -228,8 +229,7 @@ void Cones::smoothing(BatchedVector& z, const BatchedVector& work, const Batched
 
     // PSD cones: eigendecomp smoothing
     if (numPsdCones > 0) {
-        int64_t psd_offset = numZeroCones + numNonnegCones + totalSocDim
-                           + numExpCones * 3 + numPowerCones * 3;
+        int64_t psd_offset = psdOffset();
         psd_smoothing(*this, z.data(), work.data(), mu.data(),
                       psd_offset, m_total, stream);
     }
@@ -257,6 +257,7 @@ void Cones::margins_batched(const BatchedVector& z, BatchedVector& min_margin_ou
         d_soc_dims,
         d_soc_offsets,
         totalSocDim,
+        totalPsdSvecDim,
         d_soc_sz_offsets
     );
 }
@@ -280,6 +281,7 @@ void Cones::scaled_unit_shift_batched(BatchedVector& z, const BatchedVector& alp
         stream,
         d_soc_offsets,
         totalSocDim,
+        totalPsdSvecDim,
         d_soc_sz_offsets
     );
 }
@@ -302,6 +304,7 @@ void Cones::fused_margins_and_shift(BatchedVector& z, bool is_primal_cone, doubl
         d_soc_dims,
         d_soc_offsets,
         totalSocDim,
+        totalPsdSvecDim,
         d_soc_sz_offsets
     );
 }
@@ -310,8 +313,7 @@ void Cones::psd_shift_to_interior(BatchedVector& z, double total_degree, cudaStr
     if (numPsdCones == 0) return;
 
     int64_t m_total = totalConstraints();
-    int64_t psd_offset = numZeroCones + numNonnegCones + totalSocDim
-                       + numExpCones * 3 + numPowerCones * 3;
+    int64_t psd_offset = psdOffset();
     cudaStreamSynchronize(stream);
 
     // Reconstruct host-side sz_offsets

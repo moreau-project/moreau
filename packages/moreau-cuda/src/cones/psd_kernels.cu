@@ -2212,9 +2212,7 @@ void update_psd_scaling(
     const int64_t totalMatDim = cones.totalPsdMatDim;
 
     // Compute PSD offset in s/z
-    int64_t psd_offset = cones.numZeroCones + cones.numNonnegCones
-                       + cones.totalSocDim + cones.numExpCones * 3
-                       + cones.numPowerCones * 3;
+    int64_t psd_offset = cones.psdOffset();
 
     // Work matrices: mat1 = S, mat2 = Z, mat3 = scratch
     double* mat_S = cones.psd_work_mat1.data();
