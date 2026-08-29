@@ -3662,6 +3662,7 @@ void fused_cone_projection_and_derivative(
     const int64_t* d_soc_offsets,
     const int64_t* d_soc_sz_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     int64_t numExpCones,
     int64_t numPowerCones,
     int64_t m,
@@ -3700,6 +3701,7 @@ void fused_cone_projection_and_derivative(
         );
         offset += totalSocDim;
     }
+    offset += totalPsdSvecDim;
 
     if (numExpCones > 0) {
         int threads = min((int)numExpCones, 256);
@@ -4464,6 +4466,7 @@ void fused_u_and_cone_projection(
     const int64_t* d_soc_offsets,
     const int64_t* d_soc_sz_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     int64_t numExpCones,
     int64_t numPowerCones,
     int64_t m,
@@ -4496,6 +4499,7 @@ void fused_u_and_cone_projection(
         );
         offset += totalSocDim;
     }
+    offset += totalPsdSvecDim;
 
     if (numExpCones > 0) {
         int threads = min((int)numExpCones, 256);

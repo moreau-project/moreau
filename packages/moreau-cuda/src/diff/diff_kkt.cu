@@ -581,6 +581,28 @@ DiffKKT::DiffKKT(
                 }
             }
 
+            // PSD cones (variable dim, dense svec_dim x svec_dim)
+            // PSD derivative is symmetric, stored as upper triangle in psd_H.
+            // KKT needs full svec_dim * svec_dim entries per cone.
+            if (!found) {
+                const auto& psdDimsForKKT = cones.psdConeDimsOriginal.empty()
+                    ? cones.psdConeDims : cones.psdConeDimsOriginal;
+                for (int64_t k = 0; k < cones.numPsdCones && !found; ++k) {
+                    int64_t mat_dim = psdDimsForKKT[k];
+                    int64_t svec_dim = mat_dim * (mat_dim + 1) / 2;
+                    if (u_idx >= offset && u_idx < offset + svec_dim) {
+                        // Full row of svec_dim entries
+                        for (int64_t c = 0; c < svec_dim; ++c) {
+                            H_psd_idx_host.push_back(nnz);
+                            colIdx.push_back(jdim + n + m + offset + c);
+                            ++nnz;
+                        }
+                        found = true;
+                    }
+                    offset += svec_dim;
+                }
+            }
+
             // Exp cones (3x3 dense)
             if (!found) {
                 for (int64_t k = 0; k < cones.numExpCones && !found; ++k) {
@@ -610,28 +632,6 @@ DiffKKT::DiffKKT(
                         found = true;
                     }
                     offset += 3;
-                }
-            }
-
-            // PSD cones (variable dim, dense svec_dim x svec_dim)
-            // PSD derivative is symmetric, stored as upper triangle in psd_H.
-            // KKT needs full svec_dim * svec_dim entries per cone.
-            if (!found) {
-                const auto& psdDimsForKKT = cones.psdConeDimsOriginal.empty()
-                    ? cones.psdConeDims : cones.psdConeDimsOriginal;
-                for (int64_t k = 0; k < cones.numPsdCones && !found; ++k) {
-                    int64_t mat_dim = psdDimsForKKT[k];
-                    int64_t svec_dim = mat_dim * (mat_dim + 1) / 2;
-                    if (u_idx >= offset && u_idx < offset + svec_dim) {
-                        // Full row of svec_dim entries
-                        for (int64_t c = 0; c < svec_dim; ++c) {
-                            H_psd_idx_host.push_back(nnz);
-                            colIdx.push_back(jdim + n + m + offset + c);
-                            ++nnz;
-                        }
-                        found = true;
-                    }
-                    offset += svec_dim;
                 }
             }
 
@@ -807,9 +807,10 @@ DiffKKT::DiffKKT(
 
                 const auto& info = genpow_expansion_info[gp_cone];
                 // u offset for this cone within the H block:
-                // zero + nonneg + soc + exp + power + genpow_offset
+                // zero + nonneg + soc + psd + exp + power + genpow_offset
                 int64_t cone_offset_in_u = cones.numZeroCones + cones.numNonnegCones
-                    + cones.totalSocDim + cones.numExpCones * 3 + cones.numPowerCones * 3
+                    + cones.totalSocDim + cones.totalPsdSvecDim
+                    + cones.numExpCones * 3 + cones.numPowerCones * 3
                     + info.cone_offset;
 
                 // du-column entries: -right_k[i] at columns (n+m + cone_offset_in_u + i) of J

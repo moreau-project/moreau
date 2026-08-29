@@ -637,8 +637,8 @@ public:
             chordal_->reverse_z(z_aug.data() + batch * m_, z_orig.data() + batch * m_user_);
 
             // PSD completion on z
-            int64_t psd_offset = chordal_->num_zero + chordal_->num_nonneg + chordal_->total_soc
-                               + chordal_->num_exp * 3 + chordal_->num_power * 3;
+            int64_t psd_offset = chordal_->num_zero + chordal_->num_nonneg
+                               + chordal_->total_soc;
             chordal_->complete_z(z_orig.data() + batch * m_user_, psd_offset);
         }
 
@@ -873,8 +873,8 @@ public:
                        sizeof(double) * n_user_);
             chordal_->reverse_s(s_aug.data() + batch * m_, s_orig.data() + batch * m_user_);
             chordal_->reverse_z(z_aug.data() + batch * m_, z_orig.data() + batch * m_user_);
-            int64_t psd_offset = chordal_->num_zero + chordal_->num_nonneg + chordal_->total_soc
-                               + chordal_->num_exp * 3 + chordal_->num_power * 3;
+            int64_t psd_offset = chordal_->num_zero + chordal_->num_nonneg
+                               + chordal_->total_soc;
             chordal_->complete_z(z_orig.data() + batch * m_user_, psd_offset);
         }
 
@@ -1032,8 +1032,8 @@ public:
             std::memcpy(x_orig.data() + batch * n_user_, x_aug.data() + batch * n_, sizeof(double) * n_user_);
             chordal_->reverse_s(s_aug.data() + batch * m_, s_orig.data() + batch * m_user_);
             chordal_->reverse_z(z_aug.data() + batch * m_, z_orig.data() + batch * m_user_);
-            int64_t psd_offset = chordal_->num_zero + chordal_->num_nonneg + chordal_->total_soc
-                               + chordal_->num_exp * 3 + chordal_->num_power * 3;
+            int64_t psd_offset = chordal_->num_zero + chordal_->num_nonneg
+                               + chordal_->total_soc;
             chordal_->complete_z(z_orig.data() + batch * m_user_, psd_offset);
         }
 
@@ -1087,8 +1087,8 @@ public:
                 std::memcpy(x_orig.data() + batch * n_user_, x_aug.data() + batch * n_, sizeof(double) * n_user_);
                 chordal_->reverse_s(s_aug.data() + batch * m_, s_orig.data() + batch * m_user_);
                 chordal_->reverse_z(z_aug.data() + batch * m_, z_orig.data() + batch * m_user_);
-                int64_t psd_offset = chordal_->num_zero + chordal_->num_nonneg + chordal_->total_soc
-                                   + chordal_->num_exp * 3 + chordal_->num_power * 3;
+                int64_t psd_offset = chordal_->num_zero + chordal_->num_nonneg
+                                   + chordal_->total_soc;
                 chordal_->complete_z(z_orig.data() + batch * m_user_, psd_offset);
             }
             CudaDeviceMemory d_x_orig(sizeof(double) * n_user_ * batchSize_);

@@ -745,7 +745,8 @@ __global__ void check_termination_impl(
  * - SOC cone: s[0] >= ||s[1:]||_2 (s[0] >= sqrt(s[1]^2 + s[2]^2))
  * - Exp/power cones: checked via dual gradient feasibility
  *
- * Cone layout in s/z: [zero(numZero), nonneg(numNonneg), soc(variable dims), exp(numExp*3), power(numPower*3)]
+ * Cone layout in s/z: zero, nonnegative, SOC, PSD, exponential, power,
+ * generalized power.
  */
 __global__ void backtrack_line_search_impl(
     double* __restrict__ alpha,

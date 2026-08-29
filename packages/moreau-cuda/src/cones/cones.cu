@@ -142,7 +142,8 @@ void Cones::unit_initialization(BatchedVector& s, BatchedVector& z, cudaStream_t
     int64_t offset_zero = 0;
     int64_t offset_nonneg = offset_zero + numZeroCones;
     int64_t offset_soc = offset_nonneg + numNonnegCones;
-    int64_t offset_exp = offset_soc + totalSocDim;
+    int64_t offset_psd = offset_soc + totalSocDim;
+    int64_t offset_exp = offset_psd + totalPsdSvecDim;
     int64_t offset_power = offset_exp + numExpCones * 3;
     int64_t offset_genpow = offset_power + numPowerCones * 3;
 
@@ -172,7 +173,6 @@ void Cones::unit_initialization(BatchedVector& s, BatchedVector& z, cudaStream_t
 
     // PSD cones: separate kernel (needs variable dim per cone)
     if (numPsdCones > 0) {
-        int64_t offset_psd = offset_power + numPowerCones * 3;
         dim3 psd_grid(batchSize, numPsdCones);
         initPsdConesKernel<<<psd_grid, 256, 0, stream>>>(
             s.data(), z.data(), offset_psd,
@@ -294,8 +294,9 @@ void Cones::affine_ds(BatchedVector& ds, const BatchedVector& s, cudaStream_t st
     int64_t offset_zero = 0;
     int64_t offset_nonneg = numZeroCones;
     int64_t offset_soc = numZeroCones + numNonnegCones;
-    int64_t offset_exp = numZeroCones + numNonnegCones + totalSocDim;
-    int64_t offset_power = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3;
+    int64_t offset_psd = numZeroCones + numNonnegCones + totalSocDim;
+    int64_t offset_exp = offset_psd + totalPsdSvecDim;
+    int64_t offset_power = offset_exp + numExpCones * 3;
     int64_t offset_genpow = offset_power + numPowerCones * 3;
 
     // Determine thread count based on largest cone type
@@ -320,8 +321,6 @@ void Cones::affine_ds(BatchedVector& ds, const BatchedVector& s, cudaStream_t st
 
     // PSD cones: ds = svec(diag(λ²))
     if (numPsdCones > 0) {
-        int64_t offset_psd = numZeroCones + numNonnegCones + totalSocDim
-                           + numExpCones * 3 + numPowerCones * 3;
         dim3 psd_grid(batchSize, numPsdCones);
         psd_affine_ds_kernel<<<psd_grid, 256, 0, stream>>>(
             ds.data(), psd_lambda.data(), offset_psd,
@@ -466,8 +465,9 @@ void Cones::Δs_from_Δz_offset(BatchedVector& out, const BatchedVector& ds, Bat
     int64_t offset_zero = 0;
     int64_t offset_nonneg = numZeroCones;
     int64_t offset_soc = numZeroCones + numNonnegCones;
-    int64_t offset_exp = numZeroCones + numNonnegCones + totalSocDim;
-    int64_t offset_power = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3;
+    int64_t offset_psd = numZeroCones + numNonnegCones + totalSocDim;
+    int64_t offset_exp = offset_psd + totalPsdSvecDim;
+    int64_t offset_power = offset_exp + numExpCones * 3;
     int64_t offset_genpow = offset_power + numPowerCones * 3;
 
     // Determine thread count based on largest cone type
@@ -492,8 +492,6 @@ void Cones::Δs_from_Δz_offset(BatchedVector& out, const BatchedVector& ds, Bat
 
     // PSD cones: out = W^T(λ \ ds) (proper symmetric cone operation)
     if (numPsdCones > 0) {
-        int64_t offset_psd = numZeroCones + numNonnegCones + totalSocDim
-                           + numExpCones * 3 + numPowerCones * 3;
         psd_ds_from_dz_offset(*this, out.data(), ds.data(),
                               offset_psd, m, stream);
     }
@@ -733,8 +731,9 @@ void Cones::mul_Hs(BatchedVector& y, const BatchedVector& x, BatchedVector& work
     int64_t offset_zero = 0;
     int64_t offset_nonneg = numZeroCones;
     int64_t offset_soc = numZeroCones + numNonnegCones;
-    int64_t offset_exp = numZeroCones + numNonnegCones + totalSocDim;
-    int64_t offset_power = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3;
+    int64_t offset_psd = numZeroCones + numNonnegCones + totalSocDim;
+    int64_t offset_exp = offset_psd + totalPsdSvecDim;
+    int64_t offset_power = offset_exp + numExpCones * 3;
     int64_t offset_genpow = offset_power + numPowerCones * 3;
 
     // Determine thread count based on largest cone type
@@ -765,8 +764,6 @@ void Cones::mul_Hs(BatchedVector& y, const BatchedVector& x, BatchedVector& work
 
     // PSD cones: y = Hs * x (dense symmetric matvec)
     if (numPsdCones > 0) {
-        int64_t offset_psd = numZeroCones + numNonnegCones + totalSocDim
-                           + numExpCones * 3 + numPowerCones * 3;
         dim3 psd_grid(batchSize, numPsdCones);
         psd_mul_Hs_kernel<<<psd_grid, 256, 0, stream>>>(
             y.data(), x.data(), psd_Hs.data(),
@@ -1323,8 +1320,9 @@ void Cones::step_length(
     // Calculate offsets for each cone type
     int64_t offset_nonneg = numZeroCones;
     int64_t offset_soc = numZeroCones + numNonnegCones;
-    int64_t offset_exp = numZeroCones + numNonnegCones + totalSocDim;
-    int64_t offset_power = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3;
+    int64_t psd_offset = numZeroCones + numNonnegCones + totalSocDim;
+    int64_t offset_exp = psd_offset + totalPsdSvecDim;
+    int64_t offset_power = offset_exp + numExpCones * 3;
 
     // Fused symmetric cones (nonneg + SOC)
     if (numNonnegCones > 0 || numSocCones > 0) {
@@ -1366,8 +1364,6 @@ void Cones::step_length(
 
     // PSD cones: eigendecomp-based step length
     if (numPsdCones > 0) {
-        int64_t psd_offset = numZeroCones + numNonnegCones + totalSocDim
-                           + numExpCones * 3 + numPowerCones * 3;
         psd_step_length(*this, dz.data(), ds.data(), z.data(), s.data(),
                        alpha_z.data(), alpha_s.data(),
                        psd_offset, m, stream);
@@ -1944,8 +1940,9 @@ void Cones::combined_ds_shift(
     int64_t offset_zero = 0;
     int64_t offset_nonneg = numZeroCones;
     int64_t offset_soc = numZeroCones + numNonnegCones;
-    int64_t offset_exp = numZeroCones + numNonnegCones + totalSocDim;
-    int64_t offset_power = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3;
+    int64_t offset_psd = numZeroCones + numNonnegCones + totalSocDim;
+    int64_t offset_exp = offset_psd + totalPsdSvecDim;
+    int64_t offset_power = offset_exp + numExpCones * 3;
     int64_t offset_genpow = offset_power + numPowerCones * 3;
 
     // Determine thread count based on max cone count
@@ -1976,8 +1973,6 @@ void Cones::combined_ds_shift(
 
     // PSD cones: shift = W^{-T}(step_s) ∘ W(step_z) - σμ·e (proper symmetric cone operation)
     if (numPsdCones > 0) {
-        int64_t offset_psd = numZeroCones + numNonnegCones + totalSocDim
-                           + numExpCones * 3 + numPowerCones * 3;
         psd_combined_ds_shift(*this, shift.data(), step_z.data(), step_s.data(),
                               sigma_mu.data(), offset_psd, m, stream);
     }

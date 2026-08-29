@@ -12,6 +12,8 @@ Covers:
   active-set.
 - PSD slack cone combined with nonneg direct-x via moreau.Solver and
   CompiledSolver (chordal default and chordal-disabled paths).
+- Canonical PSD/EXP/POW3D slack ordering with a nonneg direct-x cone on
+  both CPU and CUDA.
 - CUDA torch backward zero-copy through `dz_x_ptr` matches numpy.
 - Woodbury KKT solver with nonneg direct-x agreeing with cuDSS.
 """
@@ -279,6 +281,52 @@ def test_cpu_torch_auto_solver_skips_active_set_when_x_cones():
 
 
 # ---------- PSD slack + direct-x mixed ----------
+
+
+def test_mixed_psd_exp_power_slack_order_with_direct_x(device):
+    """CPU and CUDA must read mixed slack rows in Clarabel/CVXPY order.
+
+    Each three-entry slice is strictly feasible for its intended cone but
+    infeasible for the cone that occupied the same position in CUDA's old
+    ``EXP, POW3D, PSD`` layout. This makes the test sensitive to row
+    reinterpretation, while the nonnegative direct-x cone exercises the CPU
+    constructor that previously assembled its own differently ordered list.
+    """
+    from moreau._backend import device_available
+
+    if not device_available(device):
+        pytest.skip(f"{device} backend not available")
+
+    psd = np.array([1.0, 0.0, 1.0])
+    exp = np.array([0.0, 1.0, 2.0])
+    power = np.array([1.0, 1.0, 0.25])
+    b = np.concatenate([psd, exp, power])
+
+    P = sparse.eye(1, format="csr")
+    q = np.array([-1.0])
+    A = sparse.csr_matrix((b.size, 1))
+    cones = moreau.Cones(
+        psd_dims=[2],
+        num_exp_cones=1,
+        power_alphas=[0.4],
+        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0])],
+    )
+    settings = moreau.Settings(
+        device=device,
+        solver="ipm",
+        verbose=False,
+        ipm_settings=moreau.IPMSettings(
+            presolve_enable=False,
+            equilibrate_enable=False,
+        ),
+    )
+
+    solver = moreau.Solver(P, q, A, b, cones, settings)
+    solution = solver.solve()
+
+    assert solver.info.status.name in ("Solved", "AlmostSolved")
+    np.testing.assert_allclose(solution.x, [1.0], atol=1e-6)
+    np.testing.assert_allclose(solution.s, b, atol=1e-7)
 
 
 def _build_psd_dx_problem():

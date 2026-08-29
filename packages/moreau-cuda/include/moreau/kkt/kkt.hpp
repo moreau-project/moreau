@@ -832,7 +832,8 @@ struct KKTData : public KKTSolver {
         };
         std::vector<PendingExpansionRow> pendingExpRows;
 
-        // Add SOC blocks first (Clarabel ordering: Zero, Nonneg, SOC, Exp, Power)
+        // Add cone blocks in Clarabel/CVXPY order:
+        // Zero, Nonnegative, SOC, PSD, Exponential, Power, Generalized Power.
         for (int64_t i = 0; i < cones.numSocCones; ++i) {
             int64_t dim = socDimsAvailable ? socDimsForKKT[i] : 3;
             if (dim > 4) {
@@ -875,16 +876,6 @@ struct KKTData : public KKTSolver {
             }
         }
 
-        // Add exp cone blocks (always 3x3)
-        for (int64_t i = 0; i < cones.numExpCones; ++i) {
-            add_dense_block(3, H_exp_indices);
-        }
-
-        // Add power cone blocks (always 3x3)
-        for (int64_t i = 0; i < cones.numPowerCones; ++i) {
-            add_dense_block(3, H_power_indices);
-        }
-
         // Add PSD cone blocks (svec_dim × svec_dim dense upper triangle)
         // Use original (unsorted) dims for KKT construction
         const auto& psdDimsForKKT = cones.psdConeDimsOriginal.empty() ? cones.psdConeDims : cones.psdConeDimsOriginal;
@@ -901,6 +892,16 @@ struct KKTData : public KKTSolver {
             int64_t mat_dim = psdDimsForKKT.empty() ? 1 : psdDimsForKKT[i];
             int64_t svec_dim = mat_dim * (mat_dim + 1) / 2;
             add_svec_dense_block(svec_dim, H_psd_indices);
+        }
+
+        // Add exp cone blocks (always 3x3)
+        for (int64_t i = 0; i < cones.numExpCones; ++i) {
+            add_dense_block(3, H_exp_indices);
+        }
+
+        // Add power cone blocks (always 3x3)
+        for (int64_t i = 0; i < cones.numPowerCones; ++i) {
+            add_dense_block(3, H_power_indices);
         }
 
         // Add GenPowerCone blocks: dense (dim<=4) or sparse expansion (dim>4)

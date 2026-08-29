@@ -347,9 +347,8 @@ ChordalInfo ChordalInfo::analyze(
     std::vector<bool> nz_mask = find_aggregate_sparsity_mask(
         A_colptr, A_rowind, A_ncol, A_nrow, b_sparsity_pattern);
 
-    // Compute PSD cone row offsets
-    // Cone layout: zero | nonneg | SOC | exp | power | PSD...
-    int64_t psd_row_start = num_zero_ + num_nonneg_ + total_soc_ + num_exp_ * 3 + num_power_ * 3;
+    // Cone layout: zero | nonneg | SOC | PSD | exp | power | ...
+    int64_t psd_row_start = num_zero_ + num_nonneg_ + total_soc_;
 
     // Analyze each PSD cone
     for (int64_t pi = 0; pi < num_psd; ++pi) {
@@ -360,9 +359,7 @@ ChordalInfo ChordalInfo::analyze(
         std::vector<bool> cone_mask(nz_mask.begin() + psd_row_start,
                                      nz_mask.begin() + psd_row_start + tri);
 
-        // coneidx: the original cone index (PSD cones come after all others)
-        // We count: num_zero + num_nonneg + num_soc_cones + num_exp + num_power + pi
-        // But for chordal decomposition, we only track PSD cone index for spatterns
+        // For chordal decomposition, only the PSD-cone index is tracked.
         info.analyse_psd_sparsity(cone_mask, dim, pi);
 
         psd_row_start += tri;
@@ -380,9 +377,14 @@ ChordalInfo ChordalInfo::analyze(
     int64_t decomposed_dim = 0;
     int64_t total_overlaps = 0;
 
-    // Non-PSD cones contribute their original dimensions
-    int64_t non_psd_rows = num_zero_ + num_nonneg_ + total_soc_ + num_exp_ * 3 + num_power_ * 3;
-    decomposed_dim += non_psd_rows;
+    int64_t prefix_rows = num_zero_ + num_nonneg_ + total_soc_;
+    int64_t orig_psd_rows = 0;
+    for (int64_t pi = 0; pi < num_psd; ++pi) {
+        orig_psd_rows += psd_dims[pi] * (psd_dims[pi] + 1) / 2;
+    }
+    int64_t suffix_orig_start = prefix_rows + orig_psd_rows;
+    int64_t suffix_rows = A_nrow - suffix_orig_start;
+    decomposed_dim += prefix_rows + suffix_rows;
 
     // PSD cones: decomposed or original
     auto spatterns_iter = info.spatterns.begin();
@@ -461,29 +463,28 @@ ChordalInfo ChordalInfo::analyze(
     int64_t row_ptr = 0;      // current position in augmented row space
     int64_t overlap_ptr = A_nnz;  // current position in overlap entries
 
-    // Non-PSD cones: direct 1:1 mapping at the start.
-    // The non-PSD rows map to the same positions (identity mapping).
+    // Cones before PSD: direct 1:1 mapping at the start.
     {
-        for (int64_t k = 0; k < non_psd_rows; ++k) {
+        for (int64_t k = 0; k < prefix_rows; ++k) {
             info.b_row_map[k] = k;
         }
-        // Set rows in Aa_rows for all non-PSD A entries
+        // Set rows in Aa_rows for all pre-PSD A entries.
         for (int64_t col = 0; col < A_ncol; ++col) {
             for (int64_t p = A_colptr[col]; p < A_colptr[col + 1]; ++p) {
                 int64_t r = A_rowind[p];
-                if (r < non_psd_rows) {
+                if (r < prefix_rows) {
                     Aa_rows[p] = r;  // identity mapping
                 }
             }
         }
-        row_ptr = non_psd_rows;
+        row_ptr = prefix_rows;
     }
 
     // ================================================================
     // PSD cones: decomposed or pass-through
     // ================================================================
 
-    int64_t psd_orig_start = num_zero_ + num_nonneg_ + total_soc_ + num_exp_ * 3 + num_power_ * 3;
+    int64_t psd_orig_start = prefix_rows;
     spatterns_iter = info.spatterns.begin();
     int64_t spattern_count = 0;
 
@@ -606,6 +607,22 @@ ChordalInfo ChordalInfo::analyze(
         psd_orig_start += tri;
     }
 
+    // Cones after PSD (EXP, POW3D, and any later cone families) retain their
+    // original relative order, shifted past the decomposed PSD block.
+    for (int64_t k = 0; k < suffix_rows; ++k) {
+        info.b_row_map[row_ptr + k] = suffix_orig_start + k;
+    }
+    for (int64_t col = 0; col < A_ncol; ++col) {
+        for (int64_t p = A_colptr[col]; p < A_colptr[col + 1]; ++p) {
+            int64_t r = A_rowind[p];
+            if (r >= suffix_orig_start) {
+                Aa_rows[p] = row_ptr + (r - suffix_orig_start);
+            }
+        }
+    }
+    row_ptr += suffix_rows;
+    assert(row_ptr == m_aug);
+
     // ================================================================
     // Convert triplets to CSC for augmented A
     // ================================================================
@@ -697,8 +714,7 @@ ChordalInfo ChordalInfo::analyze(
 // ============================================================================
 
 static int64_t psd_orig_row_start(const ChordalInfo& info, int64_t psd_cone_idx) {
-    int64_t start = info.num_zero + info.num_nonneg + info.total_soc +
-                    info.num_exp * 3 + info.num_power * 3;
+    int64_t start = info.num_zero + info.num_nonneg + info.total_soc;
     for (int64_t pi = 0; pi < psd_cone_idx; ++pi) {
         start += info.orig_psd_dims[pi] * (info.orig_psd_dims[pi] + 1) / 2;
     }
@@ -721,17 +737,15 @@ static void reverse_impl(
 {
     std::memset(orig, 0, sizeof(double) * info.m_orig);
 
-    // Non-PSD cones: direct 1:1 copy for first non_psd_rows
-    int64_t non_psd_rows = info.num_zero + info.num_nonneg + info.total_soc +
-                            info.num_exp * 3 + info.num_power * 3;
+    int64_t prefix_rows = info.num_zero + info.num_nonneg + info.total_soc;
 
-    // The augmented problem preserves non-PSD rows in the same order at the beginning
-    for (int64_t k = 0; k < non_psd_rows; ++k) {
+    // The augmented problem preserves pre-PSD rows at the beginning.
+    for (int64_t k = 0; k < prefix_rows; ++k) {
         orig[k] = aug[k];
     }
 
     // PSD cones: iterate through cone_maps (which only contain PSD entries)
-    int64_t aug_ptr = non_psd_rows;
+    int64_t aug_ptr = prefix_rows;
     std::vector<int64_t> clique_buffer;
 
     for (const auto& cm : info.cone_maps) {
@@ -781,6 +795,12 @@ static void reverse_impl(
             }
             aug_ptr += triangular_number(static_cast<int64_t>(clique_buffer.size()));
         }
+    }
+
+    int64_t suffix_orig_start = psd_orig_row_start(info, info.orig_psd_dims.size());
+    int64_t suffix_rows = info.m_orig - suffix_orig_start;
+    for (int64_t k = 0; k < suffix_rows; ++k) {
+        orig[suffix_orig_start + k] = aug[aug_ptr + k];
     }
 }
 
@@ -1006,15 +1026,15 @@ void ChordalInfo::adjoint_reverse_s(const double* ds_orig, double* ds_aug) const
 
     std::memset(ds_aug, 0, sizeof(double) * m_aug);
 
-    int64_t non_psd_rows = num_zero + num_nonneg + total_soc + num_exp * 3 + num_power * 3;
+    int64_t prefix_rows = num_zero + num_nonneg + total_soc;
 
-    // Non-PSD: 1:1
-    for (int64_t k = 0; k < non_psd_rows; ++k) {
+    // Pre-PSD cones: 1:1
+    for (int64_t k = 0; k < prefix_rows; ++k) {
         ds_aug[k] = ds_orig[k];
     }
 
     // PSD cone_maps
-    int64_t aug_ptr = non_psd_rows;
+    int64_t aug_ptr = prefix_rows;
     std::vector<int64_t> clique_buffer;
 
     for (const auto& cm : cone_maps) {
@@ -1054,6 +1074,12 @@ void ChordalInfo::adjoint_reverse_s(const double* ds_orig, double* ds_aug) const
             aug_ptr += triangular_number(static_cast<int64_t>(clique_buffer.size()));
         }
     }
+
+    int64_t suffix_orig_start = psd_orig_row_start(*this, orig_psd_dims.size());
+    int64_t suffix_rows = m_orig - suffix_orig_start;
+    for (int64_t k = 0; k < suffix_rows; ++k) {
+        ds_aug[aug_ptr + k] = ds_orig[suffix_orig_start + k];
+    }
 }
 
 void ChordalInfo::adjoint_reverse_z(const double* dz_orig, double* dz_aug) const {
@@ -1061,17 +1087,17 @@ void ChordalInfo::adjoint_reverse_z(const double* dz_orig, double* dz_aug) const
 
     std::memset(dz_aug, 0, sizeof(double) * m_aug);
 
-    int64_t non_psd_rows = num_zero + num_nonneg + total_soc + num_exp * 3 + num_power * 3;
+    int64_t prefix_rows = num_zero + num_nonneg + total_soc;
 
-    // Non-PSD: 1:1 (always last writer for non-PSD)
-    for (int64_t k = 0; k < non_psd_rows; ++k) {
+    // Pre-PSD cones: 1:1 (always last writer).
+    for (int64_t k = 0; k < prefix_rows; ++k) {
         dz_aug[k] = dz_orig[k];
     }
 
     // First pass: find last aug_ptr that writes to each PSD orig_row
     std::vector<int64_t> last_aug_for_orig(m_orig, -1);
 
-    int64_t aug_ptr = non_psd_rows;
+    int64_t aug_ptr = prefix_rows;
     std::vector<int64_t> clique_buffer;
 
     for (const auto& cm : cone_maps) {
@@ -1113,7 +1139,7 @@ void ChordalInfo::adjoint_reverse_z(const double* dz_orig, double* dz_aug) const
     }
 
     // Second pass: assign gradients only to last writers
-    aug_ptr = non_psd_rows;
+    aug_ptr = prefix_rows;
     for (const auto& cm : cone_maps) {
         if (!cm.is_decomposed()) {
             int64_t dim = orig_psd_dims[cm.orig_index];
@@ -1155,6 +1181,12 @@ void ChordalInfo::adjoint_reverse_z(const double* dz_orig, double* dz_aug) const
             }
             aug_ptr += triangular_number(static_cast<int64_t>(clique_buffer.size()));
         }
+    }
+
+    int64_t suffix_orig_start = psd_orig_row_start(*this, orig_psd_dims.size());
+    int64_t suffix_rows = m_orig - suffix_orig_start;
+    for (int64_t k = 0; k < suffix_rows; ++k) {
+        dz_aug[aug_ptr + k] = dz_orig[suffix_orig_start + k];
     }
 }
 

@@ -3017,7 +3017,25 @@ struct Cones {
                 gpDim += genPowerDim1s[i] + genPowerDim2s[i];
             }
         }
-        return numZeroCones + numNonnegCones + socDim + numExpCones * 3 + numPowerCones * 3 + psdDim + gpDim;
+        return numZeroCones + numNonnegCones + socDim + psdDim + numExpCones * 3 + numPowerCones * 3 + gpDim;
+    }
+
+    // Public slack-vector layout, matching Clarabel/CVXPY and the CPU backend:
+    // Zero, Nonnegative, SOC, PSD, Exponential, Power, Generalized Power.
+    [[nodiscard]] int64_t psdOffset() const noexcept {
+        return numZeroCones + numNonnegCones + totalSocDim;
+    }
+
+    [[nodiscard]] int64_t expOffset() const noexcept {
+        return psdOffset() + totalPsdSvecDim;
+    }
+
+    [[nodiscard]] int64_t powerOffset() const noexcept {
+        return expOffset() + numExpCones * 3;
+    }
+
+    [[nodiscard]] int64_t genPowerOffset() const noexcept {
+        return powerOffset() + numPowerCones * 3;
     }
 
     /**

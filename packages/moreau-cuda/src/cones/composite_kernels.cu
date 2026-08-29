@@ -92,6 +92,7 @@ __global__ void update_scaling_all_cones_kernel(
     const int64_t* d_soc_offsets,
     const int64_t* d_soc_Hs_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     int64_t totalSocHsEntries,
     // Scaling success flag (set to 0 on degenerate SOC state)
     int32_t* scaling_success,
@@ -348,8 +349,8 @@ __global__ void update_scaling_all_cones_kernel(
 
     // ========== EXPONENTIAL CONES ==========
     if (numExpCones > 0) {
-        int64_t offset_s = numZeroCones + numNonnegCones + totalSocDim;
-        int64_t offset_z = numZeroCones + numNonnegCones + totalSocDim;
+        int64_t offset_s = numZeroCones + numNonnegCones + totalSocDim + totalPsdSvecDim;
+        int64_t offset_z = offset_s;
 
         for (int64_t cone_idx = threadIdx.x; cone_idx < numExpCones; cone_idx += stride) {
             int64_t s_base = batch * m_total + offset_s + cone_idx * 3;
@@ -457,8 +458,9 @@ __global__ void update_scaling_all_cones_kernel(
 
     // ========== POWER CONES ==========
     if (numPowerCones > 0) {
-        int64_t offset_s = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3;
-        int64_t offset_z = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3;
+        int64_t offset_s = numZeroCones + numNonnegCones + totalSocDim
+                         + totalPsdSvecDim + numExpCones * 3;
+        int64_t offset_z = offset_s;
         double mu_val = mu[batch];
 
         for (int64_t cone_idx = threadIdx.x; cone_idx < numPowerCones; cone_idx += stride) {
@@ -603,7 +605,8 @@ __global__ void update_scaling_all_cones_kernel(
     // the host. Cones are sorted ascending in Cones::initialize(), so small
     // cones are the contiguous prefix [0, numSmallGenPow).
     if (numSmallGenPow > 0) {
-        int64_t offset_z = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3 + numPowerCones * 3;
+        int64_t offset_z = numZeroCones + numNonnegCones + totalSocDim
+                         + totalPsdSvecDim + numExpCones * 3 + numPowerCones * 3;
         double mu_val = mu[batch];
 
         for (int64_t cone_idx = threadIdx.x; cone_idx < numSmallGenPow; cone_idx += stride) {
@@ -1019,6 +1022,7 @@ bool update_scaling_all_cones(
     const int64_t* d_soc_offsets,
     const int64_t* d_soc_Hs_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     int64_t totalSocHsEntries,
     int32_t* d_scaling_success,
     const int64_t* d_soc_sz_offsets,
@@ -1082,7 +1086,8 @@ bool update_scaling_all_cones(
             numZeroCones, numNonnegCones, numSocCones, numSmallSoc,
             numExpCones, numPowerCones,
             m_total, batchSize, scaling_strategy,
-            d_soc_dims, d_soc_offsets, d_soc_Hs_offsets, totalSocDim, totalSocHsEntries,
+            d_soc_dims, d_soc_offsets, d_soc_Hs_offsets, totalSocDim, totalPsdSvecDim,
+            totalSocHsEntries,
             d_scaling_success, d_soc_sz_offsets
         );
     }
@@ -1109,7 +1114,8 @@ bool update_scaling_all_cones(
     // inputs — safe to launch concurrently with the composite kernel.
     if (numLargeGenPow > 0) {
         int64_t offset_z_cones = numZeroCones + numNonnegCones + totalSocDim
-                               + numExpCones * 3 + numPowerCones * 3;
+                               + totalPsdSvecDim + numExpCones * 3
+                               + numPowerCones * 3;
         update_large_genpow_scaling(
             genpow_grad, genpow_z_out, genpow_Hs,
             genpow_p, genpow_q, genpow_r, genpow_d1, genpow_d2,
@@ -1148,6 +1154,7 @@ __global__ void compute_margins_impl(
     const int64_t* __restrict__ d_soc_dims,
     const int64_t* __restrict__ d_soc_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     const int64_t* __restrict__ d_soc_sz_offsets
 ) {
     int64_t batch = blockIdx.x;
@@ -1188,6 +1195,7 @@ __global__ void compute_margins_impl(
         local_pos += fmax(margin, 0.0);
     }
     offset += totalSocDim;
+    offset += totalPsdSvecDim;
 
     // Exp cones (conservative margin)
     int64_t exp_start = offset;
@@ -1264,6 +1272,7 @@ void compute_margins_batched_kernel(
     const int64_t* d_soc_dims,
     const int64_t* d_soc_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     const int64_t* d_soc_sz_offsets
 ) {
     if (m_total == 0 || batchSize == 0) {
@@ -1284,7 +1293,7 @@ void compute_margins_batched_kernel(
         z, d_batch_results,
         numZeroCones, numNonnegCones, numSocCones, numExpCones, numPowerCones,
         m_total, batchSize,
-        d_soc_dims, d_soc_offsets, totalSocDim, d_soc_sz_offsets
+        d_soc_dims, d_soc_offsets, totalSocDim, totalPsdSvecDim, d_soc_sz_offsets
     );
 
     // Step 2: Copy per-batch results to output arrays (no cross-batch reduction!)
@@ -1312,6 +1321,7 @@ __global__ void scaled_unit_shift_batched_impl(
     int64_t batchSize,
     const int64_t* __restrict__ d_soc_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     const int64_t* __restrict__ d_soc_sz_offsets
 ) {
     int64_t batch = blockIdx.x;
@@ -1339,6 +1349,7 @@ __global__ void scaled_unit_shift_batched_impl(
         z[offset + d_soc_sz_offsets[i]] += alpha_batch;
     }
     offset += totalSocDim;
+    offset += totalPsdSvecDim;
 
     // Exp cones: add alpha to y and z components
     for (int64_t i = threadIdx.x; i < numExpCones; i += blockDim.x) {
@@ -1368,6 +1379,7 @@ void scaled_unit_shift_batched_kernel(
     cudaStream_t stream,
     const int64_t* d_soc_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     const int64_t* d_soc_sz_offsets
 ) {
     if (m_total == 0 || batchSize == 0) return;
@@ -1383,7 +1395,7 @@ void scaled_unit_shift_batched_kernel(
         z, alpha, is_primal_cone,
         numZeroCones, numNonnegCones, numSocCones, numExpCones, numPowerCones,
         m_total, batchSize,
-        d_soc_offsets, totalSocDim, d_soc_sz_offsets
+        d_soc_offsets, totalSocDim, totalPsdSvecDim, d_soc_sz_offsets
     );
 }
 
@@ -1404,6 +1416,7 @@ __global__ void fused_margins_and_shift_impl(
     const int64_t* __restrict__ d_soc_dims,
     const int64_t* __restrict__ d_soc_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     const int64_t* __restrict__ d_soc_sz_offsets)
 {
     int64_t batch = blockIdx.x;
@@ -1444,6 +1457,7 @@ __global__ void fused_margins_and_shift_impl(
         local_pos += fmax(margin, 0.0);
     }
     offset += totalSocDim;
+    offset += totalPsdSvecDim;
 
     int64_t exp_start = offset;
     for (int64_t i = threadIdx.x; i < numExpCones; i += blockDim.x) {
@@ -1515,6 +1529,7 @@ __global__ void fused_margins_and_shift_impl(
         z[offset + d_soc_sz_offsets[i]] += alpha_batch;
     }
     offset += totalSocDim;
+    offset += totalPsdSvecDim;
 
     for (int64_t i = threadIdx.x; i < numExpCones; i += blockDim.x) {
         z[offset + i * 3 + 1] += alpha_batch;
@@ -1543,6 +1558,7 @@ void fused_margins_and_shift_kernel(
     const int64_t* d_soc_dims,
     const int64_t* d_soc_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     const int64_t* d_soc_sz_offsets)
 {
     if (m_total == 0 || batchSize == 0) return;
@@ -1554,7 +1570,7 @@ void fused_margins_and_shift_kernel(
         z, is_primal_cone, degree,
         numZeroCones, numNonnegCones, numSocCones, numExpCones, numPowerCones,
         m_total, batchSize,
-        d_soc_dims, d_soc_offsets, totalSocDim, d_soc_sz_offsets);
+        d_soc_dims, d_soc_offsets, totalSocDim, totalPsdSvecDim, d_soc_sz_offsets);
 }
 
 } // namespace moreau

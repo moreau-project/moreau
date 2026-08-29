@@ -274,6 +274,7 @@ __global__ void smoothing_all_cones_kernel(
     const int64_t* __restrict__ d_soc_dims,
     const int64_t* __restrict__ d_soc_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     const int64_t* __restrict__ d_soc_sz_offsets,
     // GenPowerCone params
     int64_t numGenPowerCones,
@@ -386,7 +387,7 @@ __global__ void smoothing_all_cones_kernel(
     // ========== EXPONENTIAL CONES (dim 3) ==========
     // Newton iteration to solve: z + mu * grad_f*(z) = work
     if (numExpCones > 0) {
-        int64_t offset = numZeroCones + numNonnegCones + totalSocDim;
+        int64_t offset = numZeroCones + numNonnegCones + totalSocDim + totalPsdSvecDim;
         const double tol = DEVICE_SQRT_EPSILON;
         const double two_minus_sqrt3 = 2.0 - 1.7320508075688772;  // 2 - sqrt(3)
         const double min_val = 1e-6;
@@ -474,7 +475,8 @@ __global__ void smoothing_all_cones_kernel(
     // ========== POWER CONES (dim 3) ==========
     // Newton iteration to solve: z + mu * grad_f*(z) = work
     if (numPowerCones > 0) {
-        int64_t offset = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3;
+        int64_t offset = numZeroCones + numNonnegCones + totalSocDim
+                       + totalPsdSvecDim + numExpCones * 3;
         const double tol = DEVICE_SQRT_EPSILON;
         const double two_minus_sqrt3 = 2.0 - 1.7320508075688772;
         const double min_val = 1e-6;
@@ -564,7 +566,8 @@ __global__ void smoothing_all_cones_kernel(
     // Newton iteration to solve: z + mu * grad_f*(z) = work
     // Uses variable-dim dense Cholesky with preallocated workspace buffers
     if (numGenPowerCones > 0) {
-        int64_t offset = numZeroCones + numNonnegCones + totalSocDim + numExpCones * 3 + numPowerCones * 3;
+        int64_t offset = numZeroCones + numNonnegCones + totalSocDim
+                       + totalPsdSvecDim + numExpCones * 3 + numPowerCones * 3;
         const double tol = DEVICE_SQRT_EPSILON;
         const double two_minus_sqrt3 = 2.0 - 1.7320508075688772;
         const double min_val = 1e-6;
@@ -771,6 +774,7 @@ void smoothing_all_cones(
     const int64_t* d_soc_dims,
     const int64_t* d_soc_offsets,
     int64_t totalSocDim,
+    int64_t totalPsdSvecDim,
     const int64_t* d_soc_sz_offsets,
     // GenPowerCone params
     int64_t numGenPowerCones,
@@ -814,7 +818,7 @@ void smoothing_all_cones(
         z, work, mu, d_powerAlphas,
         numZeroCones, numNonnegCones, numSocCones, numExpCones, numPowerCones,
         m_total, batchSize,
-        d_soc_dims, d_soc_offsets, totalSocDim, d_soc_sz_offsets,
+        d_soc_dims, d_soc_offsets, totalSocDim, totalPsdSvecDim, d_soc_sz_offsets,
         numGenPowerCones, d_genPowerAlphas,
         d_genPowerDim1s, d_genPowerDim2s,
         d_genPowerOffsets, d_genPowerAlphaOffsets, d_genPowerSzOffsets, totalGenPowerDim,

@@ -1311,24 +1311,7 @@ class DirectXSolverCpu:
 
         # Separate slack cones and direct-x cones.
         if hasattr(cones, "num_zero_cones"):
-            # Don't go through cones_to_cpu here — it raises on non-empty
-            # x_cones. Build the slack list manually.
-            slack = []
-            if cones.num_zero_cones > 0:
-                slack.append(_cpu_solver.ZeroConeT(cones.num_zero_cones))
-            if cones.num_nonneg_cones > 0:
-                slack.append(_cpu_solver.NonnegativeConeT(cones.num_nonneg_cones))
-            for dim in cones.so_cone_dims:
-                slack.append(_cpu_solver.SecondOrderConeT(dim))
-            for _ in range(cones.num_exp_cones):
-                slack.append(_cpu_solver.ExponentialConeT())
-            for alpha in cones.power_alphas:
-                slack.append(_cpu_solver.PowerConeT(alpha))
-            for alphas, dim2 in getattr(cones, "gen_power_cone_params", []):
-                slack.append(_cpu_solver.GenPowerConeT(list(alphas), dim2))
-            for psd_k in getattr(cones, "psd_dims", []):
-                slack.append(_cpu_solver.PSDTriangleConeT(psd_k))
-            self._slack_cones = slack
+            self._slack_cones = cones_to_cpu(cones)
             self._x_cones = _xcones_to_cpu(cones)
         else:
             self._slack_cones = cones

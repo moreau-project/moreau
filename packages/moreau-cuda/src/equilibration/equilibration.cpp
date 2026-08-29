@@ -70,49 +70,49 @@ void equilibration(
         set_array(equil.ework, 1.0, 0, cones.numZeroCones + cones.numNonnegCones, equil.ework.batchSize(), stream);
     }
 
-    // SOC + exp/power cones: ework[i] = mean(e_cone) / e[i]
-    int64_t cone_3d_start = cones.numZeroCones + cones.numNonnegCones;
-    int64_t cone_3d_size = m - cone_3d_start - cones.totalPsdSvecDim - cones.totalGenPowerDim;
-    if (cone_3d_size > 0) {
-        if (cones.numSocCones > 0 && cones.totalSocDim > 0) {
-            rectify_soc_cone_equilibration(
-                equil.ework, equil.e,
-                cone_3d_start,
-                cones.d_soc_offsets,
-                cones.d_soc_dims,
-                cones.numSocCones,
-                stream,
-                cones.d_soc_sz_offsets
-            );
-            cone_3d_start += cones.totalSocDim;
-            cone_3d_size -= cones.totalSocDim;
-        }
-        if (cone_3d_size > 0) {
-            rectify_cone_equilibration(
-                equil.ework, equil.e,
-                cone_3d_start,
-                cone_3d_size,
-                stream
-            );
-        }
+    int64_t cone_offset = cones.numZeroCones + cones.numNonnegCones;
+
+    // SOC cones: ework[i] = mean(e_cone) / e[i]
+    if (cones.numSocCones > 0 && cones.totalSocDim > 0) {
+        rectify_soc_cone_equilibration(
+            equil.ework, equil.e,
+            cone_offset,
+            cones.d_soc_offsets,
+            cones.d_soc_dims,
+            cones.numSocCones,
+            stream,
+            cones.d_soc_sz_offsets
+        );
+        cone_offset += cones.totalSocDim;
         any_changed = true;
     }
+
     // PSD cones (variable-size groups -- need PSD-specific rectification)
     if (cones.numPsdCones > 0) {
-        int64_t psd_start = cones.numZeroCones + cones.numNonnegCones + cones.totalSocDim
-                          + cones.numExpCones * 3 + cones.numPowerCones * 3;
         rectify_psd_cone_equilibration(
             equil.ework, equil.e,
-            psd_start,
+            cone_offset,
             cones.d_psd_dims,
             cones.numPsdCones,
             stream,
             cones.d_psd_sz_offsets
         );
+        cone_offset += cones.totalPsdSvecDim;
         any_changed = true;
     }
 
-    int64_t cone_offset = m - cones.totalGenPowerDim;
+    // Exponential and power cones are all three-dimensional.
+    int64_t cone_3d_size = cones.numExpCones * 3 + cones.numPowerCones * 3;
+    if (cone_3d_size > 0) {
+        rectify_cone_equilibration(
+            equil.ework, equil.e,
+            cone_offset,
+            cone_3d_size,
+            stream
+        );
+        cone_offset += cone_3d_size;
+        any_changed = true;
+    }
 
     // GenPowerCone: variable-dim rectification (like SOC)
     if (cones.numGenPowerCones > 0 && cones.totalGenPowerDim > 0) {

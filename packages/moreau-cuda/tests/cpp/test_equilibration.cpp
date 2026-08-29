@@ -469,6 +469,7 @@ TEST_F(EquilibrationDataTest, ClarabelBatchedExample) {
     cones.numSocCones = 1;
     cones.numPowerCones = 1;
     cones.powerAlphas = {0.6};
+    cones.initialize(batchSize, stream);
     
     EquilibrationData equil(n, m, batchSize);
     

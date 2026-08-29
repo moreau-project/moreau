@@ -507,6 +507,72 @@ TEST(XConeEndToEndTest, MixedNonnegAndSOCDirectX) {
 }
 
 // ----------------------------------------------------------------------
+// Slack rows must use the public Clarabel/CVXPY order even when direct-x
+// cones select the direct solver path:
+// PSD(2) | Exp | Power. Each fixed slack slice is infeasible when read as
+// the cone that occupied its position in CUDA's former Exp | Power | PSD
+// layout, so a row-order regression cannot pass accidentally.
+// ----------------------------------------------------------------------
+TEST(XConeEndToEndTest, MixedPsdExpPowerSlackOrderWithDirectX) {
+    constexpr int batchSize = 1;
+    constexpr int n = 1, m = 9;
+
+    std::vector<int64_t> P_ro = {0, 1};
+    std::vector<int64_t> P_ci = {0};
+    std::vector<int64_t> A_ro(m + 1, 0);
+    std::vector<int64_t> A_ci = {};
+
+    Cones cones{};
+    cones.psdConeDims = {2};
+    cones.numExpCones = 1;
+    cones.powerAlphas = {0.4};
+    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
+
+    Settings settings;
+    settings.maxIter = 200;
+    settings.verbose = false;
+    settings.ipm.equilibrationSettings.enable = false;
+
+    CompiledSolver solver(n, m, batchSize, P_ro.data(), P_ci.data(), 1,
+                          A_ro.data(), A_ci.data(), 0, cones, settings);
+
+    std::vector<double> P_values = {1.0};
+    std::vector<double> q = {-1.0};
+    std::vector<double> b = {
+        1.0, 0.0, 1.0,  // PSD(2): identity
+        0.0, 1.0, 2.0,  // Exp: strictly feasible
+        1.0, 1.0, 0.25  // Power(0.4): strictly feasible
+    };
+
+    double* d_P = cuda_upload(P_values);
+    double* d_q = cuda_upload(q);
+    double* d_b = cuda_upload(b);
+    double* d_A = nullptr;
+    cudaMalloc(&d_A, sizeof(double));
+
+    solver.solveAll(d_P, d_A, d_q, d_b);
+    cudaDeviceSynchronize();
+
+    int32_t status_raw = 0;
+    cudaMemcpy(&status_raw, solver.info.status_device, sizeof(int32_t), cudaMemcpyDeviceToHost);
+    auto status = static_cast<SolverStatus>(status_raw);
+    EXPECT_TRUE(status == SolverStatus::Solved || status == SolverStatus::AlmostSolved);
+
+    std::vector<double> x(n);
+    std::vector<double> s(m);
+    solver.solution.x.gpuToCpu(x.data(), 0);
+    solver.solution.s.gpuToCpu(s.data(), 0);
+    cudaDeviceSynchronize();
+    EXPECT_NEAR(x[0], 1.0, 1e-6);
+    for (int64_t i = 0; i < m; ++i) EXPECT_NEAR(s[i], b[i], 1e-7);
+
+    cudaFree(d_P);
+    cudaFree(d_A);
+    cudaFree(d_q);
+    cudaFree(d_b);
+}
+
+// ----------------------------------------------------------------------
 // Dim-2 direct-x SOC (= nonneg intersection of lines x0 ≥ |x1|).
 // min 0.5||x||² + q'x, q=(-1, 0). Interior optimum (1, 0).
 // ----------------------------------------------------------------------
