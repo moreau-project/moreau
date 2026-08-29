@@ -16,7 +16,7 @@ Direct usage (advanced):
     result = solver.solve(P_values, A_values, q, b)  # 1D=single, 2D=batch
 """
 
-__version__ = "0.3.3"
+__version__ = "0.4.0-beta.1"
 
 # Import the Rust extension module
 from ._cpu_solver import *

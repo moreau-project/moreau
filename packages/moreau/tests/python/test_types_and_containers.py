@@ -24,10 +24,6 @@ from moreau._types import (
     Solution,
     BatchedSolveInfo,
     BatchedSolution,
-    TorchSolveInfo,
-    TorchSolution,
-    TorchBatchedSolveInfo,
-    TorchBatchedSolution,
     _normalize_status,
 )
 
@@ -316,9 +312,16 @@ class TestBatchedSolutionContainer:
         assert "batch_size=3" in r
 
 
-torch = pytest.importorskip("torch")
+try:
+    import torch
+except ImportError:
+    torch = None
+
+if torch is not None:
+    from moreau._types import TorchBatchedSolution, TorchSolution
 
 
+@pytest.mark.skipif(torch is None, reason="torch is not installed")
 class TestTorchBatchedSolutionContainer:
     """Test TorchBatchedSolution.__getitem__ threads z_x for direct-x problems."""
 

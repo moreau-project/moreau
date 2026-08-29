@@ -8,14 +8,19 @@ For the low-level Julia API (batching, CUDA, differentiation), see the [Julia AP
 
 ```julia
 import Pkg
-Pkg.add(url="https://github.com/optimalintellect/Moreau.jl")
+Pkg.add(url="https://github.com/moreau-project/Moreau.jl")
 ```
 
-The package depends on a compiled C shared library (`libmoreau_cpu`). On first use, it will be downloaded automatically from the artifact server.
+The CPU shared library is installed automatically as a Julia artifact. CUDA
+binaries are lazy artifacts: installing or importing Moreau does not download
+them. A matching CUDA binary is downloaded only when a CUDA solve is selected.
 
 ### CUDA Version Selection
 
-Moreau is available as both a CUDA 12 and CUDA 13 build. By default, `Moreau_CUDA_jll` auto-detects the driver's maximum supported CUDA version via `nvidia-smi` and picks the best matching library (preferring CUDA 13 when the driver supports it, using only CUDA 12 on older drivers).
+Moreau is available as both a CUDA 12 and CUDA 13 build. When CUDA is needed,
+Moreau detects the driver's maximum supported CUDA version via `nvidia-smi`
+and downloads the best matching lazy artifact. It prefers CUDA 13 when the
+driver supports it and uses CUDA 12 on older drivers.
 
 To override the auto-detection, set the `MOREAU_CUDA_VERSION` environment variable before loading the package:
 
@@ -23,11 +28,13 @@ To override the auto-detection, set the `MOREAU_CUDA_VERSION` environment variab
 # Force CUDA 12 even on a CUDA 13-capable driver
 ENV["MOREAU_CUDA_VERSION"] = "12"
 using Moreau
+# The CUDA 12 artifact is downloaded when this process first requests CUDA.
 ```
 
 Valid values are `"12"`, `"13"`, `"12.2"`, `"13.0"`, etc. (only the major version matters).
 
-If `nvidia-smi` is not available (e.g. in a container without it on PATH), the fallback is to try CUDA 13 first, then CUDA 12.
+If `nvidia-smi` is unavailable, `device=:auto` remains on CPU and downloads
+nothing. An explicit `device=:cuda` request tries CUDA 13 followed by CUDA 12.
 
 ---
 

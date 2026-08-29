@@ -3,6 +3,25 @@
 Moreau.jl is a Julia interface to the
 [Moreau](https://moreau.so) batched differentiable convex conic solver.
 
+## Installation
+
+```julia
+import Pkg
+Pkg.add(url="https://github.com/moreau-project/Moreau.jl")
+```
+
+The CPU library is installed automatically. CUDA 12 and CUDA 13 binaries are
+lazy artifacts: they are downloaded only when a CUDA solve is requested, not
+when Moreau.jl is installed or imported.
+
+Moreau.jl releases are maintained independently from the native solver. After
+a new native release, download its C-library archives and regenerate the
+manifest before bumping the Julia package version:
+
+```bash
+julia scripts/generate_artifacts.jl v0.3.4 /path/to/release-assets
+```
+
 ## Quick Start
 
 ```julia
@@ -25,5 +44,5 @@ value(y)  # ≈ 0.5
 
 ## License
 
-Apache 2.0. See the root `LICENSE` file and `NOTICE` for upstream
-attribution (Clarabel.rs, diffqcp, DAQP).
+Apache 2.0. See `LICENSE` and `NOTICE` for upstream attribution
+(Clarabel.rs, diffqcp, DAQP).

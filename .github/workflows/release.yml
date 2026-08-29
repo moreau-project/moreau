@@ -3,11 +3,11 @@
 # This is stage 1 of a 3-stage release pipeline:
 #   1. release.yml    — build wheels, create GitHub Release (this workflow)
 #   2. test-release.yml — test wheels from a GitHub Release (re-triggerable)
-#   3. publish.yml    — push to PyPI + update Julia packages
+#   3. publish.yml    — push Python wheels to PyPI
 #
 # Usage:
 #   gh workflow run release.yml
-#   gh workflow run release.yml -f version=0.2.0 -f release_name=v0.2.0
+#   gh workflow run release.yml -f version=0.4.0-beta.1 -f release_name=v0.4.0-beta.1
 
 name: Release
 
@@ -15,11 +15,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Exact version (e.g., 0.2.0). Leave empty for dev version with timestamp.'
+        description: 'Exact package version (e.g., 0.4.0-beta.1). Leave empty for a timestamped dev version.'
         required: false
         type: string
       release_name:
-        description: 'GitHub release name (e.g., v0.2.0). Leave empty for dev-YYYYMMDD-HHMMSS.'
+        description: 'GitHub release/tag (e.g., v0.4.0-beta.1). Leave empty for dev-YYYYMMDD-HHMMSS.'
         required: false
         type: string
 
@@ -243,6 +243,7 @@ jobs:
           echo "Patching package to: $PACKAGE version: $VERSION cuda_major: $CUDA_MAJOR"
           sed -i "s/^name = \"moreau-cuda\"/name = \"$PACKAGE\"/" packages/moreau-cuda/pyproject.toml
           sed -i 's/^version = ".*"/version = "'"$VERSION"'"/' packages/moreau-cuda/pyproject.toml
+          sed -i 's/moreau>=[0-9A-Za-z.-]*/moreau=='"$VERSION"'/' packages/moreau-cuda/pyproject.toml
           sed -i "s/nvidia-cudss-cu12/nvidia-cudss-cu${CUDA_MAJOR}/g" packages/moreau-cuda/pyproject.toml
           sed -i "s/==12\.\*/==${CUDA_MAJOR}.\*/g" packages/moreau-cuda/pyproject.toml
           cat packages/moreau-cuda/pyproject.toml
@@ -300,8 +301,10 @@ jobs:
           sed -i 's/__version__ = ".*"/__version__ = "'"$VERSION"'"/' packages/moreau/python/moreau/__init__.py
           grep "__version__" packages/moreau/python/moreau/__init__.py
 
-          sed -i 's/moreau-cpu>=[0-9][0-9.]*/moreau-cpu>='"$VERSION"'/' packages/moreau/pyproject.toml
-          grep "moreau-cpu" packages/moreau/pyproject.toml
+          sed -i 's/moreau-cpu>=[0-9A-Za-z.-]*/moreau-cpu=='"$VERSION"'/' packages/moreau/pyproject.toml
+          sed -i 's/moreau-cuda12>=[0-9A-Za-z.-]*/moreau-cuda12=='"$VERSION"'/g' packages/moreau/pyproject.toml
+          sed -i 's/moreau-cuda13>=[0-9A-Za-z.-]*/moreau-cuda13=='"$VERSION"'/g' packages/moreau/pyproject.toml
+          grep -E "moreau-(cpu|cuda)" packages/moreau/pyproject.toml
 
       - name: Build wheel
         run: |
@@ -335,6 +338,12 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+
+      - name: Patch C library version
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          sed -i '0,/^version = ".*"/{s/^version = ".*"/version = "'"$VERSION"'"/}' packages/moreau-cpu/Cargo.toml
 
       - name: Build CPU C API in manylinux container
         env:
@@ -373,6 +382,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Patch C library version
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          sed -i '' '1,/^version = ".*"/{s/^version = ".*"/version = "'"$VERSION"'"/;}' packages/moreau-cpu/Cargo.toml
 
       - name: Build CPU C API
         run: packages/moreau-c/build.sh cpu
@@ -449,6 +464,15 @@ jobs:
           swap-storage: false
 
       - uses: actions/checkout@v4
+
+      - name: Patch C library version
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          sed -i 's/^version = ".*"/version = "'"$VERSION"'"/' packages/moreau-cuda/pyproject.toml
+          sed -i 's/m.attr("__version__") = ".*";/m.attr("__version__") = "'"$VERSION"'";/' packages/moreau-cuda/bindings/moreau_bindings.cpp
+          sed -i 's/constexpr const char\* VERSION = ".*";/constexpr const char* VERSION = "'"$VERSION"'";/' packages/moreau-cuda/src/solver/solver.cpp
+          sed -i 's/static constexpr const char\* MOREAU_VERSION = ".*";/static constexpr const char* MOREAU_VERSION = "'"$VERSION"'";/' packages/moreau-cuda/src/solver/info.cpp
 
       - name: Build CUDA C API in Docker
         env:
@@ -557,12 +581,26 @@ jobs:
           fi
           echo "Release name: $(grep name= $GITHUB_OUTPUT | cut -d= -f2)"
 
+      - name: Set up Julia for artifact manifest
+        uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.12'
+
+      - name: Generate Julia artifact manifest
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.name }}
+        run: |
+          julia packages/moreau-julia/Moreau.jl/scripts/generate_artifacts.jl \
+            "$RELEASE_TAG" dist-clibs
+          cp packages/moreau-julia/Moreau.jl/Artifacts.toml \
+            moreau-julia-Artifacts.toml
+
       - name: Package Julia source tarball
         run: |
           tar czf moreau-julia-src.tar.gz \
             --exclude='Moreau.jl/Manifest.toml' \
             -C packages/moreau-julia \
-            Moreau.jl Moreau_CPU_jll.jl Moreau_CUDA_jll.jl
+            Moreau.jl
           echo "Julia source tarball:"
           tar tzf moreau-julia-src.tar.gz | head -20
           du -h moreau-julia-src.tar.gz
@@ -572,13 +610,14 @@ jobs:
           mkdir -p dist-release
           cp dist-wheels/*.whl dist-release/
           cp dist-clibs/*.tar.gz dist-release/
+          cp moreau-julia-Artifacts.toml dist-release/
           cp moreau-julia-src.tar.gz dist-release/
           echo "=== Release assets ==="
           ls -la dist-release/
           du -h dist-release/*
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.name }}
           name: ${{ steps.release.outputs.name }}
@@ -625,8 +664,6 @@ jobs:
 
             Each tarball contains `lib/libmoreau_cpu.{so,dylib}` or `lib/libmoreau_cuda.so`.
 
-            ---
-            Generated with [Claude Code](https://claude.com/claude-code)
           prerelease: true
           generate_release_notes: false
         env:

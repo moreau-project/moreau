@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "moreau"
-version = "0.3.3"
+version = "0.4.0-beta.1"
 description = "Moreau: Conic optimization solver with CPU and optional GPU backends"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -26,16 +26,16 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 dependencies = [
-    "moreau-cpu>=0.3.3",
+    "moreau-cpu>=0.4.0-beta.1",
     "numpy>=1.19.0",
     "pydantic>=2.0.0",
 ]
 
 [project.optional-dependencies]
 # The cuda extras require Python 3.12+ (moreau-cuda's floor).
-cuda = ["moreau-cuda12>=0.3.3"]
-cuda12 = ["moreau-cuda12>=0.3.3"]
-cuda13 = ["moreau-cuda13>=0.3.3"]
+cuda = ["moreau-cuda12>=0.4.0-beta.1"]
+cuda12 = ["moreau-cuda12>=0.4.0-beta.1"]
+cuda13 = ["moreau-cuda13>=0.4.0-beta.1"]
 torch = ["torch>=2.4.0"]
 test = ["pytest>=7.0.0", "cvxpy>=1.4.0"]
 all = ["moreau[cuda,torch]"]

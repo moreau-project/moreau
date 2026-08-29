@@ -420,7 +420,7 @@ wheels = [
 
 [[package]]
 name = "moreau"
-version = "0.3.3"
+version = "0.4.0-beta.1"
 source = { editable = "packages/moreau" }
 dependencies = [
     { name = "moreau-cpu" },
@@ -455,9 +455,9 @@ requires-dist = [
     { name = "cvxpy", marker = "extra == 'test'", specifier = ">=1.4.0" },
     { name = "moreau", extras = ["cuda", "torch"], marker = "extra == 'all'", editable = "packages/moreau" },
     { name = "moreau-cpu", editable = "packages/moreau-cpu" },
-    { name = "moreau-cuda12", marker = "extra == 'cuda'", specifier = ">=0.3.3" },
-    { name = "moreau-cuda12", marker = "extra == 'cuda12'", specifier = ">=0.3.3" },
-    { name = "moreau-cuda13", marker = "extra == 'cuda13'", specifier = ">=0.3.3" },
+    { name = "moreau-cuda12", marker = "extra == 'cuda'", specifier = ">=0.4.0-beta.1" },
+    { name = "moreau-cuda12", marker = "extra == 'cuda12'", specifier = ">=0.4.0-beta.1" },
+    { name = "moreau-cuda13", marker = "extra == 'cuda13'", specifier = ">=0.4.0-beta.1" },
     { name = "numpy", specifier = ">=1.19.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
@@ -467,7 +467,7 @@ provides-extras = ["cuda", "cuda12", "cuda13", "torch", "test", "all"]
 
 [[package]]
 name = "moreau-cpu"
-version = "0.3.3"
+version = "0.4.0-beta.1"
 source = { editable = "packages/moreau-cpu" }
 dependencies = [
     { name = "numpy" },
@@ -495,7 +495,7 @@ provides-extras = ["torch", "test"]
 
 [[package]]
 name = "moreau-cuda"
-version = "0.3.3"
+version = "0.4.0-beta.1"
 source = { editable = "packages/moreau-cuda" }
 dependencies = [
     { name = "cuda-toolkit", extra = ["cudart", "cusolver", "cusparse", "nvjitlink"] },
@@ -514,7 +514,7 @@ requires-dist = [
     { name = "cuda-toolkit", extras = ["cusolver", "cusparse", "cudart", "nvjitlink"], specifier = "==12.*" },
     { name = "moreau", editable = "packages/moreau" },
     { name = "numpy", specifier = ">=1.19.0" },
-    { name = "nvidia-cudss-cu12", specifier = ">=0.8,<0.9" },
+    { name = "nvidia-cudss-cu12", specifier = ">=0.7.1,<0.8" },
     { name = "torch", marker = "extra == 'torch'", specifier = ">=2.4.0" },
 ]
 provides-extras = ["torch"]
@@ -533,7 +533,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/0d/05/d0f6c2ab1832cd0a0
 
 [[package]]
 name = "moreau-workspace"
-version = "0.3.3"
+version = "0.4.0-beta.1"
 source = { virtual = "." }
 
 [package.dev-dependencies]
@@ -697,15 +697,15 @@ wheels = [
 
 [[package]]
 name = "nvidia-cudss-cu12"
-version = "0.8.0.10"
+version = "0.7.1.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cuda-toolkit", extra = ["cublas"] },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a3/d6/5797df31603d2f9142aeb263b7a72353a234c838ba0bf216cb34fb17d4d9/nvidia_cudss_cu12-0.8.0.10-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:a806e6e7dbeba6fce64018e76e6deee19471b44ce4daec018c18d42bb08493a5", size = 108978938, upload-time = "2026-06-02T00:01:02.854Z" },
-    { url = "https://files.pythonhosted.org/packages/81/1a/f043e6f15379a44cd3b3b7f97ad5cc35ecf6e03e848c79ab813c7e175668/nvidia_cudss_cu12-0.8.0.10-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:602eb6e394c6595a698ed10b74cf5e251a0fbbd6e84da9a755e02fafb6c60ef1", size = 109085662, upload-time = "2026-06-02T00:03:40.561Z" },
-    { url = "https://files.pythonhosted.org/packages/49/4c/85bfa40b863e1d2ec8629964283ba8b4b3f85b2c01b8ab6fe5ba60d5eed0/nvidia_cudss_cu12-0.8.0.10-py3-none-win_amd64.whl", hash = "sha256:89bf57d4d05d25c7f6e1288acbc94c5eed519763c55d7ec1f6d73099ace8554e", size = 107603833, upload-time = "2026-06-02T00:04:39.903Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/7f/0bb96031bdc421c5d2123c0570f7ba391e19c621862ceb20b2361a29ca94/nvidia_cudss_cu12-0.7.1.6-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:edf9a0d40463841a18e77e34071747ae7ae3145e0af65c976923a9ac125f97ac", size = 79845306, upload-time = "2025-11-04T21:45:12.625Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/3b/bc2da119af8328b7096bced5632d3b1045dad9b40cb2f3c64717c535e89f/nvidia_cudss_cu12-0.7.1.6-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:8b7837d216e871bb9ac174300a62eb998344f0b5faa03cf8f93d37c28985b325", size = 79958151, upload-time = "2025-11-04T21:46:46.009Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/67/13a8eb884b6cb314fffd8b9e4c60bcb18c8141e1a6ec9b51a95c84c87bde/nvidia_cudss_cu12-0.7.1.6-py3-none-win_amd64.whl", hash = "sha256:6cbe6f0c404259243faecf2ca13dfe282655d6296b97d5188995166190728435", size = 70856822, upload-time = "2025-11-04T21:36:25.936Z" },
 ]
 
 [[package]]
