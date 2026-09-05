@@ -92,7 +92,7 @@ struct WoodburyKKTData : public KKTSolver {
     // `cones.xcone_Hs[]`; the cone layout is collapsed into:
     //   xn_idx_[k] = primal x index for the k-th direct-x nonneg slot
     //   xn_hs_off_[k] = offset into cones.xcone_Hs for the k-th slot
-    // disjointness across x_cones is enforced upstream (Cones::initialize).
+    // disjointness across dir_cones is enforced upstream (Cones::initialize).
     int64_t n_xcone_nonneg_ = 0;
     std::vector<int64_t> xn_idx_host_;       // host (n_xcone_nonneg_)
     std::vector<int64_t> xn_hs_off_host_;    // host (n_xcone_nonneg_)

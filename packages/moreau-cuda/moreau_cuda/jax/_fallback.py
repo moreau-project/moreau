@@ -60,10 +60,10 @@ def _solve_fallback_callback(
     cuda_solver = solver_wrapper._get_or_create_cuda_solver(batch_size, enable_grad=True)
 
     # Check for pending warm start. The underlying CUDA solver's
-    # `solve_warm_start` signature is 7-arg (no direct-x warm); if a
+    # `solve_warm_start` signature is 7-arg (no direct warm); if a
     # `warm_z_x` was provided we pass it as a kwarg when the binding
     # accepts it, otherwise silently drop (matches the historical
-    # behavior — direct-x warm in fallback is best-effort).
+    # behavior — direct warm in fallback is best-effort).
     if solver_wrapper._pending_warm_start is not None:
         pending_warm = solver_wrapper._pending_warm_start
         warm_x = np.ascontiguousarray(pending_warm["warm_x"].reshape(batch_size, -1))
@@ -88,8 +88,8 @@ def _solve_fallback_callback(
     z = np.asarray(result["z"], dtype=np.float64)
     s = np.asarray(result["s"], dtype=np.float64)
 
-    # Direct-x cone duals. The underlying CUDA solver returns z_x (shape
-    # batch×total_xn) when x_cones are present; otherwise we synthesise a
+    # Direct cone duals. The underlying CUDA solver returns z_x (shape
+    # batch×total_xn) when dir_cones are present; otherwise we synthesise a
     # zero-length buffer with the right batch dimension. `JaxSolution`'s
     # 4-field shape requires z_x to be present even for slack-only solves.
     total_xn = solver_wrapper._total_xn
@@ -277,8 +277,8 @@ def _solve_fallback_fwd(
         _solve_fallback(solver_id, P_data, A_data, q, b)
     )
     # Save inputs and x, z, s for backward (metadata not needed; z_x is the
-    # direct-x dual but the fallback backward callback doesn't yet thread
-    # it through, so omit from residuals — direct-x backward in fallback
+    # direct dual but the fallback backward callback doesn't yet thread
+    # it through, so omit from residuals — direct backward in fallback
     # mode is a known limitation.)
     residuals = (P_data, A_data, q, b, x, z, s)
     return (
@@ -300,7 +300,7 @@ def _solve_fallback_bwd(solver_id: int, residuals, g):
 
     Receives 10 gradients but only uses first 3 (solution vectors).
     Metadata gradients (z_x grad, status, obj_val, iterations, times) are
-    ignored — fallback mode does not yet support direct-x backward.
+    ignored — fallback mode does not yet support direct backward.
     """
     P_data, A_data, q, b, x, z, s = residuals
     # Unpack all 10 gradients - metadata + z_x grads will be ignored
@@ -404,7 +404,7 @@ def _solve_fallback_warm_with_solution(
     """Fallback warm-start solve via _pending_warm_start side channel.
 
     ``warm_z_x`` is accepted for FFI-path API parity but only stored when
-    the underlying cuda_solver supports direct-x warm-start (otherwise it
+    the underlying cuda_solver supports direct warm-start (otherwise it
     is silently dropped, since the fallback `solve_warm_start` binding
     only takes 7 arguments).
     """

@@ -60,7 +60,7 @@ struct Variables {
      * @param m Number of constraints
      * @param batchSize Number of problems to solve in parallel
      * @param totalXConeNumel Sum of direct-x cone dim sizes; 0 when
-     *                       cones.x_cones is empty (placeholder z_x).
+     *                       cones.dir_cones is empty (placeholder z_x).
      */
     Variables(int64_t n, int64_t m, int64_t batchSize,
               int64_t totalXConeNumel = 0)

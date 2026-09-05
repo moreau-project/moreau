@@ -51,7 +51,7 @@ int main() {
         SupportedXConeT xc;
         xc.kind = XConeKind::Exp;
         xc.indices = {3*k, 3*k+1, 3*k+2};
-        cones.x_cones.push_back(xc);
+        cones.dir_cones.push_back(xc);
     }
 
     Settings settings;

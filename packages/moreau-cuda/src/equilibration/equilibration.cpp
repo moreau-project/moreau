@@ -160,7 +160,7 @@ void equilibration(
         );
 
         // Trigger rescale if any cone requiring uniform scaling is present.
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             if (xc.kind == XConeKind::SOC ||
                 xc.kind == XConeKind::PSD ||
                 xc.kind == XConeKind::Exp ||

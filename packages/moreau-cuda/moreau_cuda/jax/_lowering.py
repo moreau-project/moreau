@@ -30,7 +30,7 @@ def _make_ffi_solve_fn(
     num_psd: int,
     num_power: int,
     num_gen_power: int,
-    num_x_cones: int,
+    num_dir_cones: int,
     total_xn: int,
     P_row_offsets_gpu: jnp.ndarray,
     P_col_indices_gpu: jnp.ndarray,
@@ -143,7 +143,7 @@ def _make_ffi_solve_fn(
                 num_psd=np.int64(num_psd),
                 num_power=np.int64(num_power),
                 num_gen_power=np.int64(num_gen_power),
-                num_x_cones=np.int64(num_x_cones),
+                num_dir_cones=np.int64(num_dir_cones),
             )
         )
 
@@ -235,7 +235,7 @@ def _make_ffi_solve_fn(
             num_psd=np.int64(num_psd),
             num_power=np.int64(num_power),
             num_gen_power=np.int64(num_gen_power),
-            num_x_cones=np.int64(num_x_cones),
+            num_dir_cones=np.int64(num_dir_cones),
         )
 
         return dP, dA, dq_out, db_out
@@ -639,7 +639,7 @@ def _make_ffi_solve_warm_fn(
     num_psd: int,
     num_power: int,
     num_gen_power: int,
-    num_x_cones: int,
+    num_dir_cones: int,
     total_xn: int,
     P_row_offsets_gpu: jnp.ndarray,
     P_col_indices_gpu: jnp.ndarray,
@@ -668,7 +668,7 @@ def _make_ffi_solve_warm_fn(
             -> (JaxSolution, JaxSolveInfo)
 
     Mirrors `_make_ffi_solve_fn` (the regular forward) — same x-cone GPU
-    buffers and `num_x_cones`/`total_xn` plumbing — plus the four warm
+    buffers and `num_dir_cones`/`total_xn` plumbing — plus the four warm
     arrays (`warm_x`, `warm_z`, `warm_s`, `warm_z_x`). The C++ FFI handler
     `MoreauSolveFwdWarmImpl` expects the warm-`z_x` arg as a placeholder
     when `total_xn == 0`; the JaxSolver caller passes a zero-length
@@ -755,7 +755,7 @@ def _make_ffi_solve_warm_fn(
             num_psd=np.int64(num_psd),
             num_power=np.int64(num_power),
             num_gen_power=np.int64(num_gen_power),
-            num_x_cones=np.int64(num_x_cones),
+            num_dir_cones=np.int64(num_dir_cones),
         )
 
     # Backward FFI call for warm-start path (same FFI endpoint as regular backward)
@@ -811,7 +811,7 @@ def _make_ffi_solve_warm_fn(
             num_psd=np.int64(num_psd),
             num_power=np.int64(num_power),
             num_gen_power=np.int64(num_gen_power),
-            num_x_cones=np.int64(num_x_cones),
+            num_dir_cones=np.int64(num_dir_cones),
         )
 
     @custom_vmap

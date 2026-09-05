@@ -32,6 +32,10 @@ tests/python/          # Unified API integration tests
 tests/python/bench/    # Decision-gate benchmarks (checked in)
 ```
 
+The public direct cone API uses `DirectConeSpec` entries in `Cones.dir_cones`.
+Both native solver bindings accept the `dir_cones` argument. See
+[`docs/guide/direct-cones.md`](docs/guide/direct-cones.md) for usage.
+
 ## packages/moreau-cpu (Rust solver)
 
 ```

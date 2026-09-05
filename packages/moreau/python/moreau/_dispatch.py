@@ -1,6 +1,6 @@
-"""Solver-selection and direct-x cone dispatch helpers for moreau (private).
+"""Solver-selection and direct cone dispatch helpers for moreau (private).
 
-Decides between active-set and IPM, and validates that a direct-x cone
+Decides between active-set and IPM, and validates that a direct cone
 configuration is supported on the requested device.
 """
 
@@ -61,8 +61,8 @@ def _resolve_settings_and_device(
     return settings, device
 
 
-# Direct-x cone kinds with native CUDA forward + backward support.
-_CUDA_SUPPORTED_XCONE_KINDS = frozenset(
+# Direct cone kinds with native CUDA forward + backward support.
+_CUDA_SUPPORTED_DIR_CONE_KINDS = frozenset(
     {
         "nonneg",
         "soc",
@@ -100,16 +100,16 @@ def _resolve_solver_type(settings, n, m, cones, device, nnz_P=None):
             and len(getattr(cones, "gen_power_cone_params", [])) == 0
             and len(getattr(cones, "psd_dims", [])) == 0
         )
-        # Active-set CPU solver only knows zero+nonneg slack cones; direct-x
-        # cones (any kind) require IPM. Routing direct-x problems through
-        # active-set silently drops `x_cones`, returning a wrong (constraint-
+        # Active-set CPU solver only knows zero+nonneg slack cones; direct
+        # cones (any kind) require IPM. Routing direct problems through
+        # active-set silently drops `dir_cones`, returning a wrong (constraint-
         # violating) solution and zero z_x.
-        has_x_cones = bool(getattr(cones, "x_cones", None))
+        has_dir_cones = bool(getattr(cones, "dir_cones", None))
         has_quadratic = nnz_P is None or nnz_P > 0
         m_limit = max(500, 2 * n)
         if (
             is_qp_only
-            and not has_x_cones
+            and not has_dir_cones
             and has_quadratic
             and n <= 500
             and m > 0
@@ -148,18 +148,18 @@ def _warn_auto_active_set_with_grad():
     )
 
 
-def _require_x_cones_compatible(cones, settings=None) -> None:
-    """Validate that a direct-x configuration is supported.
+def _require_dir_cones_compatible(cones, settings=None) -> None:
+    """Validate that a direct configuration is supported.
 
     CompiledSolver + CPU: routes through DirectXSolverCpu (batched via
     per-problem loop, or single-problem direct invocation).
     CompiledSolver + CUDA: routes through the device CompiledSolver
-    which already threads x_cones. Forward and backward are supported
-    natively on CUDA for all direct-x cone kinds (nonneg, SOC, PSD,
+    which already threads dir_cones. Forward and backward are supported
+    natively on CUDA for all direct cone kinds (nonneg, SOC, PSD,
     exp, power, gen_power) via the IFT-direct augmented-system path.
     """
-    x_cones = getattr(cones, "x_cones", None)
-    if not x_cones:
+    dir_cones = getattr(cones, "dir_cones", None)
+    if not dir_cones:
         return
 
     device = getattr(settings, "device", None) if settings is not None else None
@@ -167,47 +167,47 @@ def _require_x_cones_compatible(cones, settings=None) -> None:
     _ = enable_grad  # All CUDA-supported kinds also support enable_grad.
 
     if device == "cuda":
-        if not _all_x_cones_cuda_supported(cones):
+        if not _all_dir_cones_cuda_supported(cones):
             raise NotImplementedError(
-                "CUDA direct-x cones support kinds " f"{sorted(_CUDA_SUPPORTED_XCONE_KINDS)}."
+                "CUDA direct cones support kinds " f"{sorted(_CUDA_SUPPORTED_DIR_CONE_KINDS)}."
             )
 
 
-def _has_x_cones(cones) -> bool:
-    """True if the cones object carries any direct-x cone specs."""
-    x_cones = getattr(cones, "x_cones", None)
-    return bool(x_cones)
+def _has_dir_cones(cones) -> bool:
+    """True if the cones object carries any direct cone specs."""
+    dir_cones = getattr(cones, "dir_cones", None)
+    return bool(dir_cones)
 
 
-def _all_x_cones_cuda_supported(cones) -> bool:
+def _all_dir_cones_cuda_supported(cones) -> bool:
     """True if every x-cone kind is supported on the CUDA backend.
 
     CUDA forward + backward is wired for: nonneg, SOC (any dim),
     psd_triangle, exp, power, and gen_power.
     """
-    x_cones = getattr(cones, "x_cones", None) or []
-    for xc in x_cones:
+    dir_cones = getattr(cones, "dir_cones", None) or []
+    for xc in dir_cones:
         kind = getattr(xc, "kind", None)
-        if kind not in _CUDA_SUPPORTED_XCONE_KINDS:
+        if kind not in _CUDA_SUPPORTED_DIR_CONE_KINDS:
             return False
     return True
 
 
-def _require_cpu_device_for_x_cones(settings, cones) -> None:
-    """Validate direct-x device + enable_grad support.
+def _require_cpu_device_for_dir_cones(settings, cones) -> None:
+    """Validate direct device + enable_grad support.
 
     CUDA supports nonneg, SOC, psd_triangle, exp, power, and gen_power
-    direct-x forward and backward via the IFT-direct augmented-system path.
+    direct forward and backward via the IFT-direct augmented-system path.
     """
     if settings is None:
         return
     device = getattr(settings, "device", None)
     if device in (None, "auto", "cpu"):
         return
-    if device == "cuda" and _all_x_cones_cuda_supported(cones):
+    if device == "cuda" and _all_dir_cones_cuda_supported(cones):
         return
     raise NotImplementedError(
-        f"Direct-x cones (Cones.x_cones) are not yet supported on "
+        f"Direct cones (Cones.dir_cones) are not yet supported on "
         f"device={device!r} with the current cone mix. CUDA supports: "
-        f"{sorted(_CUDA_SUPPORTED_XCONE_KINDS)}."
+        f"{sorted(_CUDA_SUPPORTED_DIR_CONE_KINDS)}."
     )

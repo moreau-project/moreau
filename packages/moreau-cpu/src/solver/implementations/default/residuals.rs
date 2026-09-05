@@ -98,7 +98,7 @@ where
         // problems. Downstream `rx = rx_inf − Px − qτ` then automatically
         // picks up the direct-x contribution without a second scatter.
         let mut off = 0usize;
-        for xcone in &data.x_cones {
+        for xcone in &data.dir_cones {
             let indices = xcone.indices();
             for (k, &idx) in indices.iter().enumerate() {
                 self.rx_inf[idx] += variables.z_x[off + k];

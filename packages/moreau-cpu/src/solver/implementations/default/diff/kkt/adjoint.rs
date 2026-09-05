@@ -103,10 +103,10 @@ pub(super) fn build_placeholder_H_blocks<T: FloatT>(
 /// guarantee the augmented system builder takes the all-slot branch (no
 /// zero-skipping) regardless of which `ConeDerivativeBlock` variant.
 pub(super) fn build_placeholder_H_x_blocks<T: FloatT>(
-    x_cones: &[crate::solver::core::cones::SupportedXConeT],
+    dir_cones: &[crate::solver::core::cones::SupportedXConeT],
 ) -> Vec<ConeDerivativeBlock<T>> {
     use crate::solver::core::cones::SupportedXConeT;
-    x_cones
+    dir_cones
         .iter()
         .map(|xc| {
             let dim = xc.indices().len();
@@ -212,7 +212,7 @@ pub(super) fn compute_H_x_blocks<T: FloatT>(
     x: &[T],
     z_x_eq: &[T],
     xcone_indices: &[Vec<usize>],
-    x_cones: &[crate::solver::core::cones::SupportedXConeT],
+    dir_cones: &[crate::solver::core::cones::SupportedXConeT],
     slack_cones: &[SupportedConeT<T>],
     diff_method: DiffMethod,
     mu: T,
@@ -229,7 +229,7 @@ pub(super) fn compute_H_x_blocks<T: FloatT>(
                 }
                 off += ix.len();
             }
-            super::super::cones::get_cone_derivative_sparse_xcones(&u_x, x_cones, true)
+            super::super::cones::get_cone_derivative_sparse_xcones(&u_x, dir_cones, true)
         }
         DiffMethod::Smoothed => {
             // Gather s_x = x[J] alongside z_x_eq; central_path_derivative_cone
@@ -244,7 +244,7 @@ pub(super) fn compute_H_x_blocks<T: FloatT>(
                 off += ix.len();
             }
             super::super::cones::get_central_path_derivative_sparse_xcones(
-                &s_x, z_x_eq, x_cones, mu,
+                &s_x, z_x_eq, dir_cones, mu,
             )
         }
         DiffMethod::Auto => unreachable!(),
@@ -410,7 +410,7 @@ pub(super) fn extract_hsde_gradients_full<T: FloatT>(
 }
 
 /// Solve adjoint for HSDE using cached factorization. Handles both slack-only
-/// (`state.x_cones` empty, `z_x_eq` and `dz_x_bar_eq` empty) and direct-x
+/// (`state.dir_cones` empty, `z_x_eq` and `dz_x_bar_eq` empty) and direct-x
 /// augmented systems.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn solve_adjoint_hsde_cached<T: FloatT>(
@@ -453,14 +453,14 @@ pub(super) fn solve_adjoint_hsde_cached<T: FloatT>(
     debug_assert_eq!(cones_dim, m, "cones dim != m");
 
     let H_blocks = compute_H_blocks(s, z, cones, diff_method, mu);
-    let H_x_blocks = if state.x_cones.is_empty() {
+    let H_x_blocks = if state.dir_cones.is_empty() {
         Vec::new()
     } else {
         compute_H_x_blocks(
             x,
             z_x_eq,
             &state.xcone_indices,
-            &state.x_cones,
+            &state.dir_cones,
             cones,
             diff_method,
             mu,

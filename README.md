@@ -187,7 +187,7 @@ Full guides and API reference: **[moreau.so](https://moreau.so)**.
 - [Installation](docs/installation.md) · [Quickstart](docs/quickstart.md)
 - [Basic usage](docs/guide/basic-usage.md) · [Batching](docs/guide/batching.md) · [Solver settings](docs/guide/solver-settings.md)
 - [PyTorch](docs/guide/pytorch-integration.md) · [JAX](docs/guide/jax-integration.md) · [CVXPY](docs/guide/cvxpy-integration.md) · [cvxpylayers](docs/guide/cvxpylayers-integration.md)
-- [Direct-x cones](docs/guide/direct-x-cones.md) · [PSD cones](docs/guide/psd-cones.md) · [Warm starting](docs/guide/warm-starting.md)
+- [Direct-x cones](docs/guide/direct-cones.md) · [PSD cones](docs/guide/psd-cones.md) · [Warm starting](docs/guide/warm-starting.md)
 - [Device selection](docs/guide/device-selection.md) · [Julia](docs/guide/julia-integration.md) / [JuMP](docs/guide/jump-integration.md)
 
 ## Citation

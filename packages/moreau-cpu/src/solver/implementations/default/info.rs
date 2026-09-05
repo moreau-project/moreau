@@ -246,12 +246,12 @@ where
         // comparable across slack-only vs. direct-x problems — without it,
         // a certificate with small `‖z‖` but large `‖z_x‖` can inflate the
         // relative residual past `tol_infeas_rel · |b^T z|` and miss firing.
-        let norm_zx_d_cinv = if data.x_cones.is_empty() {
+        let norm_zx_d_cinv = if data.dir_cones.is_empty() {
             T::zero()
         } else {
             let mut sumsq = T::zero();
             let mut off = 0usize;
-            for xcone in &data.x_cones {
+            for xcone in &data.dir_cones {
                 let indices = xcone.indices();
                 for (k, &idx) in indices.iter().enumerate() {
                     let val = variables.z_x[off + k] * d[idx];

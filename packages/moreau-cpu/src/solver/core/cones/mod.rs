@@ -7,7 +7,7 @@ use enum_dispatch::*;
 // the supported cone wrapper type for primitives
 // and the composite cone
 mod compositecone;
-mod compositexcone;
+mod compositedirectcone;
 mod supportedcone;
 // primitive cone types
 mod expcone;
@@ -23,8 +23,8 @@ mod symmetric_common;
 //re-export everything to appear as one module
 use nonsymmetric_common::*;
 pub use {
-    compositecone::*, compositexcone::*, expcone::*, genpowcone::*, nonnegativecone::*, powcone::*,
-    socone::*, supportedcone::*, symmetric_common::*, zerocone::*,
+    compositecone::*, compositedirectcone::*, expcone::*, genpowcone::*, nonnegativecone::*,
+    powcone::*, socone::*, supportedcone::*, symmetric_common::*, zerocone::*,
 };
 
 // only use PSD cones with SDP/Blas enabled

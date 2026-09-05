@@ -60,10 +60,10 @@ class SolverStatus(IntEnum):
         return self.name
 
 
-class XConeSpec(BaseModel):
-    """Direct-x cone specification: constrain x[indices] ∈ K_{kind}.
+class DirectConeSpec(BaseModel):
+    """Direct cone specification: constrain x[indices] ∈ K_{kind}.
 
-    Unlike slack cones (constraints ``Ax + s = b`` with ``s ∈ K``), a direct-x
+    Unlike slack cones (constraints ``Ax + s = b`` with ``s ∈ K``), a direct
     cone constrains a subvector of the primal variable ``x`` directly. This
     avoids introducing a slack variable and can be significantly faster.
 
@@ -82,11 +82,11 @@ class XConeSpec(BaseModel):
             ``(0, 1)``.
 
     Example:
-        >>> spec_soc = XConeSpec(kind='soc', indices=[3, 4, 5, 6])
-        >>> spec_nn = XConeSpec(kind='nonneg', indices=[7])
-        >>> spec_psd = XConeSpec(kind='psd_triangle', indices=list(range(6)), psd_k=3)
-        >>> spec_exp = XConeSpec(kind='exp', indices=[0, 1, 2])
-        >>> spec_pow = XConeSpec(kind='power', indices=[0, 1, 2], alpha=0.5)
+        >>> spec_soc = DirectConeSpec(kind='soc', indices=[3, 4, 5, 6])
+        >>> spec_nn = DirectConeSpec(kind='nonneg', indices=[7])
+        >>> spec_psd = DirectConeSpec(kind='psd_triangle', indices=list(range(6)), psd_k=3)
+        >>> spec_exp = DirectConeSpec(kind='exp', indices=[0, 1, 2])
+        >>> spec_pow = DirectConeSpec(kind='power', indices=[0, 1, 2], alpha=0.5)
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -102,12 +102,12 @@ class XConeSpec(BaseModel):
     @classmethod
     def validate_indices(cls, v: List[int]) -> List[int]:
         if len(v) == 0:
-            raise ValueError("XConeSpec.indices must be non-empty")
+            raise ValueError("DirectConeSpec.indices must be non-empty")
         if len(set(v)) != len(v):
-            raise ValueError(f"XConeSpec.indices contains duplicates: {v}")
+            raise ValueError(f"DirectConeSpec.indices contains duplicates: {v}")
         for idx in v:
             if idx < 0:
-                raise ValueError(f"XConeSpec.indices must be non-negative, got {idx}")
+                raise ValueError(f"DirectConeSpec.indices must be non-negative, got {idx}")
         return v
 
     @model_validator(mode="after")
@@ -206,9 +206,9 @@ class Cones(BaseModel):
             Each element is (alphas, dim2) where alphas is a list of positive
             floats summing to 1 (length = dim1) and dim2 >= 1. Total cone
             dimension is dim1 + dim2.
-        x_cones: List of direct-x cone specifications constraining subvectors
-            of ``x`` directly (see :class:`XConeSpec`). Indices across all
-            entries must be pairwise disjoint. Direct-x cones are additive
+        dir_cones: List of direct cone specifications constraining subvectors
+            of ``x`` directly (see :class:`DirectConeSpec`). Indices across all
+            entries must be pairwise disjoint. Direct cones are additive
             to the slack cones above; they do not consume rows of ``A`` or ``b``.
 
     Example:
@@ -217,8 +217,8 @@ class Cones(BaseModel):
         >>> cones = Cones(num_zero_cones=1, num_nonneg_cones=2, num_so_cones=2)
         >>> # GenPowerCone: alphas=[0.3, 0.7], dim2=2 => total dim = 4
         >>> cones = Cones(gen_power_cone_params=[([0.3, 0.7], 2)])
-        >>> # Direct-x nonneg: x[3] >= 0 without an extra slack row
-        >>> cones = Cones(x_cones=[XConeSpec(kind='nonneg', indices=[3])])
+        >>> # Direct nonneg: x[3] >= 0 without an extra slack row
+        >>> cones = Cones(dir_cones=[DirectConeSpec(kind='nonneg', indices=[3])])
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -230,7 +230,7 @@ class Cones(BaseModel):
     power_alphas: List[float] = Field(default_factory=list)
     gen_power_cone_params: List[Tuple[List[float], int]] = Field(default_factory=list)
     psd_dims: List[int] = Field(default_factory=list)
-    x_cones: List[XConeSpec] = Field(default_factory=list)
+    dir_cones: List[DirectConeSpec] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -262,17 +262,17 @@ class Cones(BaseModel):
                 raise ValueError(f"power_alphas[{i}] = {alpha} must be in (0, 1)")
         return v
 
-    @field_validator("x_cones")
+    @field_validator("dir_cones")
     @classmethod
-    def validate_x_cones_disjoint(cls, v: List[XConeSpec]) -> List[XConeSpec]:
-        """Ensure indices are pairwise disjoint across all direct-x cones."""
+    def validate_dir_cones_disjoint(cls, v: List[DirectConeSpec]) -> List[DirectConeSpec]:
+        """Ensure indices are pairwise disjoint across all direct cones."""
         seen: Dict[int, int] = {}
         for i, spec in enumerate(v):
             for idx in spec.indices:
                 if idx in seen:
                     raise ValueError(
-                        f"x_cones index {idx} appears in both x_cones[{seen[idx]}] "
-                        f"and x_cones[{i}]"
+                        f"dir_cones index {idx} appears in both dir_cones[{seen[idx]}] "
+                        f"and dir_cones[{i}]"
                     )
                 seen[idx] = i
         return v
@@ -357,13 +357,13 @@ class Cones(BaseModel):
             # GenPowerCone degree = dim1 + 1
             deg += len(alphas) + 1
         deg += sum(self.psd_dims)
-        for spec in self.x_cones:
+        for spec in self.dir_cones:
             if spec.kind == "nonneg":
                 deg += len(spec.indices)
             elif spec.kind == "soc":
                 deg += 1
             elif spec.kind == "psd_triangle":
-                assert spec.psd_k is not None  # enforced by XConeSpec.validate_kind_size
+                assert spec.psd_k is not None  # enforced by DirectConeSpec.validate_kind_size
                 deg += spec.psd_k
             elif spec.kind == "exp":
                 deg += 3
@@ -374,15 +374,15 @@ class Cones(BaseModel):
                 deg += len(spec.alphas) + 1
         return deg
 
-    def validate_x_cone_indices(self, n: int) -> None:
-        """Validate that all x_cones indices lie in ``[0, n)``.
+    def validate_dir_cone_indices(self, n: int) -> None:
+        """Validate that all dir_cones indices lie in ``[0, n)``.
 
         Called by the Solver once ``n`` is known (Cones alone cannot check).
         """
-        for i, spec in enumerate(self.x_cones):
+        for i, spec in enumerate(self.dir_cones):
             for idx in spec.indices:
                 if idx >= n:
-                    raise ValueError(f"x_cones[{i}].indices contains {idx} which is >= n={n}")
+                    raise ValueError(f"dir_cones[{i}].indices contains {idx} which is >= n={n}")
 
 
 class IPMSettings(BaseModel):
@@ -471,8 +471,8 @@ class IPMSettings(BaseModel):
     warm_start_no_retry: Optional[FrozenSet[SolverStatus]] = None
 
     # Chordal decomposition for sparse PSD slack cones. Default True.
-    # Disable when mixing slack PSD with direct-x cones (chordal augmentation
-    # adds primal slack vars; direct-x indices are anchored at the original
+    # Disable when mixing slack PSD with direct cones (chordal augmentation
+    # adds primal slack vars; direct indices are anchored at the original
     # x[J] partitions and the augmentation map doesn't yet thread them).
     chordal_decomposition_enable: bool = True
 
@@ -702,8 +702,8 @@ class WarmStart:
         x: Primal variables, shape (n,)
         z: Dual variables, shape (m,)
         s: Slack variables, shape (m,)
-        z_x: Direct-x cone duals, shape (sum |J|,) or None for problems
-            without direct-x cones.
+        z_x: Direct cone duals, shape (sum |J|,) or None for problems
+            without direct cones.
     """
 
     x: "np.ndarray"
@@ -727,7 +727,7 @@ class BatchedWarmStart:
         x: Primal variables, shape (batch_size, n)
         z: Dual variables, shape (batch_size, m)
         s: Slack variables, shape (batch_size, m)
-        z_x: Direct-x cone duals, shape (batch_size, sum |J|) or None.
+        z_x: Direct cone duals, shape (batch_size, sum |J|) or None.
     """
 
     x: "np.ndarray"
@@ -802,9 +802,9 @@ class Solution:
         x: Primal solution vector, shape (n,)
         z: Dual variable (Lagrange multipliers), shape (m,)
         s: Slack variable, shape (m,)
-        z_x: Direct-x cone duals, flat over `Cones.x_cones` in spec order
+        z_x: Direct cone duals, flat over `Cones.dir_cones` in spec order
             (length = sum of cone dimensions). Empty array when the
-            problem has no direct-x cones.
+            problem has no direct cones.
 
     Example:
         >>> solution = solver.solve(q, b)
@@ -880,8 +880,8 @@ class BatchedSolution:
         x: Primal solutions, shape (batch_size, n)
         z: Dual variables, shape (batch_size, m)
         s: Slack variables, shape (batch_size, m)
-        z_x: Direct-x cone duals, shape (batch_size, total_xn). Empty
-            (shape `(batch_size, 0)`) when there are no direct-x cones.
+        z_x: Direct cone duals, shape (batch_size, total_xn). Empty
+            (shape `(batch_size, 0)`) when there are no direct cones.
 
     Example:
         >>> solution = solver.solve(q_batch, b_batch)
@@ -1077,7 +1077,7 @@ __all__ = [
     "SolverType",
     "SolverStatus",
     "Cones",
-    "XConeSpec",
+    "DirectConeSpec",
     "Settings",
     "IPMSettings",
     "ActiveSetSettings",
