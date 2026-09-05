@@ -32,9 +32,9 @@ Moreau Solver Diagnostics
 
 Core Packages:
 ----------------------------------------
-  ✓ moreau: 0.4.0-beta.1
-  ✓ moreau-cpu: 0.4.0-beta.1
-  ✓ moreau-cuda: 0.4.0-beta.1
+  ✓ moreau: 0.4.0
+  ✓ moreau-cpu: 0.4.0
+  ✓ moreau-cuda: 0.4.0
 
 Device Backends:
 ----------------------------------------

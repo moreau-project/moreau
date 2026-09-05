@@ -179,7 +179,7 @@ div.highlight-bash::before {
 
 /* Version badge in sidebar */
 .sidebar-brand-text::after {
-    content: "v0.4.0-beta.1";
+    content: "v0.4.0";
     display: inline-block;
     font-size: 0.65rem;
     background: var(--color-brand-primary);

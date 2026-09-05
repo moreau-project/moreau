@@ -228,14 +228,14 @@ solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
 | Python | >= 3.9 | Runtime |
 | NumPy | >= 1.19.0 | Array operations |
 | Pydantic | >= 2.0.0 | Data validation |
-| moreau-cpu | >= 0.4.0-beta.1 | CPU solver backend |
+| moreau-cpu | >= 0.4.0 | CPU solver backend |
 :::
 
 :::{dropdown} Optional Dependencies
 | Package | Version | Purpose |
 |---------|---------|---------|
-| moreau-cuda12 | >= 0.4.0-beta.1 | GPU solver backend (CUDA 12, Python >= 3.12) |
-| moreau-cuda13 | >= 0.4.0-beta.1 | GPU solver backend (CUDA 13, Python >= 3.12) |
+| moreau-cuda12 | >= 0.4.0 | GPU solver backend (CUDA 12, Python >= 3.12) |
+| moreau-cuda13 | >= 0.4.0 | GPU solver backend (CUDA 13, Python >= 3.12) |
 | PyTorch | >= 2.4 | PyTorch integration |
 | JAX | >= 0.4.0 | JAX integration |
 | SciPy | >= 1.6.0 | Sparse matrix construction (used in examples) |

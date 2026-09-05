@@ -49,7 +49,7 @@ Example (CompiledSolver - multiple problems):
     print(solution.x.shape, solver.info.status[0])
 """
 
-__version__ = "0.4.0-beta.1"
+__version__ = "0.4.0"
 
 # Import CPU backend types
 import numpy as np

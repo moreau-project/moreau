@@ -28,7 +28,7 @@
 namespace moreau {
 
 // Version string
-constexpr const char* VERSION = "0.4.0-beta.1";
+constexpr const char* VERSION = "0.4.0";
 
 #ifdef MOREAU_DEBUG
 // Full per-iteration debug: prints every element of every vector (matches CPU format)

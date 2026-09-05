@@ -1,19 +1,20 @@
 # Test wheels from a GitHub Release.
 #
 # Run this after release.yml creates a GitHub Release to validate the artifacts.
-# Can be re-triggered after updating test code.
+# Can be re-triggered for the same release tag.
 #
 # Usage:
-#   gh workflow run test-release.yml -f release_tag=v0.2.0
+#   gh workflow run test-release.yml --ref v0.4.0 -f release_tag=v0.4.0
 #   gh workflow run test-release.yml -f release_tag=dev-20260313-120000
 
 name: Test Release
+run-name: Test Release ${{ inputs.release_tag }}
 
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'GitHub Release tag to test (e.g., v0.2.0 or dev-20260313-120000)'
+        description: 'GitHub Release tag to test (e.g., v0.4.0 or dev-20260313-120000)'
         required: true
         type: string
 
@@ -40,6 +41,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
 
       - name: Install gh CLI
         run: |
@@ -88,11 +91,10 @@ jobs:
           import moreau_cpu._cpu_solver as mc
           print(f"Python {pyver}: CPU native extension OK: {mc}")
           # Test CUDA native extension (via __init__.py which preloads nvidia libs)
-          try:
-              import moreau_cuda
-              print(f"Python {pyver}: CUDA native extension OK: {moreau_cuda}")
-          except ImportError as e:
-              print(f"Python {pyver}: CUDA import failed: {e}")
+          import moreau_cuda
+          import moreau
+          assert moreau.device_available("cuda"), moreau.device_error("cuda")
+          print(f"Python {pyver}: CUDA native extension OK: {moreau_cuda}")
           PYEOF
 
           docker run --rm --gpus all \
@@ -125,7 +127,7 @@ jobs:
 
               # Install GPU wheel (pulls nvidia-cudss, nvidia-cusolver, etc. from PyPI)
               pip install /dist-gpu/*.whl
-              python -c "import moreau; print('"'"'GPU available:'"'"', moreau.device_available('"'"'cuda'"'"'))"
+              python -c "import moreau; print('"'"'GPU available:'"'"', moreau.device_available('"'"'cuda'"'"')); assert moreau.device_available('"'"'cuda'"'"'), moreau.device_error('"'"'cuda'"'"')"
 
               # === abi3 import tests (frontloaded - fast check before heavy deps) ===
               echo ""
@@ -180,6 +182,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
 
       - uses: actions/setup-python@v5
         with:
@@ -234,11 +238,50 @@ jobs:
           /tmp/test_env_main/bin/pip install pytest numpy scipy hypothesis cvxpy clarabel
           /tmp/test_env_main/bin/pytest packages/moreau/tests/python/ -v --tb=short
 
-  # Julia tests: install Julia packages from release tarball + C lib tarball, run Pkg.test
+  # Validate both Linux CPU architectures without depending on GPU runners.
+  test-cpu-linux:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download CPU release wheels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          gh release download "$RELEASE_TAG" --dir dist \
+            --pattern "moreau_cpu-*manylinux*${ARCH}.whl" \
+            --pattern 'moreau-*-py3-none-any.whl'
+
+      - name: Install and test release wheels
+        run: |
+          pip install dist/*.whl
+          pip install pytest numpy scipy hypothesis cvxpy clarabel
+          pytest packages/moreau/tests/python/ packages/moreau-cpu/tests/python/ \
+            --device=cpu -v --tb=short -rs
+
+  # Julia tests: resolve native libraries through the release artifact manifest.
   test-julia:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
 
       - name: Download release assets
         env:
@@ -251,7 +294,7 @@ jobs:
           echo "=== Release assets ==="
           ls -la dist-all/
 
-      - name: Extract Julia source and C library
+      - name: Extract Julia source
         run: |
           # Extract Julia source tarball
           mkdir -p julia-src
@@ -259,23 +302,15 @@ jobs:
           echo "=== Julia source ==="
           find julia-src -type f | head -30
 
-          # Extract CPU .so from C lib tarball (Linux x86_64)
-          mkdir -p lib-root
-          tar xzf dist-all/moreau-cpu-linux-x86_64.tar.gz -C lib-root
-          echo "=== Extracted library ==="
-          ls -la lib-root/lib/
-
       - name: Setup Julia
-        uses: julia-actions/setup-julia@v2
+        uses: julia-actions/setup-julia@v3
         with:
-          version: '1'
+          version: '1.12'
 
       - name: Run Julia tests
-        env:
-          MOREAU_CPU_LIB: ${{ github.workspace }}/lib-root/lib/libmoreau_cpu.so
         run: |
           # Run Moreau.jl tests using its own Project.toml as the environment
-          # (so [sources] relative paths to JLL packages resolve correctly)
+          # and let Artifacts.toml resolve the released CPU binary.
           julia --project=julia-src/Moreau.jl -e '
             using Pkg
             Pkg.Registry.add("General")
@@ -283,9 +318,10 @@ jobs:
             Pkg.test()
           '
 
-          # Run internal tests from the repo checkout
+          # Use the same released package for the internal integration tests.
           julia --project=packages/moreau-julia/MoreauTests.jl -e '
             using Pkg
+            Pkg.develop(path="julia-src/Moreau.jl")
             Pkg.resolve()
             Pkg.test()
           '

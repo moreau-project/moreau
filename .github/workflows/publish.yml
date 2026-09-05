@@ -3,7 +3,7 @@
 # Run this AFTER creating a GitHub Release (via release.yml) and completing QA.
 #
 # Usage:
-#   gh workflow run publish.yml -f release_tag=v0.2.0
+#   gh workflow run publish.yml -f release_tag=v0.4.0
 #   gh workflow run publish.yml -f release_tag=dev-20260313-120000
 
 name: Publish
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'GitHub Release tag to publish (e.g., v0.2.0 or dev-20260313-120000)'
+        description: 'GitHub Release tag to publish (e.g., v0.4.0 or dev-20260313-120000)'
         required: true
         type: string
 
@@ -20,11 +20,35 @@ jobs:
   publish:
     runs-on: ubuntu-latest
 
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
     permissions:
       contents: read
+      actions: read
       id-token: write
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - name: Require successful QA for this release commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
+            --limit 100 --json displayTitle,conclusion,status,url > qa-runs.json
+          python3 - <<'PYQA'
+          import json, os
+          title = "Test Release " + os.environ["RELEASE_TAG"]
+          runs = [run for run in json.load(open("qa-runs.json")) if run["displayTitle"] == title]
+          if not runs or runs[0]["status"] != "completed" or runs[0]["conclusion"] != "success":
+              raise SystemExit("The latest QA run for this release commit must pass before publishing")
+          print("QA passed:", runs[0]["url"])
+          PYQA
+
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -44,6 +68,12 @@ jobs:
           echo "=== Wheels for PyPI ==="
           ls -la dist-pypi/
 
+      - name: Validate wheels and resolve their version
+        id: version
+        run: |
+          python3 scripts/validate_release_wheels.py dist-pypi --require-complete --version-output release-version.txt
+          echo "version=$(cat release-version.txt)" >> "$GITHUB_OUTPUT"
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -56,19 +86,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Extract version from release tag
-        id: version
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          # v0.2.1 -> 0.2.1, dev-20260313-120000 -> extract from wheel later
-          VERSION="${RELEASE_TAG#v}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Wait for PyPI to index all packages at this version
         # The publish job's upload returns 200 OK before PyPI's simple index
@@ -78,7 +101,7 @@ jobs:
         # real install uses), exit the step as soon as PyPI agrees, and fail
         # the job if it isn't consistent within 5 minutes.
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.publish.outputs.version }}
         run: |
           set -u
           PKGS=(moreau moreau-cpu moreau-cuda12 moreau-cuda13)
@@ -99,13 +122,13 @@ jobs:
 
       - name: Install from PyPI and test
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.publish.outputs.version }}
         run: |
           pip install --upgrade pip
-          pip install "moreau==$VERSION"
+          pip install "moreau==$VERSION" "moreau-cpu==$VERSION"
           python -c "import moreau; print('moreau OK:', moreau.__version__)"
           pip install pytest numpy scipy hypothesis cvxpy clarabel
-          pytest packages/moreau/tests/python/ -v --tb=short
+          pytest packages/moreau/tests/python/ -v --tb=short --device=cpu -rs
 
   # Fast-forward the `release` branch to the published tag so the out-of-band
   # docs build picks up the version users actually install from PyPI. Only

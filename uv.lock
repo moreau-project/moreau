@@ -420,7 +420,7 @@ wheels = [
 
 [[package]]
 name = "moreau"
-version = "0.4.0-beta.1"
+version = "0.4.0"
 source = { editable = "packages/moreau" }
 dependencies = [
     { name = "moreau-cpu" },
@@ -455,9 +455,9 @@ requires-dist = [
     { name = "cvxpy", marker = "extra == 'test'", specifier = ">=1.4.0" },
     { name = "moreau", extras = ["cuda", "torch"], marker = "extra == 'all'", editable = "packages/moreau" },
     { name = "moreau-cpu", editable = "packages/moreau-cpu" },
-    { name = "moreau-cuda12", marker = "extra == 'cuda'", specifier = ">=0.4.0-beta.1" },
-    { name = "moreau-cuda12", marker = "extra == 'cuda12'", specifier = ">=0.4.0-beta.1" },
-    { name = "moreau-cuda13", marker = "extra == 'cuda13'", specifier = ">=0.4.0-beta.1" },
+    { name = "moreau-cuda12", marker = "extra == 'cuda'", specifier = ">=0.4.0" },
+    { name = "moreau-cuda12", marker = "extra == 'cuda12'", specifier = ">=0.4.0" },
+    { name = "moreau-cuda13", marker = "extra == 'cuda13'", specifier = ">=0.4.0" },
     { name = "numpy", specifier = ">=1.19.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
@@ -467,7 +467,7 @@ provides-extras = ["cuda", "cuda12", "cuda13", "torch", "test", "all"]
 
 [[package]]
 name = "moreau-cpu"
-version = "0.4.0-beta.1"
+version = "0.4.0"
 source = { editable = "packages/moreau-cpu" }
 dependencies = [
     { name = "numpy" },
@@ -495,7 +495,7 @@ provides-extras = ["torch", "test"]
 
 [[package]]
 name = "moreau-cuda"
-version = "0.4.0-beta.1"
+version = "0.4.0"
 source = { editable = "packages/moreau-cuda" }
 dependencies = [
     { name = "cuda-toolkit", extra = ["cudart", "cusolver", "cusparse", "nvjitlink"] },
@@ -533,7 +533,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/0d/05/d0f6c2ab1832cd0a0
 
 [[package]]
 name = "moreau-workspace"
-version = "0.4.0-beta.1"
+version = "0.4.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "moreau-cpu"
-version = "0.4.0-beta.1"
+version = "0.4.0"
 description = "Moreau CPU solver: Conic interior-point optimization in Rust"
 readme = "README.md"
 license = {text = "Apache-2.0"}

@@ -7,12 +7,14 @@ on:
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
       - '.github/workflows/ci-cpu.yml'
+      - 'scripts/**'
   pull_request:
     branches: [ main ]
     paths:
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
       - '.github/workflows/ci-cpu.yml'
+      - 'scripts/**'
   workflow_dispatch:
   workflow_call:
 
@@ -76,6 +78,9 @@ jobs:
       run: |
         python -c "import moreau; print(f'Version: {moreau.__version__}')"
         python -c "from moreau import Cones, Solver; print('Imports OK')"
+
+    - name: Test release tooling
+      run: pytest scripts/tests/ -q
 
     - name: Clone upstream test repos
       run: |
