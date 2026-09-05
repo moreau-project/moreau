@@ -59,7 +59,7 @@ bool WoodburyKKTData::isCompatible(
     // Direct-x cones: nonneg only (diagonal H_primal). SOC, PSD, and the
     // asymmetric kinds break the diagonal-(1,1) structure that Woodbury
     // exploits.
-    for (const auto& xc : cones.x_cones) {
+    for (const auto& xc : cones.dir_cones) {
         if (xc.kind != XConeKind::Nonneg) return false;
     }
 
@@ -101,7 +101,7 @@ bool WoodburyKKTData::isCompatible(
             covered[A_ci[A_ro[i]]] = true;
         }
     }
-    for (const auto& xc : cones.x_cones) {
+    for (const auto& xc : cones.dir_cones) {
         for (int64_t idx : xc.indices) {
             if (idx >= 0 && idx < n) covered[idx] = true;
         }
@@ -185,10 +185,10 @@ WoodburyKKTData::WoodburyKKTData(
 
     // Direct-x nonneg cones: collapse all nonneg x-cones into a flat list of
     // (x_index, hs_offset) pairs. cones.xcone_Hs is laid out per cone block;
-    // walk x_cones in order and accumulate the per-cone offset.
+    // walk dir_cones in order and accumulate the per-cone offset.
     {
         int64_t hs_off = 0;
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             // isCompatible has already enforced kind == Nonneg.
             for (int64_t k = 0; k < static_cast<int64_t>(xc.indices.size()); ++k) {
                 xn_idx_host_.push_back(xc.indices[k]);

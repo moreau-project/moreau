@@ -423,8 +423,8 @@ impl<'a> FromPyObject<'a> for PySupportedXCone {
     }
 }
 
-pub(crate) fn _py_to_native_x_cones(x_cones: Vec<PySupportedXCone>) -> Vec<SupportedXConeT> {
-    x_cones.into_iter().map(|c| c.into()).collect()
+pub(crate) fn _py_to_native_dir_cones(dir_cones: Vec<PySupportedXCone>) -> Vec<SupportedXConeT> {
+    dir_cones.into_iter().map(|c| c.into()).collect()
 }
 
 // We can't implement the foreign trait FromPyObject directly on

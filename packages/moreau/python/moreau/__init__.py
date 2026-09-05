@@ -63,7 +63,7 @@ from ._types import (
     SolverType,
     SolverStatus,
     Cones,
-    XConeSpec,
+    DirectConeSpec,
     Settings,
     IPMSettings,
     ActiveSetSettings,
@@ -119,14 +119,14 @@ from ._validation import (
     _validate_P_values_symmetry,
 )
 
-# Direct-x cone dispatch helpers (private). `_resolve_solver_type` and
-# `_require_x_cones_compatible` are also imported by the torch/jax modules.
+# Direct cone dispatch helpers (private). `_resolve_solver_type` and
+# `_require_dir_cones_compatible` are also imported by the torch/jax modules.
 from ._dispatch import (
     _resolve_solver_type,
     _resolve_settings_and_device,
-    _require_x_cones_compatible,
-    _has_x_cones,
-    _require_cpu_device_for_x_cones,
+    _require_dir_cones_compatible,
+    _has_dir_cones,
+    _require_cpu_device_for_dir_cones,
 )
 
 
@@ -193,7 +193,7 @@ class Solver:
         subject to  Ax + s = b
                     x ∈ K1,  s ∈ K2
 
-    K2 constrains the slack s; K1 constrains x directly (direct-x cones).
+    K2 constrains the slack s; K1 constrains x directly (direct cones).
 
     Args:
         P: Quadratic objective matrix (scipy sparse or numpy array).
@@ -232,22 +232,22 @@ class Solver:
         # Validate problem dimensions first (before any other processing)
         _validate_problem_dimensions(P, q, A, b, cones)
 
-        # Direct-x cones dispatch:
+        # Direct cones dispatch:
         #   - CPU: bypass the CompiledSolver-based backend and go through
         #     `DirectXSolverCpu` (wraps `DefaultSolver.new_with_xcones`,
         #     includes backward via HSDE unfold).
-        #   - CUDA: nonneg direct-x forward is handled natively by the
-        #     CompiledSolver device path (C++ side threads x_cones through
+        #   - CUDA: nonneg direct forward is handled natively by the
+        #     CompiledSolver device path (C++ side threads dir_cones through
         #     Cones/KKT/IPM). Fall through to the normal device init.
-        if _has_x_cones(cones):
-            _require_cpu_device_for_x_cones(settings, cones)
+        if _has_dir_cones(cones):
+            _require_cpu_device_for_dir_cones(settings, cones)
             dev = getattr(settings, "device", None) if settings is not None else None
             if dev in (None, "auto", "cpu"):
-                self._init_with_x_cones(P, q, A, b, cones, settings)
+                self._init_with_dir_cones(P, q, A, b, cones, settings)
                 return
             # CUDA + nonneg x-cones: fall through to the standard device
             # init below. SOC x-cones on CUDA are blocked at
-            # _require_cpu_device_for_x_cones (and at Cones::initialize
+            # _require_cpu_device_for_dir_cones (and at Cones::initialize
             # on the C++ side).
 
         # Validate smoothed diff is only used with LP cones (zero + nonneg)
@@ -310,11 +310,11 @@ class Solver:
         # Last solve info (populated after solve())
         self._info: Optional[SolveInfo] = None
 
-    def _init_with_x_cones(self, P, q, A, b, cones, settings):
-        """Dispatch path for problems with direct-x cones (CPU).
+    def _init_with_dir_cones(self, P, q, A, b, cones, settings):
+        """Dispatch path for problems with direct cones (CPU).
 
         Routes through `DirectXSolverCpu`, which now wraps
-        `_cpu_solver.CompiledSolver` with `x_cones`. Symbolic
+        `_cpu_solver.CompiledSolver` with `dir_cones`. Symbolic
         factorisation runs once at construction; subsequent solves
         reuse the precompiled structure. Backward via `enable_grad=True`
         flows through `CompiledSolver.backward_flat`.
@@ -484,7 +484,7 @@ class Solver:
             kwargs["warm_z"] = warm_z.reshape(1, -1)
             kwargs["warm_s"] = warm_s.reshape(1, -1)
 
-            # Direct-x dual: thread warm_z_x through when the WarmStart
+            # Direct dual: thread warm_z_x through when the WarmStart
             # carries it. Backends that haven't been updated to accept
             # the kwarg fall back via the TypeError handler below.
             zx = getattr(warm_start, "z_x", None)
@@ -493,12 +493,12 @@ class Solver:
                 if zx_arr.size > 0:
                     total_x_dim = sum(
                         len(getattr(xc, "indices", []))
-                        for xc in (getattr(self._cones, "x_cones", None) or [])
+                        for xc in (getattr(self._cones, "dir_cones", None) or [])
                     )
                     if zx_arr.shape != (total_x_dim,):
                         raise ValueError(
                             f"warm_start.z_x shape {zx_arr.shape}, expected "
-                            f"({total_x_dim},) (sum of x_cones[*].indices length)"
+                            f"({total_x_dim},) (sum of dir_cones[*].indices length)"
                         )
                     kwargs["warm_z_x"] = zx_arr.reshape(1, -1)
 
@@ -581,7 +581,7 @@ class Solver:
         """Compute gradients via implicit differentiation using cached state.
 
         Pass `dz_x` (shape matching `Solution.z_x`) to backprop through the
-        direct-x cone duals. Defaults to None (no upstream on `z_x`).
+        direct cone duals. Defaults to None (no upstream on `z_x`).
         Both CPU and CUDA backends support dz_x.
 
         Returns:
@@ -689,7 +689,7 @@ class CompiledSolver:
         _validate_csr_structure(
             n, m, P_row_offsets, P_col_indices, A_row_offsets, A_col_indices, cones
         )
-        _require_x_cones_compatible(cones, settings)
+        _require_dir_cones_compatible(cones, settings)
 
         # Validate P sparsity pattern is symmetric (full symmetric required)
         # This catches structural issues early, before setup() is called
@@ -1106,7 +1106,7 @@ class CompiledSolver:
             kwargs["warm_z"] = warm_z
             kwargs["warm_s"] = warm_s
 
-            # Direct-x dual: thread warm_z_x through when the WarmStart
+            # Direct dual: thread warm_z_x through when the WarmStart
             # carries it and the backend accepts the kwarg. Backends that
             # haven't been updated silently fall back to the default
             # init via the C++ warmStart fallback (see solver.cpp
@@ -1119,13 +1119,13 @@ class CompiledSolver:
                         zx_arr = zx_arr.reshape(1, -1)
                     total_x_dim = sum(
                         len(getattr(xc, "indices", []))
-                        for xc in (getattr(self._cones, "x_cones", None) or [])
+                        for xc in (getattr(self._cones, "dir_cones", None) or [])
                     )
                     if zx_arr.shape != (self._batch_size, total_x_dim):
                         raise ValueError(
                             f"warm_start.z_x shape {zx_arr.shape}, expected "
                             f"({self._batch_size}, {total_x_dim}) "
-                            f"(batch_size × sum of x_cones[*].indices length)"
+                            f"(batch_size × sum of dir_cones[*].indices length)"
                         )
                     kwargs["warm_z_x"] = zx_arr
 
@@ -1222,7 +1222,7 @@ class CompiledSolver:
         """Compute gradients via implicit differentiation using cached state.
 
         Pass `dz_x` (shape matching `Solution.z_x`) to backprop through the
-        direct-x cone duals. Defaults to None (no upstream on `z_x`).
+        direct cone duals. Defaults to None (no upstream on `z_x`).
         Both CPU and CUDA backends support dz_x.
 
         Returns:
@@ -1283,7 +1283,7 @@ __all__ = [
     "Solver",
     "CompiledSolver",
     "Cones",
-    "XConeSpec",
+    "DirectConeSpec",
     "Settings",
     "IPMSettings",
     "ActiveSetSettings",

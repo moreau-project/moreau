@@ -107,7 +107,7 @@ TEST(XConeAsymmBackwardCuda, ExpDirectXMatchesSlack) {
         std::vector<int64_t> A_ci = {};
 
         Cones cones{};
-        cones.x_cones.push_back(SupportedXConeT{XConeKind::Exp, {0, 1, 2}});
+        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Exp, {0, 1, 2}});
 
         Settings settings;
         settings.verbose = false;
@@ -228,7 +228,7 @@ TEST(XConeAsymmBackwardCuda, PowerDirectXMatchesSlack) {
         pow_xc.kind = XConeKind::Power;
         pow_xc.indices = {0, 1, 2};
         pow_xc.power_alpha = alpha;
-        cones.x_cones.push_back(std::move(pow_xc));
+        cones.dir_cones.push_back(std::move(pow_xc));
 
         Settings settings;
         settings.verbose = false;
@@ -346,7 +346,7 @@ TEST(XConeAsymmBackwardCuda, SOCDirectXMatchesSlackHighDim) {
         xc.kind = XConeKind::SOC;
         xc.indices.assign(n, 0);
         for (int i = 0; i < n; ++i) xc.indices[i] = i;
-        cones.x_cones.push_back(std::move(xc));
+        cones.dir_cones.push_back(std::move(xc));
 
         Settings settings;
         settings.verbose = false;
@@ -464,7 +464,7 @@ TEST(XConeAsymmBackwardCuda, GenPowerDirectXMatchesSlack3D) {
         gp_xc.indices = {0, 1, 2};
         gp_xc.gen_power_alphas = {0.5, 0.5};
         gp_xc.gen_power_dim2 = 1;
-        cones.x_cones.push_back(std::move(gp_xc));
+        cones.dir_cones.push_back(std::move(gp_xc));
 
         Settings settings;
         settings.verbose = false;
@@ -585,7 +585,7 @@ TEST(XConeAsymmBackwardCuda, GenPowerDirectXMatchesSlack) {
         gp_xc.indices = {0, 1, 2, 3};
         gp_xc.gen_power_alphas = {0.5, 0.5};
         gp_xc.gen_power_dim2 = 2;
-        cones.x_cones.push_back(std::move(gp_xc));
+        cones.dir_cones.push_back(std::move(gp_xc));
 
         Settings settings;
         settings.verbose = false;

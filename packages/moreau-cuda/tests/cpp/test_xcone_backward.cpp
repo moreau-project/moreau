@@ -109,7 +109,7 @@ TEST(XConeBackwardCuda, NonnegDirectXMatchesSlack) {
         std::vector<double>  b;      // empty
 
         Cones cones{};
-        cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
 
         Settings settings;
         settings.verbose = false;
@@ -227,7 +227,7 @@ TEST(XConeBackwardCuda, SOCDirectXMatchesSlack) {
         std::vector<int64_t> A_ci = {};
 
         Cones cones{};
-        cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
+        cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
 
         Settings settings;
         settings.verbose = false;
@@ -344,7 +344,7 @@ TEST(XConeBackwardCuda, PSDDirectXMatchesSlack) {
         Cones cones{};
         SupportedXConeT xc{XConeKind::PSD, {0, 1, 2}};
         xc.psd_k = 2;
-        cones.x_cones.push_back(xc);
+        cones.dir_cones.push_back(xc);
 
         Settings settings;
         settings.verbose = false;
@@ -415,7 +415,7 @@ TEST(XConeBackwardCuda, NonnegDirectXBatchedMatchesSingle) {
         -> std::pair<std::vector<double>, std::vector<double>>
     {
         Cones cones{};
-        cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
 
         Settings settings;
         settings.verbose = false;
@@ -494,7 +494,7 @@ TEST(XConeBackwardCuda, NonnegDirectXDzXMatchesFiniteDifference) {
         -> std::vector<double>
     {
         Cones cones{};
-        cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
 
         Settings settings;
         settings.verbose = false;
@@ -535,7 +535,7 @@ TEST(XConeBackwardCuda, NonnegDirectXDzXMatchesFiniteDifference) {
     auto solve_with_dz_x = [&](int j_dz_x) -> std::vector<double>
     {
         Cones cones{};
-        cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
 
         Settings settings;
         settings.verbose = false;
@@ -626,7 +626,7 @@ TEST(XConeBackwardCuda, WoodburyForwardDirectXBackwardMatchesCuDSS) {
                                   bool& is_woodbury) {
         Cones cones{};
         cones.numZeroCones = 1;
-        cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {1, 2}});
+        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {1, 2}});
 
         Settings settings;
         settings.verbose = false;

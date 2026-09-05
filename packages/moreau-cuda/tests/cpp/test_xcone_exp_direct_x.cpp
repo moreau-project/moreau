@@ -52,7 +52,7 @@ TEST(XConeExpDirectXTest, SimpleProblemConverges) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Exp, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Exp, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -129,7 +129,7 @@ TEST(XConeExpDirectXTest, StackedConesConverge) {
 
     Cones cones{};
     for (int k = 0; k < K; ++k) {
-        cones.x_cones.push_back(SupportedXConeT{
+        cones.dir_cones.push_back(SupportedXConeT{
             XConeKind::Exp,
             {3*k, 3*k+1, 3*k+2}
         });
@@ -193,7 +193,7 @@ TEST(XConeExpDirectXTest, BatchedSimpleProblem) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Exp, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Exp, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;

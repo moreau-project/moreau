@@ -310,7 +310,7 @@ impl PyCompiledSolver {
     /// * `num_threads` - Number of threads for parallel solve (None = auto-detect)
     /// * `enable_grad` - If True, pre-compute gradient structures for backward() (default: False)
     #[new]
-    #[pyo3(signature = (n, m, P_row_offsets, P_col_indices, A_row_offsets, A_col_indices, cones, settings=None, num_threads=None, enable_grad=false, x_cones=None, b_sparsity_pattern=None))]
+    #[pyo3(signature = (n, m, P_row_offsets, P_col_indices, A_row_offsets, A_col_indices, cones, settings=None, num_threads=None, enable_grad=false, dir_cones=None, b_sparsity_pattern=None))]
     fn new(
         n: usize,
         m: usize,
@@ -322,11 +322,11 @@ impl PyCompiledSolver {
         settings: Option<PyDefaultSettings>,
         num_threads: Option<usize>,
         enable_grad: bool,
-        x_cones: Option<Vec<super::cones_py::PySupportedXCone>>,
+        dir_cones: Option<Vec<super::cones_py::PySupportedXCone>>,
         b_sparsity_pattern: Option<Vec<bool>>,
     ) -> PyResult<Self> {
         let cones = _py_to_native_cones(cones);
-        let x_cones: Vec<crate::solver::core::cones::SupportedXConeT> = x_cones
+        let dir_cones: Vec<crate::solver::core::cones::SupportedXConeT> = dir_cones
             .unwrap_or_default()
             .into_iter()
             .map(Into::into)
@@ -352,7 +352,7 @@ impl PyCompiledSolver {
             &A_row_offsets,
             &A_col_indices,
             &cones,
-            &x_cones,
+            &dir_cones,
             settings,
             num_threads,
             enable_grad,

@@ -55,7 +55,7 @@ def test_cuda_torch_asymmetric_direct_x_kinds(kind, extra_kwargs, q_vals):
     A_ro = torch.tensor([0])
     A_ci = torch.tensor([], dtype=torch.int64)
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind=kind, indices=[0, 1, 2], **extra_kwargs)],
+        dir_cones=[moreau.DirectConeSpec(kind=kind, indices=[0, 1, 2], **extra_kwargs)],
     )
     settings = moreau.Settings(
         device="cuda",
@@ -104,7 +104,7 @@ def test_direct_x_warm_start_reduces_iters(device):
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1)]
+        dir_cones=[moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1)]
     )
 
     settings = moreau.Settings(
@@ -156,7 +156,7 @@ def test_direct_x_warm_start_without_z_x_uses_default_init(device):
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1)]
+        dir_cones=[moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1)]
     )
     settings = moreau.Settings(
         device=device,
@@ -190,18 +190,18 @@ def test_direct_x_warm_start_without_z_x_uses_default_init(device):
     )
 
 
-def test_active_set_solver_rejects_x_cones():
+def test_active_set_solver_rejects_dir_cones():
     """ActiveSetSolver only knows zero + nonneg slack cones. If a user
     explicitly forces ``solver='active_set'`` on a problem that carries
-    `cones.x_cones`, the solver previously silently dropped the direct-x
+    `cones.dir_cones`, the solver previously silently dropped the direct-x
     cones and returned a wrong (constraint-violating) solution. Validate
     that the constructor now errors loudly so the bug cannot recur.
     """
     n = 3
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])],
     )
-    with pytest.raises(ValueError, match="does not support direct-x cones"):
+    with pytest.raises(ValueError, match="does not support direct cones"):
         moreau.CompiledSolver(
             n=n,
             m=0,
@@ -240,9 +240,9 @@ def test_active_set_solver_rejects_exotic_slack_cones():
         )
 
 
-def test_cpu_torch_auto_solver_skips_active_set_when_x_cones():
-    """`Settings(device='cpu')` (auto) must NOT route x_cones problems
-    through the active-set CPU solver — active-set ignores x_cones and
+def test_cpu_torch_auto_solver_skips_active_set_when_dir_cones():
+    """`Settings(device='cpu')` (auto) must NOT route dir_cones problems
+    through the active-set CPU solver — active-set ignores dir_cones and
     silently produces a constraint-violating solution with empty z_x.
     Regression: the previous auto-resolver only checked slack cone
     counts; direct-x cones with zero+nonneg slack passed the QP-only
@@ -254,7 +254,7 @@ def test_cpu_torch_auto_solver_skips_active_set_when_x_cones():
     n = 4
     cones = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=list(range(n)))],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=list(range(n)))],
     )
     solver = TorchSolver(
         n=n,
@@ -309,7 +309,7 @@ def test_mixed_psd_exp_power_slack_order_with_direct_x(device):
         psd_dims=[2],
         num_exp_cones=1,
         power_alphas=[0.4],
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0])],
     )
     settings = moreau.Settings(
         device=device,
@@ -339,7 +339,7 @@ def _build_psd_dx_problem():
     b = np.zeros(3)
     cones = moreau.Cones(
         psd_dims=[2],
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[3])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[3])],
     )
     return P, q, A, b, cones
 
@@ -406,7 +406,7 @@ def test_cuda_torch_warm_start_with_direct_x():
     n = 4
     cones = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=list(range(n)))],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=list(range(n)))],
     )
     solver = TorchSolver(
         n=n,
@@ -453,7 +453,7 @@ def test_cuda_torch_dz_x_zerocopy_matches_numpy():
     q = np.array([2.0, 1.0, -1.0, 0.5])
     cones = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=list(range(n)))],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=list(range(n)))],
     )
 
     # Numpy reference
@@ -508,7 +508,7 @@ def test_woodbury_with_nonneg_direct_x_matches_cudss():
     b = np.array([1.0])
     cones = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=list(range(n)))],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=list(range(n)))],
     )
     s_cudss = moreau.Solver(
         P,

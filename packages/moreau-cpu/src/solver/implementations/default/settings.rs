@@ -591,7 +591,7 @@ fn test_reject_riccati_direct_solve_method_on_cpu() {
     // Riccati and Woodbury are GPU-only. On CPU, explicitly selecting
     // either must fail at settings validation time — this also forms
     // the direct-x gating: a user who sets `direct_solve_method='riccati'`
-    // and adds x_cones would see a clear settings error before any
+    // and adds dir_cones would see a clear settings error before any
     // cone-solver mismatch could surface. (CUDA enforces this separately
     // at the Riccati/Woodbury factory sites.)
     for method in ["riccati", "woodbury", "cudss"] {

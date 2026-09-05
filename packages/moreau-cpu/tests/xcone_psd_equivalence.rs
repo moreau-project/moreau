@@ -28,7 +28,7 @@ fn solve_slack_psd_qp(P: &CscMatrix<f64>, q: &[f64], k: usize) -> DefaultSolutio
     solver.solution
 }
 
-/// Direct-x PSD: same constraint via `x_cones = PSDTriangleXConeT(indices, k)`
+/// Direct-x PSD: same constraint via `dir_cones = PSDTriangleXConeT(indices, k)`
 /// on all of x.
 fn solve_direct_x_psd_qp(P: &CscMatrix<f64>, q: &[f64], k: usize) -> DefaultSolution<f64> {
     let n = k * (k + 1) / 2;
@@ -37,12 +37,12 @@ fn solve_direct_x_psd_qp(P: &CscMatrix<f64>, q: &[f64], k: usize) -> DefaultSolu
     let cones: Vec<SupportedConeT<f64>> = vec![];
 
     let indices: Vec<usize> = (0..n).collect();
-    let x_cones = vec![SupportedXConeT::PSDTriangleXConeT(indices, k)];
+    let dir_cones = vec![SupportedXConeT::PSDTriangleXConeT(indices, k)];
 
     let mut settings = DefaultSettings::default();
     settings.ipm.presolve_enable = false;
     let mut solver =
-        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, &x_cones, settings).unwrap();
+        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, &dir_cones, settings).unwrap();
     solver.solve();
     solver.solution
 }
@@ -190,7 +190,7 @@ fn test_mixed_chordal_slack_psd_plus_direct_x_psd() {
 
     let slack_cones = vec![SupportedConeT::PSDTriangleConeT(3)]; // size-3 slack
                                                                  // ^ Note: if we used PSDTriangleConeT(3), svec dim = 6 which matches m=6.
-    let x_cones = vec![SupportedXConeT::PSDTriangleXConeT(vec![0, 1, 2], 2)];
+    let dir_cones = vec![SupportedXConeT::PSDTriangleXConeT(vec![0, 1, 2], 2)];
 
     // Solve twice: with chordal disabled (reference) and with chordal enabled
     // (to check that chordal on slack side coexists with direct-x).
@@ -199,7 +199,7 @@ fn test_mixed_chordal_slack_psd_plus_direct_x_psd() {
         settings.ipm.presolve_enable = false;
         settings.ipm.chordal_decomposition_enable = chordal;
         let mut solver =
-            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &slack_cones, &x_cones, settings)
+            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &slack_cones, &dir_cones, settings)
                 .unwrap();
         solver.solve();
         solver.solution
@@ -286,11 +286,11 @@ fn test_backward_direct_x_psd_matches_slack() {
         let A = CscMatrix::<f64>::zeros((0, n));
         let b: Vec<f64> = vec![];
         let cones: Vec<SupportedConeT<f64>> = vec![];
-        let x_cones = vec![SupportedXConeT::PSDTriangleXConeT((0..n).collect(), 2)];
+        let dir_cones = vec![SupportedXConeT::PSDTriangleXConeT((0..n).collect(), 2)];
         let mut settings = DefaultSettings::default();
         settings.ipm.presolve_enable = false;
         let mut solver =
-            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, settings).unwrap();
+            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, settings).unwrap();
         solver.solve();
         assert_eq!(solver.solution.status, SolverStatus::Solved);
         let dz: Vec<f64> = vec![];

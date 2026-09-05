@@ -5,7 +5,7 @@ Run:
 
 Same problem instance runs through all four paths via `moreau.Solver`
 with `device='cpu'` vs `device='cuda'` and Cones configured for slack
-(non-empty `so_cone_dims`) vs direct-x (non-empty `x_cones`). Reports
+(non-empty `so_cone_dims`) vs direct-x (non-empty `dir_cones`). Reports
 wall-clock (mean / p95 / min), iterations, and pairwise speedups.
 """
 
@@ -156,7 +156,7 @@ def _make_single_soc(k: int, seed: int = 0) -> Dict[str, Callable[[], tuple]]:
         A = sparse.csr_matrix(np.zeros((0, k)))
         b = np.array([])
         cones = moreau.Cones(
-            x_cones=[moreau.XConeSpec(kind="soc", indices=list(range(k)))],
+            dir_cones=[moreau.DirectConeSpec(kind="soc", indices=list(range(k)))],
         )
         return _solve(P, q, A, b, cones, settings)
 
@@ -187,11 +187,11 @@ def _make_tiled_socs(n_soc: int, soc_dim: int, seed: int = 0) -> Dict[str, Calla
     def _direct(settings):
         A = sparse.csr_matrix(np.zeros((0, n)))
         b = np.array([])
-        x_cones = [
-            moreau.XConeSpec(kind="soc", indices=list(range(i * soc_dim, (i + 1) * soc_dim)))
+        dir_cones = [
+            moreau.DirectConeSpec(kind="soc", indices=list(range(i * soc_dim, (i + 1) * soc_dim)))
             for i in range(n_soc)
         ]
-        return _solve(P, q, A, b, cones=moreau.Cones(x_cones=x_cones), settings=settings)
+        return _solve(P, q, A, b, cones=moreau.Cones(dir_cones=dir_cones), settings=settings)
 
     return {
         "cpu-slack": lambda: _slack(s_cpu),
@@ -282,7 +282,7 @@ def _make_batched_single_soc(
     A_direct = sparse.csr_matrix(np.zeros((0, k)))
     b_direct = np.zeros((batch_size, 0))
     cones_direct = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="soc", indices=list(range(k)))],
+        dir_cones=[moreau.DirectConeSpec(kind="soc", indices=list(range(k)))],
     )
 
     return {
@@ -314,8 +314,8 @@ def _make_batched_tiled_socs(
     A_direct = sparse.csr_matrix(np.zeros((0, n)))
     b_direct = np.zeros((batch_size, 0))
     cones_direct = moreau.Cones(
-        x_cones=[
-            moreau.XConeSpec(kind="soc", indices=list(range(i * soc_dim, (i + 1) * soc_dim)))
+        dir_cones=[
+            moreau.DirectConeSpec(kind="soc", indices=list(range(i * soc_dim, (i + 1) * soc_dim)))
             for i in range(n_soc)
         ],
     )

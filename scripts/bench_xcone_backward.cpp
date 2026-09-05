@@ -92,7 +92,7 @@ struct GenPowProblem {
         for (int i = 0; i < n; ++i) xc.indices[i] = i;
         xc.gen_power_alphas = alphas;
         xc.gen_power_dim2 = static_cast<int64_t>(dim2);
-        cones_dx.x_cones.push_back(std::move(xc));
+        cones_dx.dir_cones.push_back(std::move(xc));
     }
 };
 
@@ -128,7 +128,7 @@ struct SocProblem {
         xc.kind = XConeKind::SOC;
         xc.indices.assign(n, 0);
         for (int i = 0; i < n; ++i) xc.indices[i] = i;
-        cones_dx.x_cones.push_back(std::move(xc));
+        cones_dx.dir_cones.push_back(std::move(xc));
     }
 };
 

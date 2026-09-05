@@ -76,7 +76,7 @@ TEST(XConeGenPowDirectXTest, SimpleProblemConverges) {
     xc.indices = {0, 1, 2};
     xc.gen_power_alphas = alphas;
     xc.gen_power_dim2 = dim2;
-    cones.x_cones.push_back(xc);
+    cones.dir_cones.push_back(xc);
 
     Settings settings;
     settings.maxIter = 200;
@@ -143,7 +143,7 @@ TEST(XConeGenPowDirectXTest, HigherDimConverges) {
     xc.indices = {0, 1, 2, 3, 4};
     xc.gen_power_alphas = alphas;
     xc.gen_power_dim2 = dim2;
-    cones.x_cones.push_back(xc);
+    cones.dir_cones.push_back(xc);
 
     Settings settings;
     settings.maxIter = 300;
@@ -218,7 +218,7 @@ TEST(XConeGenPowDirectXTest, StackedConesConverge) {
         xc.indices = {3*k, 3*k+1, 3*k+2};
         xc.gen_power_alphas = alphas;
         xc.gen_power_dim2 = dim2;
-        cones.x_cones.push_back(xc);
+        cones.dir_cones.push_back(xc);
     }
 
     Settings settings;
@@ -286,7 +286,7 @@ TEST(XConeGenPowDirectXTest, ZeroPlusDirectXGenPowAutoSelectsCuDSS) {
     std::iota(xc.indices.begin(), xc.indices.end(), 0);
     xc.gen_power_alphas = alphas;
     xc.gen_power_dim2 = dim2;
-    cones.x_cones.push_back(xc);
+    cones.dir_cones.push_back(xc);
 
     Settings settings;
     settings.maxIter = 50;

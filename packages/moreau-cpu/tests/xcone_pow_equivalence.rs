@@ -37,7 +37,7 @@ fn test_pow_direct_x_scaffolding_does_not_crash() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::PowerXConeT((0..n).collect(), ALPHA)];
+    let dir_cones = vec![SupportedXConeT::PowerXConeT((0..n).collect(), ALPHA)];
 
     let mut settings = DefaultSettings::default();
     settings.ipm.presolve_enable = false;
@@ -46,7 +46,7 @@ fn test_pow_direct_x_scaffolding_does_not_crash() {
     settings.max_iter = 200;
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones, settings)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones, settings)
             .expect("PowerCone direct-x construction must succeed");
     solver.solve();
 
@@ -72,7 +72,7 @@ fn test_pow_direct_x_solves_simple_problem() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::PowerXConeT((0..n).collect(), ALPHA)];
+    let dir_cones = vec![SupportedXConeT::PowerXConeT((0..n).collect(), ALPHA)];
 
     let mut settings = DefaultSettings::default();
     settings.ipm.presolve_enable = false;
@@ -81,7 +81,7 @@ fn test_pow_direct_x_solves_simple_problem() {
     settings.max_iter = 200;
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones, settings)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones, settings)
             .unwrap();
     solver.solve();
     assert!(
@@ -118,7 +118,7 @@ fn test_pow_direct_x_stacked_solves() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones: Vec<SupportedXConeT> = (0..K)
+    let dir_cones: Vec<SupportedXConeT> = (0..K)
         .map(|k| SupportedXConeT::PowerXConeT(vec![3 * k, 3 * k + 1, 3 * k + 2], ALPHA))
         .collect();
 
@@ -129,7 +129,7 @@ fn test_pow_direct_x_stacked_solves() {
     settings.max_iter = 200;
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones, settings)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones, settings)
             .unwrap();
     solver.solve();
     assert!(
@@ -173,9 +173,9 @@ fn test_pow_direct_x_matches_slack() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::PowerXConeT((0..n).collect(), ALPHA)];
+    let dir_cones = vec![SupportedXConeT::PowerXConeT((0..n).collect(), ALPHA)];
     let mut d_solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones, settings)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones, settings)
             .unwrap();
     d_solver.solve();
     assert!(

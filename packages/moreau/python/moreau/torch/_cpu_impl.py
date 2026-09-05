@@ -176,11 +176,11 @@ class _TorchSolverCpu:
                     b_sparsity_pattern = [abs(float(v)) > 0 for v in b]
                 else:
                     b_sparsity_pattern = np.any(np.abs(b) > 0, axis=0).tolist()
-            # Pass the original `Cones` object (with x_cones intact) when
-            # available — moreau_cpu.Solver dispatches direct-x routing
-            # internally. cones_to_cpu strips x_cones.
+            # Pass the original `Cones` object (with dir_cones intact) when
+            # available — moreau_cpu.Solver dispatches direct routing
+            # internally. cones_to_cpu strips dir_cones.
             cones_for_solver = (
-                self._original_cones if hasattr(self._original_cones, "x_cones") else self._cones
+                self._original_cones if hasattr(self._original_cones, "dir_cones") else self._cones
             )
             self._batch_solver = moreau_cpu.Solver(
                 self._n,
@@ -296,7 +296,7 @@ class _TorchSolverCpu:
         solve_time = float(result["solve_time"])
         backward_state = result.get("_backward_state")
 
-        # Direct-x dual (z_x): empty 1D tensor when no x-cones.
+        # Direct dual (z_x): empty 1D tensor when no x-cones.
         z_x_arr = result.get("z_x")
         if z_x_arr is not None and getattr(z_x_arr, "size", 0):
             z_x = torch.from_numpy(np.asarray(z_x_arr)[0])
@@ -912,7 +912,7 @@ class _TorchSolverCpu:
         if state_lam_star is None:
             state_lam_star = torch.empty(batch_size, 0, dtype=torch.float64)
 
-        # Direct-x: pass z_x (saved direct-x dual) and dz_x (upstream
+        # Direct: pass z_x (saved direct dual) and dz_x (upstream
         # gradient on Solution.z_x) to backward_with_data_flat as kwargs.
         # Only forwarded when set; older Rust solvers / ActiveSet don't
         # accept the kwargs.

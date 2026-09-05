@@ -112,7 +112,7 @@ struct KKTData : public KKTSolver {
     //   - SOC sparse (dim > 4): k diagonal entries per cone; off-diagonal
     //     coupling lives in H_xcone_u/v_idx_ + H_xcone_exp_diag_idx_
     //     below (rank-2 expansion columns, mirror of slack SOC).
-    // Length: totalXConeHsEntries. Nullptr when x_cones is empty.
+    // Length: totalXConeHsEntries. Nullptr when dir_cones is empty.
     device_unique_ptr<int64_t> H_xcone_hs_idx_;
 
     // Direct-x sparse SOC expansion column indices.
@@ -200,7 +200,7 @@ struct KKTData : public KKTSolver {
             [&]{
                 int64_t n_sparse_xsoc = 0;
                 int64_t n_sparse_xgenpow = 0;
-                for (const auto& xc : cones.x_cones) {
+                for (const auto& xc : cones.dir_cones) {
                     if (xc.kind == XConeKind::SOC &&
                         xc.indices.size() > 4) ++n_sparse_xsoc;
                     else if (xc.kind == XConeKind::GenPower &&
@@ -247,7 +247,7 @@ struct KKTData : public KKTSolver {
         // x-cones (dim > 4) add diagonal-only rows here; their off-diagonal
         // coupling is carried by the rank-2 expansion cols appended below.
         std::vector<std::vector<int64_t>> xcone_extra_cols((size_t)n);
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             if (xc.kind == XConeKind::Nonneg) {
                 for (int64_t idx : xc.indices) {
                     if (idx < 0 || idx >= n) {
@@ -377,7 +377,7 @@ struct KKTData : public KKTSolver {
                 }
             } else {
                 throw std::runtime_error(
-                    "KKTData: unknown XConeKind in cones.x_cones");
+                    "KKTData: unknown XConeKind in cones.dir_cones");
             }
         }
         // Sort + dedupe each row's extras so we can merge against P's
@@ -405,13 +405,13 @@ struct KKTData : public KKTSolver {
         // the last 6 PD-axis cols of slack GenPow.
         const int64_t p_slack =
             2 * cones.numSparseSoc + 9 * cones.numSparseGenPow;
-        std::vector<int64_t> xcone_sparse_idx_of(cones.x_cones.size(),
+        std::vector<int64_t> xcone_sparse_idx_of(cones.dir_cones.size(),
                                                  int64_t{-1});
         int64_t num_sparse_xsoc = 0;
         std::vector<int64_t> sparse_xsoc_offset;   // prefix over sparse x-cones of dim
         std::vector<int64_t> sparse_xsoc_dim;      // dim per sparse x-cone
-        for (size_t c = 0; c < cones.x_cones.size(); ++c) {
-            const auto& xc = cones.x_cones[c];
+        for (size_t c = 0; c < cones.dir_cones.size(); ++c) {
+            const auto& xc = cones.dir_cones[c];
             if (xc.kind == XConeKind::SOC && xc.indices.size() > 4) {
                 xcone_sparse_idx_of[c] = num_sparse_xsoc++;
                 sparse_xsoc_offset.push_back(
@@ -430,9 +430,9 @@ struct KKTData : public KKTSolver {
         // (API contract), so at most one entry per row.
         std::vector<int64_t> xsoc_row_v_col((size_t)n, int64_t{-1});
         std::vector<int64_t> xsoc_row_flat_idx((size_t)n, int64_t{-1});
-        for (size_t c = 0; c < cones.x_cones.size(); ++c) {
+        for (size_t c = 0; c < cones.dir_cones.size(); ++c) {
             if (xcone_sparse_idx_of[c] < 0) continue;
-            const auto& xc = cones.x_cones[c];
+            const auto& xc = cones.dir_cones[c];
             int64_t sparse_idx = xcone_sparse_idx_of[c];
             int64_t base_flat = sparse_xsoc_offset[(size_t)sparse_idx];
             int64_t v_col = n + m + p_slack + 2 * sparse_idx;
@@ -446,7 +446,7 @@ struct KKTData : public KKTSolver {
                     throw std::runtime_error(
                         "KKTData: direct-x cone indices overlap at row " +
                         std::to_string(row) +
-                        "; indices across x_cones must be disjoint.");
+                        "; indices across dir_cones must be disjoint.");
                 }
                 xsoc_row_v_col[(size_t)row] = v_col;
                 xsoc_row_flat_idx[(size_t)row] = base_flat + p;
@@ -471,7 +471,7 @@ struct KKTData : public KKTSolver {
         const int64_t p_slack_xsoc = p_slack + 2 * num_sparse_xsoc;
 
         // GenPow sparse x-cone metadata
-        std::vector<int64_t> xcone_genpow_sparse_idx_of(cones.x_cones.size(), int64_t{-1});
+        std::vector<int64_t> xcone_genpow_sparse_idx_of(cones.dir_cones.size(), int64_t{-1});
         int64_t num_sparse_xgenpow = 0;
         // Per-sparse-xcone: dim1, dim2, dim offset into q_indices and r_indices
         std::vector<int64_t> sparse_xgenpow_dim1;  // dim1 per sparse x-GenPow cone
@@ -479,8 +479,8 @@ struct KKTData : public KKTSolver {
         std::vector<int64_t> sparse_xgenpow_q_offset;  // prefix over sparse x-GenPow cones (dim1)
         std::vector<int64_t> sparse_xgenpow_r_offset;  // prefix over sparse x-GenPow cones (dim2)
         std::vector<int64_t> sparse_xgenpow_p_offset;  // prefix over sparse x-GenPow cones (dim)
-        for (size_t c = 0; c < cones.x_cones.size(); ++c) {
-            const auto& xc = cones.x_cones[c];
+        for (size_t c = 0; c < cones.dir_cones.size(); ++c) {
+            const auto& xc = cones.dir_cones[c];
             if (xc.kind == XConeKind::GenPower && xc.indices.size() > 4) {
                 xcone_genpow_sparse_idx_of[c] = num_sparse_xgenpow++;
                 const int64_t d1 = static_cast<int64_t>(xc.gen_power_alphas.size());
@@ -523,9 +523,9 @@ struct KKTData : public KKTSolver {
         //   genpow_qr_flat[i] = flat index in H_xcone_genpow_q/r_indices (-1 if not q or r)
         struct XGenPowRowInfo { int64_t q_col; int64_t row_type; int64_t p_flat; int64_t qr_flat; };
         std::vector<XGenPowRowInfo> xgenpow_row_info((size_t)n, {-1, -1, -1, -1});
-        for (size_t c = 0; c < cones.x_cones.size(); ++c) {
+        for (size_t c = 0; c < cones.dir_cones.size(); ++c) {
             if (xcone_genpow_sparse_idx_of[c] < 0) continue;
-            const auto& xc = cones.x_cones[c];
+            const auto& xc = cones.dir_cones[c];
             int64_t sparse_idx = xcone_genpow_sparse_idx_of[c];
             int64_t d1 = sparse_xgenpow_dim1[(size_t)sparse_idx];
             int64_t q_col = n + m + p_slack_xsoc + 9 * sparse_idx;  // q expansion col
@@ -554,7 +554,7 @@ struct KKTData : public KKTSolver {
                     xsoc_row_v_col[(size_t)row] != -1) {
                     throw std::runtime_error(
                         "KKTData: direct-x cone indices overlap at row " +
-                        std::to_string(row) + "; indices across x_cones must be disjoint.");
+                        std::to_string(row) + "; indices across dir_cones must be disjoint.");
                 }
                 int64_t row_type = (cone_pos < d1) ? 0 : 1;
                 int64_t p_flat = sparse_xgenpow_p_offset[(size_t)sparse_idx] + cone_pos;
@@ -580,7 +580,7 @@ struct KKTData : public KKTSolver {
 
         // Top-left block: Upper(Pext) with ensured diagonal; Top-right block: A^T
         // Pext = P ∪ direct-x footprint (upper tri), with structural zeros
-        // at direct-x-only positions. When x_cones is empty, the merge
+        // at direct-x-only positions. When dir_cones is empty, the merge
         // collapses to the original P-only loop and the path is unchanged.
         for (int64_t i = 0; i < n; ++i) {
             bool hasDiag = false;
@@ -1615,14 +1615,14 @@ struct KKTData : public KKTSolver {
         //     row sorted_J[r_logical], col sorted_J[c_logical], resolved
         //     by scanning rowOff/colIdx for that (row, col) pair.
         //
-        // Read cones.x_cones directly (authoritative source) — cones.numXCones
+        // Read cones.dir_cones directly (authoritative source) — cones.numXCones
         // is only populated by Cones::initialize(), which may not have run
         // when KKTData is constructed in isolation (e.g. unit tests).
         int64_t* d_H_xcone_hs = nullptr;
-        if (!cones.x_cones.empty()) {
-            // Count Hs entries per cone in cones.x_cones order.
+        if (!cones.dir_cones.empty()) {
+            // Count Hs entries per cone in cones.dir_cones order.
             int64_t total_hs = 0;
-            for (const auto& xc : cones.x_cones) {
+            for (const auto& xc : cones.dir_cones) {
                 const int64_t k = static_cast<int64_t>(xc.indices.size());
                 if (xc.kind == XConeKind::Nonneg) {
                     total_hs += k;
@@ -1657,7 +1657,7 @@ struct KKTData : public KKTSolver {
 
             std::vector<int64_t> xcone_hs_host;
             xcone_hs_host.reserve((size_t)total_hs);
-            for (const auto& xc : cones.x_cones) {
+            for (const auto& xc : cones.dir_cones) {
                 const int64_t k = static_cast<int64_t>(xc.indices.size());
                 if (xc.kind == XConeKind::Nonneg) {
                     for (int64_t idx : xc.indices) {
@@ -1830,9 +1830,9 @@ struct KKTData : public KKTSolver {
         // Allocate the direct-x cone P-baseline buffer when any x-cone is
         // present. Actual P values are snapshotted into this buffer by
         // init_xcone_px_baseline() after populate() runs.
-        if (!cones.x_cones.empty()) {
+        if (!cones.dir_cones.empty()) {
             int64_t total_hs = 0;
-            for (const auto& xc : cones.x_cones) {
+            for (const auto& xc : cones.dir_cones) {
                 const int64_t k = static_cast<int64_t>(xc.indices.size());
                 if (xc.kind == XConeKind::Nonneg) {
                     total_hs += k;

@@ -3,7 +3,7 @@
  *
  * Same QP `min 0.5||x - target||^2` solved two ways:
  *   slack:    A = -I, b = 0, s in K  (n extra rows, standard cone constraint)
- *   direct-x: x_cones with Exp/Power/GenPower  (cone augmentation in (1,1) block)
+ *   direct-x: dir_cones with Exp/Power/GenPower  (cone augmentation in (1,1) block)
  *
  * Usage:
  *   ./bench_xcone_asymmetric
@@ -178,7 +178,7 @@ struct ExpProblem {
             SupportedXConeT xc;
             xc.kind = XConeKind::Exp;
             xc.indices = {3*k, 3*k+1, 3*k+2};
-            cones_dx.x_cones.push_back(xc);
+            cones_dx.dir_cones.push_back(xc);
         }
     }
 };
@@ -219,7 +219,7 @@ struct PowProblem {
             xc.kind = XConeKind::Power;
             xc.power_alpha = alpha;
             xc.indices = {3*k, 3*k+1, 3*k+2};
-            cones_dx.x_cones.push_back(xc);
+            cones_dx.dir_cones.push_back(xc);
         }
     }
 };
@@ -261,7 +261,7 @@ struct GenPowProblem {
         for (int i = 0; i < n; ++i) xc.indices.push_back(i);
         xc.gen_power_alphas = alphas;
         xc.gen_power_dim2 = static_cast<int64_t>(dim2);
-        cones_dx.x_cones.push_back(xc);
+        cones_dx.dir_cones.push_back(xc);
     }
 };
 
@@ -310,7 +310,7 @@ struct GenPow3DProblem {
             xc.indices = {3*k, 3*k+1, 3*k+2};
             xc.gen_power_alphas = alphas;
             xc.gen_power_dim2 = static_cast<int64_t>(dim2);
-            cones_dx.x_cones.push_back(xc);
+            cones_dx.dir_cones.push_back(xc);
         }
     }
 };
@@ -418,7 +418,7 @@ int main() {
     std::cout << "=== Asymmetric direct-x vs slack benchmark (CUDA) ===\n";
     std::cout << "Problem: min 0.5||x - target||^2  s.t.  x in K\n";
     std::cout << "         slack form: A=-I, b=0, s in K\n";
-    std::cout << "         direct-x:   x_cones with Exp/Power/GenPower\n";
+    std::cout << "         direct-x:   dir_cones with Exp/Power/GenPower\n";
     std::cout << "         (each batch entry = same problem replicated)\n\n";
 
     const std::vector<int> batch_sizes = {1, 16, 64, 256};

@@ -39,7 +39,7 @@ def test_exp_direct_x_cuda_converges():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="exp", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="exp", indices=[0, 1, 2])],
     )
     settings = moreau.Settings(device="cuda", verbose=False)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
@@ -75,7 +75,7 @@ def test_power_direct_x_cuda_converges():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="power", indices=[0, 1, 2], alpha=alpha)],
+        dir_cones=[moreau.DirectConeSpec(kind="power", indices=[0, 1, 2], alpha=alpha)],
     )
     settings = moreau.Settings(device="cuda", verbose=False)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
@@ -115,8 +115,8 @@ def test_genpow_direct_x_cuda_converges():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[
-            moreau.XConeSpec(
+        dir_cones=[
+            moreau.DirectConeSpec(
                 kind="gen_power",
                 indices=[0, 1, 2],
                 alphas=alphas,

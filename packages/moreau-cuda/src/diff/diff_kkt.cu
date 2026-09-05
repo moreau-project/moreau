@@ -45,12 +45,12 @@ static std::string gpu_memory_info() {
          + std::to_string(static_cast<int>(used_mb)) + " MB used)";
 }
 
-// Compute total direct-x numel (sum of |J_xc|) from cones.x_cones.
+// Compute total direct-x numel (sum of |J_xc|) from cones.dir_cones.
 // Defined as a free function so it can also be used by the size constants
 // below in the member-initialiser list.
 static int64_t compute_xn(const moreau::Cones& cones) {
     int64_t xn = 0;
-    for (const auto& xc : cones.x_cones) {
+    for (const auto& xc : cones.dir_cones) {
         xn += static_cast<int64_t>(xc.indices.size());
     }
     return xn;
@@ -79,7 +79,7 @@ DiffKKT::DiffKKT(
 {
     // Direct-x cone metadata cached on `this` for use throughout the
     // sparsity build and `updateJ`.
-    numXCones_ = static_cast<int64_t>(cones.x_cones.size());
+    numXCones_ = static_cast<int64_t>(cones.dir_cones.size());
     totalXConeNumel_ = compute_xn(cones);
     int64_t xn_ctor = totalXConeNumel_;
 
@@ -231,10 +231,10 @@ DiffKKT::DiffKKT(
     // Direct-x GenPow expansion info. Direct-x expansion vars come AFTER
     // all slack expansion vars. `xc_du_offset` is the cone's start offset
     // within the [n+2m, n+2m+xn) du_x block. `cone_x_idx` is the cone's
-    // position in `cones.x_cones` (used to look up indices for stat-row
+    // position in `cones.dir_cones` (used to look up indices for stat-row
     // emission).
     struct XGenpowExpansionInfo {
-        int64_t cone_x_idx;     // index in cones.x_cones
+        int64_t cone_x_idx;     // index in cones.dir_cones
         int64_t xc_du_offset;   // offset within direct-x du_x block
         int64_t genpow_dim;     // total dimension of this cone
         int64_t exp_col_base;   // expansion column base in J
@@ -247,7 +247,7 @@ DiffKKT::DiffKKT(
         int64_t slack_exp_count = 2 * cones.numSparseSoc + 3 * cones.numGenPowerCones;
         int64_t xgp_idx = 0;
         for (int64_t c = 0; c < numXCones_; ++c) {
-            const auto& xc = cones.x_cones[c];
+            const auto& xc = cones.dir_cones[c];
             int64_t d = static_cast<int64_t>(xc.indices.size());
             if (xc.kind == XConeKind::GenPower) {
                 xgenpow_expansion_info.push_back({
@@ -281,7 +281,7 @@ DiffKKT::DiffKKT(
             + 3 * cones.numXGenPowerCones;
         int64_t xsoc_idx = 0;
         for (int64_t c = 0; c < numXCones_; ++c) {
-            const auto& xc = cones.x_cones[c];
+            const auto& xc = cones.dir_cones[c];
             int64_t d = static_cast<int64_t>(xc.indices.size());
             if (xc.kind == XConeKind::SOC && d > 4) {
                 xsoc_sparse_info.push_back({
@@ -404,11 +404,11 @@ DiffKKT::DiffKKT(
             // + xc_off + l. Since du_x cols come before τ, these entries
             // are sorted before the τ col entry below.
             for (int64_t xc_idx = 0; xc_idx < numXCones_; ++xc_idx) {
-                const auto& xc = cones.x_cones[xc_idx];
+                const auto& xc = cones.dir_cones[xc_idx];
                 int64_t dim_xc = static_cast<int64_t>(xc.indices.size());
                 int64_t xc_off = 0;
                 for (int64_t i = 0; i < xc_idx; ++i) {
-                    xc_off += static_cast<int64_t>(cones.x_cones[i].indices.size());
+                    xc_off += static_cast<int64_t>(cones.dir_cones[i].indices.size());
                 }
                 for (int64_t k = 0; k < dim_xc; ++k) {
                     if (xc.indices[k] == row) {
@@ -683,7 +683,7 @@ DiffKKT::DiffKKT(
             {
                 int64_t off = 0;
                 for (int64_t i = 0; i < numXCones_; ++i) {
-                    int64_t d = static_cast<int64_t>(cones.x_cones[i].indices.size());
+                    int64_t d = static_cast<int64_t>(cones.dir_cones[i].indices.size());
                     if (xrow >= off && xrow < off + d) {
                         xc_idx = i;
                         k_in_cone = xrow - off;
@@ -692,7 +692,7 @@ DiffKKT::DiffKKT(
                     off += d;
                 }
             }
-            const auto& xc = cones.x_cones[xc_idx];
+            const auto& xc = cones.dir_cones[xc_idx];
             int64_t dim_xc = static_cast<int64_t>(xc.indices.size());
             // E_J entry: +1 at K col jdim + J_xc[k_in_cone].
             int64_t Jxk = xc.indices[k_in_cone];
@@ -1106,7 +1106,7 @@ DiffKKT::DiffKKT(
         int64_t nn_acc = 0, soc_acc = 0, psd_acc = 0;
         int64_t exp_acc = 0, pow_acc = 0, gp_acc = 0;
         for (int64_t i = 0; i < numXCones_; ++i) {
-            const auto& xc = cones.x_cones[i];
+            const auto& xc = cones.dir_cones[i];
             xcone_dims[i] = static_cast<int64_t>(xc.indices.size());
             xcone_numel_offsets[i + 1] = xcone_numel_offsets[i] + xcone_dims[i];
             switch (xc.kind) {
@@ -1150,7 +1150,7 @@ DiffKKT::DiffKKT(
         // Upload metadata.
         std::vector<int64_t> xcone_indices_flat;
         xcone_indices_flat.reserve(totalXConeNumel_);
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             for (int64_t v : xc.indices) xcone_indices_flat.push_back(v);
         }
         upload_indices(xcone_kinds, d_xcone_kinds_);

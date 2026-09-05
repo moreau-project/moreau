@@ -78,7 +78,7 @@ where
         P: &CscMatrix<T>,
         A: &CscMatrix<T>,
         cones: &CompositeCone<T>,
-        x_cones: &CompositeXCone<T>,
+        dir_cones: &CompositeXCone<T>,
         m: usize,
         n: usize,
         settings: &CoreSettings<T>,
@@ -89,7 +89,7 @@ where
         let (kktshape, ldl_ctor) = T::get_ldlsolver_config(settings);
 
         //construct a KKT matrix of the right shape
-        let (KKT, map) = assemble_kkt_matrix_with_xcones(P, A, cones, x_cones, kktshape);
+        let (KKT, map) = assemble_kkt_matrix_with_xcones(P, A, cones, dir_cones, kktshape);
 
         // Total expansion dimension = slack (SOC/genpow) + direct-x
         // sparse (SOC). Direct-x sparse cols live at the end of the KKT.
@@ -121,7 +121,7 @@ where
         // value at the i-th Hx block position when the footprint overlaps P,
         // else zero. Together with `hx_values` (get_Hs output) it reconstructs
         // `KKT[(r,c)] = P[(r,c)] + H_J[(r,c)]` each solver update.
-        let hx_len = x_cones.hx_block_len();
+        let hx_len = dir_cones.hx_block_len();
         let mut px_baseline = vec![T::zero(); hx_len];
         for (i, entry) in map.Hx_to_P.iter().enumerate() {
             if let Some(k) = entry {
@@ -243,7 +243,7 @@ where
     /// Refresh the direct-x Hs contributions in the (1,1) KKT block.
     ///
     /// Each Hxblocks entry is written as `px_baseline[i] + hs[i]` where
-    /// `hs` is populated by `x_cones.get_Hs`. At overlap slots with the
+    /// `hs` is populated by `dir_cones.get_Hs`. At overlap slots with the
     /// user P pattern, this restores the structural invariant
     /// `KKT[(r,c)] = P[(r,c)] + H_J[(r,c)]` after a fresh `update_P`. At
     /// non-overlap slots `px_baseline` is zero.
@@ -251,10 +251,10 @@ where
     /// Callers must invoke `update_P` (or equivalent) before this whenever
     /// P has changed — `px_baseline` is a cache of user P values at Hx
     /// positions.
-    pub(crate) fn refresh_hx_blocks(&mut self, x_cones: &CompositeXCone<T>) {
+    pub(crate) fn refresh_hx_blocks(&mut self, dir_cones: &CompositeXCone<T>) {
         if !self.map.Hxblocks.is_empty() {
             assert_eq!(self.hx_values.len(), self.map.Hxblocks.len());
-            x_cones.get_Hs(&mut self.hx_values);
+            dir_cones.get_Hs(&mut self.hx_values);
             for i in 0..self.hx_values.len() {
                 self.hx_values[i] += self.px_baseline[i];
             }
@@ -271,7 +271,7 @@ where
         // convention. Values are fetched in sorted-row order via the map's
         // `cone_pos_for_sorted_*` permutations.
         if self.map.x_sparse_maps.iter().any(|m| m.is_some()) {
-            for (entry, opt_map) in x_cones.iter().zip(self.map.x_sparse_maps.iter()) {
+            for (entry, opt_map) in dir_cones.iter().zip(self.map.x_sparse_maps.iter()) {
                 let Some(xm) = opt_map else {
                     continue;
                 };
@@ -453,7 +453,7 @@ where
     fn update(
         &mut self,
         cones: &mut CompositeCone<T>,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
         settings: &CoreSettings<T>,
     ) -> bool {
         // Set the elements the W^tW blocks in the KKT matrix.
@@ -501,7 +501,7 @@ where
         // direct-x sentinel for axis k is `-pd_signs[k]` (slack's sentinel
         // negated — direct-x adds `+Hs` to (1,1), slack adds `-Hs` to (2,2)),
         // so the LDL pivot expected sign is also `-pd_signs[k]`.
-        for (entry, opt_map) in x_cones.iter().zip(self.map.x_sparse_maps.iter()) {
+        for (entry, opt_map) in dir_cones.iter().zip(self.map.x_sparse_maps.iter()) {
             let Some(xm) = opt_map else {
                 continue;
             };
@@ -526,8 +526,8 @@ where
         self.ldlsolver.update_dsigns(&self.dsigns);
 
         // Direct-x cones additively contribute H_J to (1,1). Skipped cheaply
-        // when `x_cones` is empty (fast path matches the slack-only solver).
-        self.refresh_hx_blocks(x_cones);
+        // when `dir_cones` is empty (fast path matches the slack-only solver).
+        self.refresh_hx_blocks(dir_cones);
 
         let success = self.regularize_and_refactor(settings);
 
@@ -899,14 +899,14 @@ mod xcone_refresh_tests {
         let P = CscMatrix::<f64>::from(&[[3., 0.], [0., 0.]]);
         let A = CscMatrix::<f64>::from(&[[1., 1.]]);
         let cones = CompositeCone::<f64>::new(&[SupportedConeT::ZeroConeT(1)]);
-        let x_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![0, 1])]);
+        let dir_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![0, 1])]);
 
         let settings = DefaultSettings::<f64>::default();
         let mut ldl = DirectLDLKKTSolver::<f64>::new_with_perm_and_xcones(
             &P,
             &A,
             &cones,
-            &x_cones,
+            &dir_cones,
             1,
             2,
             settings.core(),
@@ -916,11 +916,11 @@ mod xcone_refresh_tests {
         // Prime the direct-x cone scaling so `get_Hs` emits a non-zero,
         // deterministic block. NonnegativeCone's Hs is `w*w`, and
         // `set_identity_scaling` sets w = 1, so Hs[i] = 1.
-        let mut x_cones_mut = x_cones;
-        for entry in x_cones_mut.iter_mut() {
+        let mut dir_cones_mut = dir_cones;
+        for entry in dir_cones_mut.iter_mut() {
             entry.cone.set_identity_scaling();
         }
-        ldl.refresh_hx_blocks(&x_cones_mut);
+        ldl.refresh_hx_blocks(&dir_cones_mut);
         assert_eq!(kkt_at(&ldl.KKT, 0, 0), 3.0 + 1.0);
         assert_eq!(kkt_at(&ldl.KKT, 1, 1), 0.0 + 1.0);
 
@@ -928,7 +928,7 @@ mod xcone_refresh_tests {
         // slot should track the new baseline.
         let P_new = CscMatrix::<f64>::from(&[[7., 0.], [0., 0.]]);
         ldl.update_P(&P_new);
-        ldl.refresh_hx_blocks(&x_cones_mut);
+        ldl.refresh_hx_blocks(&dir_cones_mut);
         assert_eq!(kkt_at(&ldl.KKT, 0, 0), 7.0 + 1.0);
         assert_eq!(kkt_at(&ldl.KKT, 1, 1), 0.0 + 1.0);
     }

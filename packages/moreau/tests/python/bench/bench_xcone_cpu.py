@@ -73,14 +73,14 @@ def _solve_slack(P, q, A, b, slack_cones):
     return _Result(sol, sol)
 
 
-def _solve_direct(P, q, A, b, slack_cones, x_cones):
+def _solve_direct(P, q, A, b, slack_cones, dir_cones):
     solver = cpu.DefaultSolver.new_with_xcones(
         P,
         q.tolist(),
         A,
         b.tolist(),
         slack_cones,
-        x_cones,
+        dir_cones,
         _make_settings(),
     )
     solver.solve()
@@ -234,10 +234,10 @@ def _make_s3(n_soc: int, soc_dim: int = 3, seed: int = 0):
     def direct_run():
         A = sparse.csr_matrix(np.zeros((0, n)))
         b = np.array([])
-        x_cones = [
+        dir_cones = [
             cpu.SecondOrderXConeT(list(range(i * soc_dim, (i + 1) * soc_dim))) for i in range(n_soc)
         ]
-        return _solve_direct(P, q, A, b, [], x_cones)
+        return _solve_direct(P, q, A, b, [], dir_cones)
 
     direct_run.__name__ = "direct"
 

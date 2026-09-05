@@ -50,7 +50,7 @@ TEST(XConeInfeasibilityTest, NonnegDirectXPrimalInfeasible) {
 
     Cones cones{};
     cones.numZeroCones = 1;                    // single equality row
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -94,7 +94,7 @@ TEST(XConeInfeasibilityTest, NonnegDirectXDualInfeasible) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -139,7 +139,7 @@ TEST(XConeInfeasibilityTest, SOCDirectXPrimalInfeasible) {
 
     Cones cones{};
     cones.numZeroCones = 1;
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -183,7 +183,7 @@ TEST(XConeInfeasibilityTest, SOCDirectXDualInfeasible) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -228,7 +228,7 @@ TEST(XConeInfeasibilityTest, PSDDirectXPrimalInfeasible) {
 
     Cones cones{};
     cones.numZeroCones = 1;
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::PSD, {0, 1, 2}, /*psd_k=*/2});
 
     Settings settings;
@@ -275,7 +275,7 @@ TEST(XConeInfeasibilityTest, NonnegDirectXMixedPrimalInfeasible) {
 
     Cones cones{};
     cones.numZeroCones = 1;
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1}});
 
     Settings settings;
     settings.maxIter = 200;

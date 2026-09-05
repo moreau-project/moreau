@@ -41,15 +41,15 @@ fn assemble_kkt_matrix_full<T: FloatT>(
     P: &CscMatrix<T>,
     A: &CscMatrix<T>,
     cones: &CompositeCone<T>,
-    x_cones: &CompositeXCone<T>,
+    dir_cones: &CompositeXCone<T>,
     shape: MatrixTriangle,
 ) -> (CscMatrix<T>, LDLDataMap) {
     let mut map = LDLDataMap::new(P, A, cones);
-    map.x_sparse_maps = (0..x_cones.len()).map(|_| None).collect();
+    map.x_sparse_maps = (0..dir_cones.len()).map(|_| None).collect();
 
     let (m, n) = A.size();
     let p_slack = map.sparse_maps.pdim();
-    let p_x = x_cones.x_sparse_pdim();
+    let p_x = dir_cones.x_sparse_pdim();
     let p_total = p_slack + p_x;
 
     // LDLDataMap::new sized `diag_full` for (m + n + p_slack); grow it
@@ -69,7 +69,7 @@ fn assemble_kkt_matrix_full<T: FloatT>(
     // in the 2 extra cols). Compute upfront so we can allocate the
     // right KKT size.
     let mut nnz_x_sparse = 0usize;
-    for entry in x_cones.iter() {
+    for entry in dir_cones.iter() {
         if !entry.cone.direct_x_is_sparse_expandable() {
             continue;
         }
@@ -104,13 +104,13 @@ fn assemble_kkt_matrix_full<T: FloatT>(
     let mut K = CscMatrix::<T>::spalloc((dim, dim), nnzKKT);
 
     _kkt_assemble_colcounts(&mut K, P, A, cones, &map, shape);
-    _x_sparse_colcounts(&mut K, x_cones, m + n + p_slack, shape);
+    _x_sparse_colcounts(&mut K, dir_cones, m + n + p_slack, shape);
     _kkt_assemble_fill_with_xcones(
         &mut K,
         P,
         A,
         cones,
-        x_cones,
+        dir_cones,
         m + n + p_slack,
         &mut map,
         shape,
@@ -124,12 +124,12 @@ fn assemble_kkt_matrix_full<T: FloatT>(
 /// slack sparse expansion columns).
 fn _x_sparse_colcounts<T: FloatT>(
     K: &mut CscMatrix<T>,
-    x_cones: &CompositeXCone<T>,
+    dir_cones: &CompositeXCone<T>,
     pcol_start: usize,
     shape: MatrixTriangle,
 ) {
     let mut pcol = pcol_start;
-    for entry in x_cones.iter() {
+    for entry in dir_cones.iter() {
         if !entry.cone.direct_x_is_sparse_expandable() {
             continue;
         }
@@ -256,18 +256,18 @@ fn _kkt_assemble_fill<T: FloatT>(
 
 /// Variant of the fill pass that also fills direct-x sparse expansion
 /// columns before the final `backshift_colptrs`. `x_sparse_info` pairs
-/// (x_cones, pcol_start) when present; None skips the direct-x pass.
+/// (dir_cones, pcol_start) when present; None skips the direct-x pass.
 fn _kkt_assemble_fill_with_xcones<T: FloatT>(
     K: &mut CscMatrix<T>,
     P: &CscMatrix<T>,
     A: &CscMatrix<T>,
     cones: &CompositeCone<T>,
-    x_cones: &CompositeXCone<T>,
+    dir_cones: &CompositeXCone<T>,
     pcol_x_start: usize,
     map: &mut LDLDataMap,
     shape: MatrixTriangle,
 ) {
-    _kkt_assemble_fill_inner(K, P, A, cones, map, shape, Some((x_cones, pcol_x_start)))
+    _kkt_assemble_fill_inner(K, P, A, cones, map, shape, Some((dir_cones, pcol_x_start)))
 }
 
 fn _kkt_assemble_fill_inner<T: FloatT>(
@@ -327,9 +327,9 @@ fn _kkt_assemble_fill_inner<T: FloatT>(
 
     // Direct-x sparse expansion — must run BEFORE `backshift_colptrs`
     // so we can continue using the advancing colptr as the fill cursor.
-    if let Some((x_cones, pcol_x_start)) = x_sparse_info {
+    if let Some((dir_cones, pcol_x_start)) = x_sparse_info {
         let mut pcol_x = pcol_x_start;
-        for (xi, entry) in x_cones.iter().enumerate() {
+        for (xi, entry) in dir_cones.iter().enumerate() {
             if !entry.cone.direct_x_is_sparse_expandable() {
                 continue;
             }
@@ -495,15 +495,15 @@ fn _kkt_assemble_fill_inner<T: FloatT>(
 /// Caller supplies a user P matrix in triu form. `Pext` is also triu.
 pub(crate) fn build_P_ext<T: FloatT>(
     P: &CscMatrix<T>,
-    x_cones: &CompositeXCone<T>,
+    dir_cones: &CompositeXCone<T>,
 ) -> (CscMatrix<T>, Vec<usize>, Vec<usize>) {
     let n = P.nrows();
     assert_eq!(P.ncols(), n, "P must be square for build_P_ext");
 
     // Footprint positions in triu form, stored as (col, row) with row <= col,
     // in the cone-then-block order expected by the stacked Hx buffer.
-    let mut hx_triu_positions: Vec<(usize, usize)> = Vec::with_capacity(x_cones.hx_block_len());
-    for entry in x_cones.iter() {
+    let mut hx_triu_positions: Vec<(usize, usize)> = Vec::with_capacity(dir_cones.hx_block_len());
+    for entry in dir_cones.iter() {
         let indices = &entry.indices;
         let ni = indices.len();
         if entry.cone.direct_x_Hs_is_diagonal() {
@@ -583,21 +583,21 @@ pub(crate) fn build_P_ext<T: FloatT>(
 }
 
 /// Variant of [`assemble_kkt_matrix`] that additionally supports direct-x
-/// cone contributions to the (1,1) block. When `x_cones` is empty this is
+/// cone contributions to the (1,1) block. When `dir_cones` is empty this is
 /// identical to `assemble_kkt_matrix`.
 pub(crate) fn assemble_kkt_matrix_with_xcones<T: FloatT>(
     P: &CscMatrix<T>,
     A: &CscMatrix<T>,
     cones: &CompositeCone<T>,
-    x_cones: &CompositeXCone<T>,
+    dir_cones: &CompositeXCone<T>,
     shape: MatrixTriangle,
 ) -> (CscMatrix<T>, LDLDataMap) {
-    if x_cones.is_empty() {
+    if dir_cones.is_empty() {
         return assemble_kkt_matrix(P, A, cones, shape);
     }
 
-    let (Pext, p_to_pext, hx_to_pext) = build_P_ext(P, x_cones);
-    let (K, pext_map) = assemble_kkt_matrix_full(&Pext, A, cones, x_cones, shape);
+    let (Pext, p_to_pext, hx_to_pext) = build_P_ext(P, dir_cones);
+    let (K, pext_map) = assemble_kkt_matrix_full(&Pext, A, cones, dir_cones, shape);
 
     // Translate Pext-indexed P map into user-P-indexed map, and build
     // Hxblocks by redirecting hx_to_pext through pext_map.P.
@@ -750,7 +750,7 @@ mod xcone_assembly_tests {
 
     #[test]
     fn with_xcones_empty_matches_standard() {
-        // When x_cones is empty, the _with_xcones variant must produce
+        // When dir_cones is empty, the _with_xcones variant must produce
         // an identical KKT matrix and map (P/Hsblocks/A indices unchanged).
         let P = CscMatrix::from(&[
             [1., 2., 0.], //
@@ -787,8 +787,8 @@ mod xcone_assembly_tests {
             [0., 0., 0.], //
             [0., 0., 5.], //
         ]);
-        let x_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![1])]);
-        let (Pext, p_to_pext, hx_to_pext) = build_P_ext(&P, &x_cones);
+        let dir_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![1])]);
+        let (Pext, p_to_pext, hx_to_pext) = build_P_ext(&P, &dir_cones);
 
         // P.nnz() was 2, Pext should have 3.
         assert_eq!(Pext.nnz(), 3);
@@ -828,8 +828,8 @@ mod xcone_assembly_tests {
             [1., 0.], //
             [0., 2.], //
         ]);
-        let x_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![0])]);
-        let (Pext, p_to_pext, hx_to_pext) = build_P_ext(&P, &x_cones);
+        let dir_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![0])]);
+        let (Pext, p_to_pext, hx_to_pext) = build_P_ext(&P, &dir_cones);
 
         assert_eq!(Pext.nnz(), 2);
         // P's (0,0) entry is at index 0 in P; Pext preserves it.
@@ -852,10 +852,10 @@ mod xcone_assembly_tests {
         let A = CscMatrix::from(&[[1., 1., 1.]]);
         let cones = CompositeCone::new(&[SupportedConeT::<f64>::ZeroConeT(1)]);
         // Direct-x nonneg on x[1] and x[2]
-        let x_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![1, 2])]);
+        let dir_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![1, 2])]);
 
         let (mut K, map) =
-            assemble_kkt_matrix_with_xcones(&P, &A, &cones, &x_cones, MatrixTriangle::Triu);
+            assemble_kkt_matrix_with_xcones(&P, &A, &cones, &dir_cones, MatrixTriangle::Triu);
 
         // Hxblocks has 2 entries (diagonal nonneg, size 2).
         assert_eq!(map.Hxblocks.len(), 2);
@@ -902,10 +902,10 @@ mod xcone_assembly_tests {
         ]);
         let A = CscMatrix::from(&[[1., 1.]]);
         let cones = CompositeCone::new(&[SupportedConeT::<f64>::ZeroConeT(1)]);
-        let x_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![1])]);
+        let dir_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![1])]);
 
         let (mut K, map) =
-            assemble_kkt_matrix_with_xcones(&P, &A, &cones, &x_cones, MatrixTriangle::Tril);
+            assemble_kkt_matrix_with_xcones(&P, &A, &cones, &dir_cones, MatrixTriangle::Tril);
 
         assert_eq!(map.Hxblocks.len(), 1);
         for i in &map.Hxblocks {
@@ -939,11 +939,11 @@ mod xcone_assembly_tests {
         ]);
         let A = CscMatrix::from(&[[1., 1., 1.]]);
         let cones = CompositeCone::new(&[SupportedConeT::<f64>::ZeroConeT(1)]);
-        let x_cones =
+        let dir_cones =
             CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![0, 1, 2])]);
 
         let (_K, map) =
-            assemble_kkt_matrix_with_xcones(&P, &A, &cones, &x_cones, MatrixTriangle::Triu);
+            assemble_kkt_matrix_with_xcones(&P, &A, &cones, &dir_cones, MatrixTriangle::Triu);
 
         assert_eq!(map.Hx_to_P.len(), 3);
         // Hx entry 0 → P's (0,0), which is the first user-P nzval
@@ -965,13 +965,13 @@ mod xcone_assembly_tests {
         ]);
         let A = CscMatrix::from(&[[1., 1., 1., 1.]]);
         let cones = CompositeCone::new(&[SupportedConeT::<f64>::ZeroConeT(1)]);
-        let x_cones = CompositeXCone::<f64>::new(&[
+        let dir_cones = CompositeXCone::<f64>::new(&[
             SupportedXConeT::NonnegativeXConeT(vec![0, 1]),
             SupportedXConeT::NonnegativeXConeT(vec![2, 3]),
         ]);
 
         let (mut K, map) =
-            assemble_kkt_matrix_with_xcones(&P, &A, &cones, &x_cones, MatrixTriangle::Triu);
+            assemble_kkt_matrix_with_xcones(&P, &A, &cones, &dir_cones, MatrixTriangle::Triu);
         assert_eq!(map.Hxblocks.len(), 4);
 
         // Write distinguishable values to each Hxblocks slot.

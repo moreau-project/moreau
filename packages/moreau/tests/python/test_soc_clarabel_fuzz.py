@@ -45,9 +45,9 @@ requires_gpu = pytest.mark.skipif(not HAS_CUDA, reason="CUDA not available")
 
 
 @st.composite
-def soc_dims_strategy(draw, max_total_m=40, max_dim=15, max_cones=5):
+def soc_dims_strategy(draw, max_total_m=40, max_dim=15, madir_cones=5):
     """Generate a list of SOC dimensions (each >= 2) with bounded total."""
-    num_cones = draw(st.integers(min_value=1, max_value=max_cones))
+    num_cones = draw(st.integers(min_value=1, max_value=madir_cones))
     dims = []
     remaining = max_total_m
     for i in range(num_cones):

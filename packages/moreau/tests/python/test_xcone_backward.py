@@ -16,7 +16,7 @@ from scipy import sparse
 import moreau
 
 
-def test_solver_with_x_cones_backward_matches_slack():
+def test_solver_with_dir_cones_backward_matches_slack():
     # Backward via the unfold path: dP and dq should match the slack-
     # form reference. dA / db for a pure direct-x problem (no slack
     # rows) are empty.
@@ -25,7 +25,7 @@ def test_solver_with_x_cones_backward_matches_slack():
 
     # Direct-x form (no slack rows)
     cones_direct = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])],
     )
     A_dx = sparse.csr_matrix(np.zeros((0, 3)))
     b_dx = np.array([])
@@ -59,14 +59,14 @@ def test_solver_with_x_cones_backward_matches_slack():
     assert len(grads_direct["dA_values"]) == 0
 
 
-def test_solver_with_x_cones_cpu_psd_backward_matches_slack():
+def test_solver_with_dir_cones_cpu_psd_backward_matches_slack():
     # Backward via unfold: PSD direct-x must match slack dP/dq.
     P = sparse.diags([1.0, 1.0, 1.0], format="csr")
     q = np.array([0.0, -1.0, 0.0])
 
     cones_direct = moreau.Cones(
-        x_cones=[
-            moreau.XConeSpec(
+        dir_cones=[
+            moreau.DirectConeSpec(
                 kind="psd_triangle",
                 indices=[0, 1, 2],
                 psd_k=2,
@@ -113,7 +113,7 @@ def _batched_backward_matches_per_problem(device):
 
     n = 3
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])],
     )
     P_row_offsets = [0, 1, 2, 3]
     P_col_indices = [0, 1, 2]
@@ -199,7 +199,7 @@ def _check_dz_x_finite_difference(device):
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])],
     )
     # Equilibration is a non-smooth rescaling that produces asymmetric
     # finite differences at the cone boundary; disable it to keep the FD
@@ -272,7 +272,7 @@ def _check_torch_autograd_through_z_x(device):
     P_ci = torch.tensor([0, 1, 2])
     A_ro = torch.tensor([0])
     A_ci = torch.tensor([], dtype=torch.int64)
-    cones = moreau.Cones(x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0, 1, 2])])
+    cones = moreau.Cones(dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])])
     ipm = moreau.IPMSettings(equilibrate_enable=False)
     settings = moreau.Settings(
         device=device,
@@ -331,7 +331,7 @@ def _check_jax_autograd_through_z_x(device):
     n = 4
     cones = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=list(range(n)))],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=list(range(n)))],
     )
     solver = JaxSolver(
         n=n,
@@ -381,5 +381,5 @@ def test_cuda_jax_solver_direct_x_autograd_through_z_x():
 
 def test_jax_solver_direct_x_autograd_through_z_x():
     """JAX (CPU) direct-x autograd. Regression: previously
-    `JaxSolver(cones=Cones(x_cones=...))` raised `NotImplementedError`."""
+    `JaxSolver(cones=Cones(dir_cones=...))` raised `NotImplementedError`."""
     _check_jax_autograd_through_z_x("cpu")

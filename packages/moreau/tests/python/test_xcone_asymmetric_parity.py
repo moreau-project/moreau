@@ -89,7 +89,7 @@ def test_exp_direct_x_cpu_cuda_parity():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="exp", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="exp", indices=[0, 1, 2])],
     )
 
     cpu = solve_on("cpu", P, q, A, b, cones)
@@ -111,7 +111,7 @@ def test_power_direct_x_cpu_cuda_parity():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="power", indices=[0, 1, 2], alpha=alpha)],
+        dir_cones=[moreau.DirectConeSpec(kind="power", indices=[0, 1, 2], alpha=alpha)],
     )
 
     cpu = solve_on("cpu", P, q, A, b, cones)
@@ -128,7 +128,7 @@ def test_power_direct_x_boundary_active_parity():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="power", indices=[0, 1, 2], alpha=alpha)],
+        dir_cones=[moreau.DirectConeSpec(kind="power", indices=[0, 1, 2], alpha=alpha)],
     )
 
     cpu = solve_on("cpu", P, q, A, b, cones)
@@ -151,8 +151,8 @@ def test_genpow_direct_x_cpu_cuda_parity():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[
-            moreau.XConeSpec(
+        dir_cones=[
+            moreau.DirectConeSpec(
                 kind="gen_power",
                 indices=[0, 1, 2],
                 alphas=alphas,
@@ -177,9 +177,9 @@ def test_genpow_direct_x_stacked_parity():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[
-            moreau.XConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1),
-            moreau.XConeSpec(kind="gen_power", indices=[3, 4, 5], alphas=[0.4, 0.6], dim2=1),
+        dir_cones=[
+            moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1),
+            moreau.DirectConeSpec(kind="gen_power", indices=[3, 4, 5], alphas=[0.4, 0.6], dim2=1),
         ]
     )
 
@@ -202,8 +202,8 @@ def test_genpow_direct_x_dim3_dense_path_parity():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[
-            moreau.XConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1),
+        dir_cones=[
+            moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1),
         ]
     )
     cpu = solve_on("cpu", P, q, A, b, cones)

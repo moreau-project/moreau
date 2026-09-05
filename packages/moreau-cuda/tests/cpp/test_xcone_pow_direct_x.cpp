@@ -54,7 +54,7 @@ TEST(XConePowDirectXTest, SimpleProblemConverges) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Power, {0, 1, 2}, 0, alpha});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Power, {0, 1, 2}, 0, alpha});
 
     Settings settings;
     settings.maxIter = 200;
@@ -134,7 +134,7 @@ TEST(XConePowDirectXTest, StackedConesConverge) {
 
     Cones cones{};
     for (int k = 0; k < K; ++k) {
-        cones.x_cones.push_back(SupportedXConeT{
+        cones.dir_cones.push_back(SupportedXConeT{
             XConeKind::Power,
             {3*k, 3*k+1, 3*k+2},
             0,      // psd_k (unused for Power)
@@ -202,7 +202,7 @@ TEST(XConePowDirectXTest, BatchedSimpleProblem) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Power, {0, 1, 2}, 0, alpha});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Power, {0, 1, 2}, 0, alpha});
 
     Settings settings;
     settings.maxIter = 200;

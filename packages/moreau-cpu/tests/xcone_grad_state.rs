@@ -32,7 +32,7 @@ fn run_direct_x<F: Fn() -> Vec<SupportedXConeT>>(
     let A = CscMatrix::<f64>::zeros((0, n));
     let b: Vec<f64> = vec![];
     let cones: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = make_xcones();
+    let dir_cones = make_xcones();
 
     let mut settings = DefaultSettings::default();
     settings.ipm.presolve_enable = false;
@@ -40,7 +40,7 @@ fn run_direct_x<F: Fn() -> Vec<SupportedXConeT>>(
     settings.verbose = false;
 
     let mut solver =
-        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, &x_cones, settings.clone()).unwrap();
+        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, &dir_cones, settings.clone()).unwrap();
     solver.solve();
     assert_eq!(solver.solution.status, SolverStatus::Solved);
 
@@ -50,7 +50,7 @@ fn run_direct_x<F: Fn() -> Vec<SupportedXConeT>>(
 
     if cached {
         let mut grad_state =
-            GradState::<f64>::new_with_xcones(P, q, &A, &b, &cones, &x_cones, settings.core())
+            GradState::<f64>::new_with_xcones(P, q, &A, &b, &cones, &dir_cones, settings.core())
                 .unwrap();
         solver
             .backward_batch(&dx, &ds, &dz, Some(&mut grad_state), DiffMethod::Exact)

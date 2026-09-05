@@ -21,7 +21,7 @@ pub struct DefaultKKTSystem<T: FloatT> {
     // Direct-x cone state. Holds NT-scaling (`w` for nonneg, etc.) across
     // IPM iterations, paralleling the slack `CompositeCone`. Empty when the
     // problem has no direct-x cones — in that case it costs nothing.
-    x_cones: CompositeXCone<T>,
+    dir_cones: CompositeXCone<T>,
 
     // solution vector for constant part of KKT solves
     x1: Vec<T>,
@@ -36,7 +36,7 @@ pub struct DefaultKKTSystem<T: FloatT> {
     workz: Vec<T>,
     work_conic: Vec<T>,
 
-    // Per-cone direct-x scratch, sized to `max(x_cones[i].indices.len())`.
+    // Per-cone direct-x scratch, sized to `max(dir_cones[i].indices.len())`.
     // Allocated once and reused across IPM iterations to satisfy the
     // "zero allocations inside iteration loops" rule. All consumers
     // truncate-or-resize to the current cone's k via `[..k]` slicing or
@@ -68,17 +68,17 @@ where
         settings: &DefaultSettings<T>,
         perm: Option<Vec<usize>>,
     ) -> Self {
-        let x_cones = data.composite_x_cones();
-        Self::new_with_perm_and_xcones(data, cones, x_cones, settings, perm)
+        let dir_cones = data.composite_dir_cones();
+        Self::new_with_perm_and_xcones(data, cones, dir_cones, settings, perm)
     }
 
     /// Create a new KKT system solver including direct-x cones and an
-    /// optional cached AMD permutation. Ownership of `x_cones` moves to
+    /// optional cached AMD permutation. Ownership of `dir_cones` moves to
     /// the KKT system so NT-scaling state persists across IPM iterations.
     pub fn new_with_perm_and_xcones(
         data: &DefaultProblemData<T>,
         cones: &CompositeCone<T>,
-        x_cones: CompositeXCone<T>,
+        dir_cones: CompositeXCone<T>,
         settings: &DefaultSettings<T>,
         perm: Option<Vec<usize>>,
     ) -> Self {
@@ -102,7 +102,7 @@ where
                 &data.P,
                 &data.A,
                 cones,
-                &x_cones,
+                &dir_cones,
                 m,
                 n,
                 settings.core(),
@@ -127,11 +127,11 @@ where
 
         // Per-cone direct-x scratch sized to the largest cone's k. Empty
         // when there are no direct-x cones.
-        let max_xcone_k = x_cones.iter().map(|e| e.indices.len()).max().unwrap_or(0);
+        let max_xcone_k = dir_cones.iter().map(|e| e.indices.len()).max().unwrap_or(0);
 
         Self {
             kktsolver,
-            x_cones,
+            dir_cones,
             x1,
             z1,
             x2,
@@ -166,12 +166,12 @@ where
     type C = CompositeCone<T>;
     type SE = DefaultSettings<T>;
 
-    fn x_cones_mut(&mut self) -> &mut CompositeXCone<T> {
-        &mut self.x_cones
+    fn dir_cones_mut(&mut self) -> &mut CompositeXCone<T> {
+        &mut self.dir_cones
     }
 
-    fn x_cones_ref(&self) -> &CompositeXCone<T> {
-        &self.x_cones
+    fn dir_cones_ref(&self) -> &CompositeXCone<T> {
+        &self.dir_cones
     }
 
     fn update(
@@ -183,7 +183,7 @@ where
         // update the linear solver with new cones
         let is_success = self
             .kktsolver
-            .update(cones, &mut self.x_cones, settings.core());
+            .update(cones, &mut self.dir_cones, settings.core());
 
         if !is_success {
             return is_success;
@@ -234,13 +234,13 @@ where
         // playing the role of cone's primal slack "s"). For Affine:
         // `c_J = variables.z_x[rng]`; for Combined/Centering: `c_J =
         // cone.Δs_from_Δz_offset(rhs.z_x[rng], x[J])` (cone's z = x[J]).
-        if !self.x_cones.is_empty() {
-            let x_cones = &mut self.x_cones;
+        if !self.dir_cones.is_empty() {
+            let dir_cones = &mut self.dir_cones;
             let c_j_buf = &mut self.xcone_scratch_c_j;
             let work_buf = &mut self.xcone_scratch_work;
             let gather_buf = &mut self.xcone_scratch_gather;
             let mut off = 0usize;
-            for entry in x_cones.iter_mut() {
+            for entry in dir_cones.iter_mut() {
                 let k = entry.indices.len();
                 let c_j = &mut c_j_buf[..k];
                 match step_direction {
@@ -309,7 +309,7 @@ where
             // gives Δz_J = -Hs_inv_J (E_J Δx) - c_J, mirroring the slack
             // recovery `Δs = -Hs Δz - c_slack` with primal/dual swapped.
             recover_direct_x_dual(
-                &mut self.x_cones,
+                &mut self.dir_cones,
                 &mut lhs.z_x,
                 &lhs.x,
                 rhs,
@@ -363,7 +363,7 @@ where
             // Direct-x Δz_J recovery — mirror of slack `Δs = -Hs Δz - c`
             // with primal/dual swapped.
             recover_direct_x_dual(
-                &mut self.x_cones,
+                &mut self.dir_cones,
                 &mut lhs.z_x,
                 &lhs.x,
                 rhs,
@@ -449,13 +449,13 @@ where
 /// with swapped (z_J, x[J]) args (so cone's Hs = z/x = Hs_inv).
 #[allow(clippy::too_many_arguments)]
 fn recover_direct_x_dual<T: FloatT>(
-    x_cones: &mut CompositeXCone<T>,
+    dir_cones: &mut CompositeXCone<T>,
     lhs_z_x: &mut [T],
     lhs_x: &[T],
     rhs: &DefaultVariables<T>,
     variables: &DefaultVariables<T>,
     step_direction: StepDirection,
-    // Preallocated scratch sized to max(x_cones[i].indices.len()); sliced
+    // Preallocated scratch sized to max(dir_cones[i].indices.len()); sliced
     // to [..k] per cone. See DefaultKKTSystem::xcone_scratch_*.
     c_j_buf: &mut [T],
     work_buf: &mut [T],
@@ -463,11 +463,11 @@ fn recover_direct_x_dual<T: FloatT>(
     hs_dx_buf: &mut [T],
     work2_buf: &mut [T],
 ) {
-    if x_cones.is_empty() {
+    if dir_cones.is_empty() {
         return;
     }
     let mut off = 0usize;
-    for entry in x_cones.iter_mut() {
+    for entry in dir_cones.iter_mut() {
         let k = entry.indices.len();
         let dx_gather = &mut gather_buf[..k];
         for (i, &idx) in entry.indices.iter().enumerate() {

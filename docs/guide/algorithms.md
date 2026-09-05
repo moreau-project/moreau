@@ -12,9 +12,9 @@ $$
 
 with $\mathcal{K}_1, \mathcal{K}_2$ products of convex cones: $\mathcal{K}_2$
 constrains the slack $s = b - Ax$ (the usual conic form), while $\mathcal{K}_1$
-constrains $x$ directly ("direct-x" cones). It then differentiates through the
+constrains $x$ directly ("direct" cones). It then differentiates through the
 solution map. Most pieces below come from published papers (cited); the parts
-original to Moreau — the **direct-x extension**, a primal–dual scaling and
+original to Moreau — the **direct extension**, a primal–dual scaling and
 higher-order corrector for the **generalized power cone**, and the
 structure-exploiting GPU KKT backends — each get their own section.
 
@@ -22,7 +22,7 @@ structure-exploiting GPU KKT backends — each get their own section.
 
 - **Interior-point method (IPM).** Default solver: a primal-dual IPM on the
   homogeneous embedding, based on **Clarabel** [1] (GPU port **CuClarabel** [2])
-  and extended for direct-x cones. The embedding and the Newton iteration are
+  and extended for direct cones. The embedding and the Newton iteration are
   spelled out in the next two sections.
 - **Active-set.** Handles only the zero+nonneg special case (CPU) — i.e. a
   dense, two-sided-inequality QP, no general cones. The vendored solver is
@@ -57,15 +57,15 @@ $$
 \qquad \tau, \kappa \ge 0, \;\; \tau\kappa = 0,
 $$
 
-where $x_J = E_J x$ is the sub-vector of $x$ that direct-x cone $J$ constrains,
+where $x_J = E_J x$ is the sub-vector of $x$ that direct cone $J$ constrains,
 $z_x$ its dual, and $E_J$ the selection of that cone's coordinates.
 
 The two cone families enter the embedding differently, and that difference is
 the subject of this note. A **slack** cone constrains $s = b - Ax$, so its dual
 $z$ reaches $x$ only through the constraint matrix — the $A^\top z$ term in
-$r_x$. A **direct-x** cone constrains a slice of $x$ itself, so its dual $z_x$
+$r_x$. A **direct** cone constrains a slice of $x$ itself, so its dual $z_x$
 enters $r_x$ directly, through $-\sum_J E_J^\top z_x$. Everything in the
-direct-x extension section below is a consequence of that one structural
+direct extension section below is a consequence of that one structural
 difference. Two further properties make this an *embedding* rather than the bare
 KKT system:
 
@@ -118,14 +118,14 @@ Each iteration is a **damped Newton step** on this relaxed system $F_\mu$:
 Iterate until the relative residuals $r_x, r_z, r_\tau$ and the gap fall below
 tolerance, then recover $(x, s, z)/\tau$.
 
-## The direct-x extension (new in Moreau)
+## The direct extension (new in Moreau)
 
-The slack/direct-x split in the embedding shows up again in the linearized
-Newton step — and this is where direct-x earns its keep. A slack cone's scaling
+The slack/direct split in the embedding shows up again in the linearized
+Newton step — and this is where direct earns its keep. A slack cone's scaling
 reaches the $x$-block of the KKT system only through $A$ (as $A^\top H_s^{-1} A$);
-a direct-x cone's lands in it directly:
+a direct cone's lands in it directly:
 
-- **Linearizing its complementarity.** Each direct-x cone carries the (relaxed)
+- **Linearizing its complementarity.** Each direct cone carries the (relaxed)
   complementarity $x_J \circ z_x = \mu e$, where $x_J = E_J x$ is the constrained
   slice and $z_x$ its dual. This is linearized *exactly* like a slack cone's
   $s \circ z$: NT scaling for symmetric cones, the barrier Hessian for
@@ -154,7 +154,7 @@ a direct-x cone's lands in it directly:
   exp/power/gen-power cones $F \ne F^*$, the swap is invalid; they carry explicit
   primal-barrier Hessian formulas instead.
 
-The backward pass extends the same way: a direct-x pair enters the adjoint system
+The backward pass extends the same way: a direct pair enters the adjoint system
 through $D\Pi_{\mathcal{K}_1^*}$, mirroring the slack derivation below.
 
 ## Asymmetric-cone scaling and correctors (beyond Clarabel)
@@ -220,11 +220,11 @@ rank-structured dual Hessian rather than an $O(\dim^3)$ dense solve, so the
 corrector is nearly free. Clarabel's 3D exponential and power cones already carry
 this term; Moreau matches them and extends it to the $N$-dimensional cone.
 
-### A primal-direct corrector for the direct-x asymmetric cones
+### A primal-direct corrector for the direct asymmetric cones
 
-The exponential and power cones in **direct-x** mode have no upstream analog —
-Clarabel has no direct-x cones at all. With $F \ne F^*$ the primal↔dual
-self-duality the symmetric direct-x cones exploit is unavailable, so Moreau
+The exponential and power cones in **direct** mode have no upstream analog —
+Clarabel has no direct cones at all. With $F \ne F^*$ the primal↔dual
+self-duality the symmetric direct cones exploit is unavailable, so Moreau
 scales these with the **dual-only primal barrier**
 $H_{s,x} = \mu\,\nabla^2 F_\text{primal}(x)$ and supplies a **primal-direct**
 third-order corrector
@@ -241,7 +241,7 @@ $F(s) = -\log(\varphi - s_2^2) - (1-\alpha)\log s_0 - \alpha\log s_1$ with
 $\varphi = s_0^{2\alpha} s_1^{2(1-\alpha)}$, in place of the approximate
 conjugate-dual primal Hessian (Karimi–Tunçel) Clarabel carries for the power
 cone — whose $(2,2)$ and off-diagonal entries are only approximate and stall the
-IPM once several direct-x power cones share the augmented $(1,1)$ block.
+IPM once several direct power cones share the augmented $(1,1)$ block.
 
 ## KKT linear solve (inside the IPM)
 
@@ -255,7 +255,7 @@ $$
 $$
 
 where $H_s \succ 0$ is the slack-cone scaling in the $(2,2)$ block,
-$D_x = \sum_J E_J^\top H_{s,x} E_J$ is the direct-x augmentation of the $(1,1)$
+$D_x = \sum_J E_J^\top H_{s,x} E_J$ is the direct augmentation of the $(1,1)$
 block (from the previous section), and $\varepsilon$ is the static
 regularization below. This solve is the dominant per-iteration cost. Moreau
 selects a backend by problem structure; `direct_solve_method='auto'` chooses for
@@ -308,7 +308,7 @@ $M = P + A^\top H_s^{-1} A$ of the $(2,2)$ block:
   $k_\text{total}$ dense / equality coupling rows. Factoring $S$ by Cholesky costs
   $O(k_\text{total}^3)$ with $k_\text{total} \ll n$. It is gated to zero+nonneg
   cones with a strictly diagonal $P$ and $k_\text{total} < n$, and requires every
-  column to be "covered" by a diagonal-$P$, sparse-bound, or direct-x entry —
+  column to be "covered" by a diagonal-$P$, sparse-bound, or direct entry —
   the conditioning guard on the inverted blocks, spelled out under
   [Conditioning](#conditioning) below. GPU-only, opt-in (never auto-selected).
 
@@ -324,7 +324,7 @@ inherits Clarabel's [1] conditioning stack:
   rescaled by diagonals $d, e$ — up to 10 Ruiz sweeps equalizing the row/column
   $\infty$-norms, with the cumulative scaling clipped to $[10^{-4}, 10^{4}]$ —
   which sharply cuts the condition number. The rescaling is **cone-aware**: a cone
-  that needs one shared scale across a slice (SOC, PSD, the direct-x cones) gets
+  that needs one shared scale across a slice (SOC, PSD, the direct cones) gets
   the geometric mean of $d$ over that slice, so the scaling commutes with cone
   membership and the unscaled iterate stays feasible.
 - **Static regularization + quasidefiniteness.** The reduced KKT is symmetric
@@ -340,7 +340,7 @@ inherits Clarabel's [1] conditioning stack:
   small Schur complement $S$, Riccati's per-stage blocks — and cap each block's
   condition number by construction. The static $\varepsilon$ floors every
   diagonal of $D$ and $S$ from below; on top of that, Woodbury runs only when
-  **every** column is "covered" (by a diagonal-$P$, sparse-bound, or direct-x
+  **every** column is "covered" (by a diagonal-$P$, sparse-bound, or direct
   entry), which holds each $D_j$ at its true scale instead of collapsing to
   $\varepsilon$. An uncovered column would give $D_j \approx \varepsilon$, a
   $\sim 1/\varepsilon$ entry in $D^{-1}$, and a Schur complement poisoned by

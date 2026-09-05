@@ -29,10 +29,10 @@ fn nonneg_direct_x_primal_infeasible() {
     let b = vec![-1.0; 1];
 
     let cones = vec![ZeroConeT(1)];
-    let x_cones = vec![NonnegativeXConeT(vec![0])];
+    let dir_cones = vec![NonnegativeXConeT(vec![0])];
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, nonneg_pinf_settings())
+        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, nonneg_pinf_settings())
             .unwrap();
     solver.solve();
 
@@ -55,10 +55,10 @@ fn nonneg_direct_x_dual_infeasible() {
     let b: Vec<f64> = vec![];
 
     let cones: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![NonnegativeXConeT(vec![0])];
+    let dir_cones = vec![NonnegativeXConeT(vec![0])];
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, nonneg_pinf_settings())
+        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, nonneg_pinf_settings())
             .unwrap();
     solver.solve();
 
@@ -82,10 +82,10 @@ fn soc_direct_x_primal_infeasible() {
     let b = vec![-1.0];
 
     let cones = vec![ZeroConeT(1)];
-    let x_cones = vec![SecondOrderXConeT(vec![0, 1, 2])];
+    let dir_cones = vec![SecondOrderXConeT(vec![0, 1, 2])];
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, nonneg_pinf_settings())
+        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, nonneg_pinf_settings())
             .unwrap();
     solver.solve();
 
@@ -108,10 +108,10 @@ fn soc_direct_x_dual_infeasible() {
     let b: Vec<f64> = vec![];
 
     let cones: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SecondOrderXConeT(vec![0, 1, 2])];
+    let dir_cones = vec![SecondOrderXConeT(vec![0, 1, 2])];
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, nonneg_pinf_settings())
+        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, nonneg_pinf_settings())
             .unwrap();
     solver.solve();
 
@@ -134,10 +134,10 @@ fn nonneg_direct_x_mixed_primal_infeasible() {
     let b = vec![-2.0];
 
     let cones = vec![ZeroConeT(1)];
-    let x_cones = vec![NonnegativeXConeT(vec![0, 1])];
+    let dir_cones = vec![NonnegativeXConeT(vec![0, 1])];
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, nonneg_pinf_settings())
+        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, nonneg_pinf_settings())
             .unwrap();
     solver.solve();
 
@@ -166,10 +166,10 @@ fn psd_direct_x_primal_infeasible() {
     let b = vec![-1.0];
 
     let cones = vec![ZeroConeT(1)];
-    let x_cones = vec![PSDTriangleXConeT(vec![0, 1, 2], k)];
+    let dir_cones = vec![PSDTriangleXConeT(vec![0, 1, 2], k)];
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, nonneg_pinf_settings())
+        DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, nonneg_pinf_settings())
             .unwrap();
     solver.solve();
 

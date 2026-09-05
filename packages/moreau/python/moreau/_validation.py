@@ -95,9 +95,9 @@ def _validate_problem_dimensions(P, q, A, b, cones):
             f"Total cone constraints must equal m = len(b) = {m}."
         )
 
-    # Validate direct-x cone indices lie in [0, n)
-    if hasattr(cones, "validate_x_cone_indices"):
-        cones.validate_x_cone_indices(n)
+    # Validate direct cone indices lie in [0, n)
+    if hasattr(cones, "validate_dir_cone_indices"):
+        cones.validate_dir_cone_indices(n)
 
 
 def _validate_csr_structure(
@@ -182,9 +182,9 @@ def _validate_csr_structure(
                 f"Valid range is [0, {n - 1}]."
             )
 
-    # Validate direct-x cone indices lie in [0, n)
-    if hasattr(cones, "validate_x_cone_indices"):
-        cones.validate_x_cone_indices(n)
+    # Validate direct cone indices lie in [0, n)
+    if hasattr(cones, "validate_dir_cone_indices"):
+        cones.validate_dir_cone_indices(n)
 
     # Validate cone dimensions sum to m
     cone_total = cones.total_constraints()

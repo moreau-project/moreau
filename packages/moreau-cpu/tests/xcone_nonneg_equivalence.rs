@@ -31,12 +31,12 @@ fn solve_direct_x_nonneg_qp(P: &CscMatrix<f64>, q: &[f64], n: usize) -> DefaultS
     let cones: Vec<SupportedConeT<f64>> = vec![];
 
     let indices: Vec<usize> = (0..n).collect();
-    let x_cones = vec![SupportedXConeT::NonnegativeXConeT(indices)];
+    let dir_cones = vec![SupportedXConeT::NonnegativeXConeT(indices)];
 
     let mut settings = DefaultSettings::default();
     settings.ipm.presolve_enable = false;
     let mut solver =
-        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, &x_cones, settings).unwrap();
+        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, &dir_cones, settings).unwrap();
     solver.solve();
     solver.solution
 }
@@ -125,12 +125,12 @@ fn test_partial_direct_x_nonneg() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones_dx = vec![SupportedXConeT::NonnegativeXConeT(vec![0, 2])];
+    let dir_cones_dx = vec![SupportedXConeT::NonnegativeXConeT(vec![0, 2])];
 
     let mut settings_dx = DefaultSettings::default();
     settings_dx.ipm.presolve_enable = false;
     let mut solver_dx =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones_dx, settings_dx)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones_dx, settings_dx)
             .unwrap();
     solver_dx.solve();
     let direct = solver_dx.solution;
@@ -204,11 +204,11 @@ fn test_backward_direct_x_matches_slack() {
         let A = CscMatrix::<f64>::zeros((0, n));
         let b: Vec<f64> = vec![];
         let cones: Vec<SupportedConeT<f64>> = vec![];
-        let x_cones = vec![SupportedXConeT::NonnegativeXConeT((0..n).collect())];
+        let dir_cones = vec![SupportedXConeT::NonnegativeXConeT((0..n).collect())];
         let mut settings = DefaultSettings::default();
         settings.ipm.presolve_enable = false;
         let mut solver =
-            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, settings).unwrap();
+            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, settings).unwrap();
         solver.solve();
         assert_eq!(solver.solution.status, SolverStatus::Solved);
         let dz: Vec<f64> = vec![];

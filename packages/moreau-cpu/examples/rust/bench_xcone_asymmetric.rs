@@ -59,14 +59,14 @@ fn time_solve_slack(
 fn time_solve_dx(
     P: &CscMatrix<f64>,
     q: &[f64],
-    x_cones: &[SupportedXConeT],
+    dir_cones: &[SupportedXConeT],
 ) -> (f64, u32, SolverStatus) {
     let n = q.len();
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
     let mut solver =
-        DefaultSolver::new_with_xcones(P, q, &A_dx, &b_dx, &cones_dx, x_cones, settings()).unwrap();
+        DefaultSolver::new_with_xcones(P, q, &A_dx, &b_dx, &cones_dx, dir_cones, settings()).unwrap();
     let t = Instant::now();
     solver.solve();
     (
@@ -96,10 +96,10 @@ fn make_exp_problem(
         q[3 * k + 2] = -5.0;
     }
     let cones_slack: Vec<_> = (0..K).map(|_| ExponentialConeT()).collect();
-    let x_cones: Vec<_> = (0..K)
+    let dir_cones: Vec<_> = (0..K)
         .map(|k| SupportedXConeT::ExponentialXConeT(vec![3 * k, 3 * k + 1, 3 * k + 2]))
         .collect();
-    (P, q, cones_slack, x_cones)
+    (P, q, cones_slack, dir_cones)
 }
 
 /// K stacked 3D PowerCones. Target `(2, 3, 1)` per cone (interior for α=0.4).
@@ -120,10 +120,10 @@ fn make_pow_problem(
         q[3 * k + 2] = -1.0;
     }
     let cones_slack: Vec<_> = (0..K).map(|_| PowerConeT(POW_ALPHA)).collect();
-    let x_cones: Vec<_> = (0..K)
+    let dir_cones: Vec<_> = (0..K)
         .map(|k| SupportedXConeT::PowerXConeT(vec![3 * k, 3 * k + 1, 3 * k + 2], POW_ALPHA))
         .collect();
-    (P, q, cones_slack, x_cones)
+    (P, q, cones_slack, dir_cones)
 }
 
 /// One GenPowerCone with `dim1` p-coords (uniform alphas) and `dim2` w-coords.
@@ -149,12 +149,12 @@ fn make_genpow_problem(
         q[dim1 + j] = -0.5;
     }
     let cones_slack = vec![GenPowerConeT(alphas.clone(), dim2)];
-    let x_cones = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         alphas,
         dim2,
     )];
-    (P, q, cones_slack, x_cones)
+    (P, q, cones_slack, dir_cones)
 }
 
 // ─── Bench harness ───────────────────────────────────────────────────
@@ -189,7 +189,7 @@ fn run_bench(
     P: &CscMatrix<f64>,
     q: &[f64],
     cones_slack: &[SupportedConeT<f64>],
-    x_cones: &[SupportedXConeT],
+    dir_cones: &[SupportedXConeT],
     iters: usize,
 ) {
     let A_slack = neg_eye(n);
@@ -201,13 +201,13 @@ fn run_bench(
 
     // Warmup
     let _ = time_solve_slack(P, q, &A_slack, &b_slack, cones_slack);
-    let _ = time_solve_dx(P, q, x_cones);
+    let _ = time_solve_dx(P, q, dir_cones);
 
     let mut s_runs = Vec::with_capacity(iters);
     let mut d_runs = Vec::with_capacity(iters);
     for _ in 0..iters {
         s_runs.push(time_solve_slack(P, q, &A_slack, &b_slack, cones_slack));
-        d_runs.push(time_solve_dx(P, q, x_cones));
+        d_runs.push(time_solve_dx(P, q, dir_cones));
     }
 
     bench_one(label, n, nnz_kkt_slack, nnz_kkt_dx, &s_runs, &d_runs);
@@ -253,7 +253,7 @@ fn main() {
         let cones_slack: Vec<SupportedConeT<f64>> = (0..K)
             .map(|_| GenPowerConeT(alphas.clone(), dim2))
             .collect();
-        let x_cones: Vec<SupportedXConeT> = (0..K)
+        let dir_cones: Vec<SupportedXConeT> = (0..K)
             .map(|k| {
                 SupportedXConeT::GenPowerXConeT(
                     vec![3 * k, 3 * k + 1, 3 * k + 2],
@@ -268,7 +268,7 @@ fn main() {
             &P,
             &q,
             &cones_slack,
-            &x_cones,
+            &dir_cones,
             iters,
         );
     }

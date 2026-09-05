@@ -1,7 +1,7 @@
 // test_xcone_scaffolding.cpp
 //
 // Tests for the direct-x cone metadata scaffolding on CUDA:
-// - `Cones.x_cones` stores user-supplied direct-x specs.
+// - `Cones.dir_cones` stores user-supplied direct-x specs.
 // - `SupportedXConeT` constructs cleanly.
 // - `Cones::initialize()` populates the direct-x metadata layout.
 //
@@ -20,7 +20,7 @@ using namespace moreau;
 TEST(XConeScaffoldingTest, DefaultConesHaveNoXCones) {
     Cones cones{};
     EXPECT_EQ(cones.numXCones, 0);
-    EXPECT_TRUE(cones.x_cones.empty());
+    EXPECT_TRUE(cones.dir_cones.empty());
     EXPECT_EQ(cones.totalXConeNumel, 0);
     EXPECT_EQ(cones.numSparseXSoc, 0);
 }
@@ -43,14 +43,14 @@ TEST(XConeScaffoldingTest, SupportedXConeTFieldsRoundTrip) {
 
 TEST(XConeScaffoldingTest, ConesStoresUserXCones) {
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1}});
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {2, 3, 4}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {2, 3, 4}});
 
-    ASSERT_EQ(cones.x_cones.size(), 2u);
-    EXPECT_EQ(cones.x_cones[0].kind, XConeKind::Nonneg);
-    EXPECT_EQ(cones.x_cones[0].indices.size(), 2u);
-    EXPECT_EQ(cones.x_cones[1].kind, XConeKind::SOC);
-    EXPECT_EQ(cones.x_cones[1].indices.size(), 3u);
+    ASSERT_EQ(cones.dir_cones.size(), 2u);
+    EXPECT_EQ(cones.dir_cones[0].kind, XConeKind::Nonneg);
+    EXPECT_EQ(cones.dir_cones[0].indices.size(), 2u);
+    EXPECT_EQ(cones.dir_cones[1].kind, XConeKind::SOC);
+    EXPECT_EQ(cones.dir_cones[1].indices.size(), 3u);
 }
 
 TEST(XConeScaffoldingTest, InitializeAcceptsDenseSOCXCones) {
@@ -58,7 +58,7 @@ TEST(XConeScaffoldingTest, InitializeAcceptsDenseSOCXCones) {
     // step-math kernels and direct-x KKT assembly all handle it.
     Cones cones{};
     cones.numNonnegCones = 1;
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
 
     cudaStream_t stream;
@@ -74,7 +74,7 @@ TEST(XConeScaffoldingTest, InitializeAcceptsSparseSOCXCones) {
     // end-to-end in scaling, refresh, and step-math.
     Cones cones{};
     cones.numNonnegCones = 1;
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::SOC, {0, 1, 2, 3, 4}});  // dim = 5
 
     cudaStream_t stream;
@@ -91,7 +91,7 @@ TEST(XConeScaffoldingTest, InitializeAcceptsLargeSOCXCones) {
     Cones cones{};
     std::vector<int64_t> indices;
     for (int64_t i = 0; i < 64; ++i) indices.push_back(i);  // dim = 64
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, indices});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, indices});
 
     cudaStream_t stream;
     ASSERT_EQ(cudaStreamCreate(&stream), cudaSuccess);
@@ -104,10 +104,10 @@ TEST(XConeScaffoldingTest, InitializeAcceptsLargeSOCXCones) {
 TEST(XConeScaffoldingTest, InitializeAllocatesNonnegXConeArrays) {
     // Nonneg direct-x cones should pass through initialize(), allocating
     // and uploading the d_xcone_* metadata arrays plus the batched
-    // working storage. Verifies the arrays round-trip the user x_cones.
+    // working storage. Verifies the arrays round-trip the user dir_cones.
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {4}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {4}});
 
     cudaStream_t stream;
     ASSERT_EQ(cudaStreamCreate(&stream), cudaSuccess);
@@ -145,9 +145,9 @@ TEST(XConeScaffoldingTest, InitializePsdXConeMetadataLayout) {
     // consume.
     Cones cones{};
     cones.numZeroCones = 1;
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::PSD, {0, 1, 2}, /*psd_k=*/2});
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::PSD, {3, 4, 5, 6, 7, 8}, /*psd_k=*/3});
 
     cudaStream_t stream;
@@ -202,7 +202,7 @@ TEST(XConeScaffoldingTest, InitializePsdXConeMetadataLayout) {
 TEST(XConeScaffoldingTest, InitializePsdXConeRejectsBadShape) {
     // psd_k must match indices.size() == k(k+1)/2.
     Cones cones{};
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::PSD, {0, 1, 2, 3}, /*psd_k=*/3});  // 4 != 6
 
     cudaStream_t stream;
@@ -217,11 +217,11 @@ TEST(XConeScaffoldingTest, MixedPsdAndSocXConeMetadata) {
     // Mixed direct-x stack: SOC and PSD coexist, distinct PSD-only
     // offsets are populated only for the PSD cones.
     Cones cones{};
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::SOC, {0, 1, 2}});                 // dim=3
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::PSD, {3, 4, 5}, /*psd_k=*/2});    // svec=3
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::Nonneg, {6, 7}});                 // dim=2
 
     cudaStream_t stream;
@@ -256,7 +256,7 @@ TEST(XConeScaffoldingTest, InitializeIsUnchangedWhenXConesEmpty) {
     Cones cones{};
     cones.numZeroCones = 1;
     cones.numNonnegCones = 2;
-    ASSERT_TRUE(cones.x_cones.empty());
+    ASSERT_TRUE(cones.dir_cones.empty());
 
     cudaStream_t stream;
     ASSERT_EQ(cudaStreamCreate(&stream), cudaSuccess);
@@ -282,7 +282,7 @@ TEST(XConeScaffoldingTest, KKTIndexMapForNonnegXCone) {
 
     Cones cones{};
     cones.numZeroCones = 1;
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
 
     cudaStream_t stream;
     ASSERT_EQ(cudaStreamCreate(&stream), cudaSuccess);
@@ -323,7 +323,7 @@ TEST(XConeScaffoldingTest, KKTSparseSOCAddsExpansionColumns) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::SOC, {0, 1, 2, 3, 4}});  // dim=5 -> sparse
 
     cudaStream_t stream;
@@ -397,7 +397,7 @@ TEST(XConeScaffoldingTest, RefreshXConeHsKernelWritesBaselinePlusHs) {
 
     Cones cones{};
     cones.numZeroCones = 1;
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
 
     cudaStream_t stream;
     ASSERT_EQ(cudaStreamCreate(&stream), cudaSuccess);
@@ -467,7 +467,7 @@ TEST(XConeScaffoldingTest, UpdateXConesNonnegScalingKernel) {
     //   lam[p] = sqrt(x[J[p]] * z[p])
     //   Hs[p]  = x[J[p]] / z[p]
     // We set up the metadata device arrays by hand (Cones::initialize()
-    // still throws for non-empty x_cones, so we bypass it).
+    // still throws for non-empty dir_cones, so we bypass it).
     const int64_t batchSize = 2;
     const int64_t n = 5;
     const int64_t numXCones = 1;
@@ -567,7 +567,7 @@ TEST(XConeScaffoldingTest, KKTInitAndRefreshXConePxBaseline) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
 
     cudaStream_t stream;
     ASSERT_EQ(cudaStreamCreate(&stream), cudaSuccess);
@@ -655,7 +655,7 @@ TEST(XConeScaffoldingTest, KKTIndexMapForDenseSOCXCone) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {1, 0, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {1, 0, 2}});
 
     cudaStream_t stream;
     ASSERT_EQ(cudaStreamCreate(&stream), cudaSuccess);

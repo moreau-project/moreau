@@ -13,7 +13,7 @@ Compares slack-form vs direct-x form for each cone kind across:
 
 Slack form embeds the cone as a slack: `Bx = c, −Ix + s = 0, s ∈ K`,
 with m = (n_eq + |J|) constraints. Direct-x form declares the cone on
-`x` directly via `Cones.x_cones=[XConeSpec(...)]`, with m = n_eq. For
+`x` directly via `Cones.dir_cones=[DirectConeSpec(...)]`, with m = n_eq. For
 mixed-cone problems a third `hybrid` form declares the first cone block
 direct-x and embeds the remaining blocks as slacks. All forms solve
 mathematically equivalent problems and converge to the same optimum
@@ -42,7 +42,7 @@ import moreau
 # Per-cone problem builders.
 #
 # Each builder returns a tuple (P, q, A_slack, b_slack, slack_cones,
-# A_dirx, b_dirx, dirx_cones) — the SAME problem in two formulations.
+# A_dirx, b_dirx, dirdir_cones) — the SAME problem in two formulations.
 # Sparsity pattern is independent of seed/values; values come from rng(seed).
 # ---------------------------------------------------------------------------
 
@@ -74,7 +74,7 @@ class ConeProblem:
     m_slack: int
     m_dirx: int
     slack_cones: moreau.Cones
-    dirx_cones: moreau.Cones
+    dirdir_cones: moreau.Cones
     target_or_cost_fn: callable  # rng → np.ndarray (shape (n,))
     interior_x0_fn: callable  # () → np.ndarray (shape (n,))
     cone_x_kind: str  # 'nonneg', 'soc', 'exp', 'power', 'psd', 'gen_power'
@@ -168,7 +168,7 @@ def _build_dirx_problem(
         nnz_A_dirx = B.nnz
     m_dirx = n_eq
 
-    dirx_cones = moreau.Cones(num_zero_cones=n_eq, x_cones=dirx_xcones)
+    dirdir_cones = moreau.Cones(num_zero_cones=n_eq, dir_cones=dirx_xcones)
 
     def gen_values(seed: int):
         rng = np.random.default_rng(seed)
@@ -212,7 +212,7 @@ def _build_dirx_problem(
             m_slack=m_slack,
             m_dirx=m_dirx,
             slack_cones=slack_cones,
-            dirx_cones=dirx_cones,
+            dirdir_cones=dirdir_cones,
             target_or_cost_fn=target_fn,
             interior_x0_fn=x0_fn,
             cone_x_kind=kind,
@@ -226,7 +226,7 @@ def _build_dirx_problem(
 # Per-cone-kind problem factories
 def make_nonneg(dim: int, n_eq: int, regime: str, seed_offset: int) -> Tuple[ConeProblem, callable]:
     slack_cones = moreau.Cones(num_zero_cones=n_eq, num_nonneg_cones=dim)
-    dirx_xc = [moreau.XConeSpec(kind="nonneg", indices=list(range(dim)))]
+    dirx_xc = [moreau.DirectConeSpec(kind="nonneg", indices=list(range(dim)))]
 
     def target_fn(rng):
         if regime == "interior":
@@ -257,7 +257,7 @@ def make_nonneg(dim: int, n_eq: int, regime: str, seed_offset: int) -> Tuple[Con
 
 def make_soc(dim: int, n_eq: int, regime: str, seed_offset: int) -> Tuple[ConeProblem, callable]:
     slack_cones = moreau.Cones(num_zero_cones=n_eq, so_cone_dims=[dim])
-    dirx_xc = [moreau.XConeSpec(kind="soc", indices=list(range(dim)))]
+    dirx_xc = [moreau.DirectConeSpec(kind="soc", indices=list(range(dim)))]
 
     def target_fn(rng):
         if regime == "interior":
@@ -298,7 +298,7 @@ def make_exp(
     n = 3 * num_stacks
     slack_cones = moreau.Cones(num_zero_cones=n_eq, num_exp_cones=num_stacks)
     dirx_xc = [
-        moreau.XConeSpec(kind="exp", indices=[3 * k, 3 * k + 1, 3 * k + 2])
+        moreau.DirectConeSpec(kind="exp", indices=[3 * k, 3 * k + 1, 3 * k + 2])
         for k in range(num_stacks)
     ]
 
@@ -337,7 +337,7 @@ def make_power(
     n = 3 * num_stacks
     slack_cones = moreau.Cones(num_zero_cones=n_eq, power_alphas=[alpha] * num_stacks)
     dirx_xc = [
-        moreau.XConeSpec(kind="power", indices=[3 * k, 3 * k + 1, 3 * k + 2], alpha=alpha)
+        moreau.DirectConeSpec(kind="power", indices=[3 * k, 3 * k + 1, 3 * k + 2], alpha=alpha)
         for k in range(num_stacks)
     ]
 
@@ -368,7 +368,7 @@ def make_power(
 def make_psd(k: int, n_eq: int, regime: str, seed_offset: int) -> Tuple[ConeProblem, callable]:
     n = k * (k + 1) // 2
     slack_cones = moreau.Cones(num_zero_cones=n_eq, psd_dims=[k])
-    dirx_xc = [moreau.XConeSpec(kind="psd_triangle", indices=list(range(n)), psd_k=k)]
+    dirx_xc = [moreau.DirectConeSpec(kind="psd_triangle", indices=list(range(n)), psd_k=k)]
 
     def target_fn(rng):
         return rng.standard_normal(n) * 0.5
@@ -403,7 +403,7 @@ def make_gen_power(
     n = dim1 + dim2
     alphas = [1.0 / dim1] * dim1  # uniform
     slack_cones = moreau.Cones(num_zero_cones=n_eq, gen_power_cone_params=[(alphas, dim2)])
-    dirx_xc = [moreau.XConeSpec(kind="gen_power", indices=list(range(n)), alphas=alphas, dim2=dim2)]
+    dirx_xc = [moreau.DirectConeSpec(kind="gen_power", indices=list(range(n)), alphas=alphas, dim2=dim2)]
 
     def target_fn(rng):
         return rng.standard_normal(n) * 0.5
@@ -431,10 +431,10 @@ def make_gen_power(
     return p, gv
 
 
-def _merge_slack_cones(plist, num_zero: int, x_cones=None) -> moreau.Cones:
+def _merge_slack_cones(plist, num_zero: int, dir_cones=None) -> moreau.Cones:
     """Merge the slack-form cones of `plist` into one canonical Cones.
 
-    `x_cones`, if given, are attached as direct-x cones (used by the
+    `dir_cones`, if given, are attached as direct-x cones (used by the
     hybrid formulation where some blocks stay direct-x).
     """
     num_nn = sum(getattr(p.slack_cones, "num_nonneg_cones", 0) or 0 for p in plist)
@@ -463,8 +463,8 @@ def _merge_slack_cones(plist, num_zero: int, x_cones=None) -> moreau.Cones:
         kw["psd_dims"] = psd_dims
     if gpc_params:
         kw["gen_power_cone_params"] = gpc_params
-    if x_cones:
-        kw["x_cones"] = x_cones
+    if dir_cones:
+        kw["dir_cones"] = dir_cones
     return moreau.Cones(**kw)
 
 
@@ -477,7 +477,7 @@ def make_mixed(label: str, parts, regime: str, seed_offset: int) -> Tuple[ConePr
 
     Slack form: A_slack = [B_block_diag; −I_total], cones = [zero (sum eq);
     block_1 cone; block_2 cone; ...].
-    Direct-x form: A_dirx = B_block_diag, x_cones with shifted indices.
+    Direct-x form: A_dirx = B_block_diag, dir_cones with shifted indices.
     """
     sub = [fn() for fn in parts]
     sub_p = [s[0] for s in sub]
@@ -532,20 +532,20 @@ def make_mixed(label: str, parts, regime: str, seed_offset: int) -> Tuple[ConePr
     # Cones: merge slack_cones (zero cones first; then cone-list per block).
     slack_cones = _merge_slack_cones(sub_p, n_eq_total)
 
-    # Direct-x cones: shift each block's x_cones indices by n_offs[i].
+    # Direct-x cones: shift each block's dir_cones indices by n_offs[i].
     def _shift_xcones(plist_idx):
         out = []
         for i in plist_idx:
-            for xc in getattr(sub_p[i].dirx_cones, "x_cones", None) or []:
+            for xc in getattr(sub_p[i].dirdir_cones, "dir_cones", None) or []:
                 kw = dict(kind=xc.kind, indices=[int(idx) + n_offs[i] for idx in xc.indices])
                 for attr in ("alpha", "alphas", "dim2", "psd_k"):
                     v = getattr(xc, attr, None)
                     if v is not None:
                         kw[attr] = v
-                out.append(moreau.XConeSpec(**kw))
+                out.append(moreau.DirectConeSpec(**kw))
         return out
 
-    dirx_cones = moreau.Cones(num_zero_cones=n_eq_total, x_cones=_shift_xcones(range(len(sub_p))))
+    dirdir_cones = moreau.Cones(num_zero_cones=n_eq_total, dir_cones=_shift_xcones(range(len(sub_p))))
 
     # Hybrid form: block 0 declared direct-x, blocks 1.. embedded as slacks.
     # A_hybrid = [B_total; −I over the slack blocks' columns only].
@@ -559,7 +559,7 @@ def make_mixed(label: str, parts, regime: str, seed_offset: int) -> Tuple[ConePr
     A_hybrid_ci = np.empty(nnz_A_hybrid, dtype=np.int64)
     A_hybrid_ci[:B_nnz] = B_ci
     A_hybrid_ci[B_nnz:] = n_offs[1] + np.arange(n_slack_vars, dtype=np.int64)
-    hybrid_cones = _merge_slack_cones(sub_p[1:], n_eq_total, x_cones=_shift_xcones([0]))
+    hybrid_cones = _merge_slack_cones(sub_p[1:], n_eq_total, dir_cones=_shift_xcones([0]))
 
     def gen_values(seed: int):
         P_parts, A_slack_B_parts, A_dirx_parts = [], [], []
@@ -607,7 +607,7 @@ def make_mixed(label: str, parts, regime: str, seed_offset: int) -> Tuple[ConePr
         m_slack=m_slack,
         m_dirx=m_dirx,
         slack_cones=slack_cones,
-        dirx_cones=dirx_cones,
+        dirdir_cones=dirdir_cones,
         target_or_cost_fn=lambda rng: np.zeros(n_total),
         interior_x0_fn=lambda: np.zeros(n_total),
         cone_x_kind="mixed",
@@ -728,7 +728,7 @@ def _solve_batched(
         m = p.m_dirx
         A_ro = p.A_dirx_row_offsets
         A_ci = p.A_dirx_col_indices
-        cones = p.dirx_cones
+        cones = p.dirdir_cones
     elif mode == "hybrid":
         if p.hybrid_cones is None:
             raise ValueError(f"hybrid mode unsupported for kind={p.kind}")

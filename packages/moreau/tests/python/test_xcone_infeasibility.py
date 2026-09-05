@@ -29,7 +29,7 @@ def test_nonneg_direct_x_primal_infeasible(device):
     b = np.array([-1.0])
     cones = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0])],
     )
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=_settings(device))
     solver.solve()
@@ -46,7 +46,7 @@ def test_nonneg_direct_x_dual_infeasible(device):
     A = sparse.csr_matrix(np.zeros((0, 1)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0])],
     )
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=_settings(device))
     solver.solve()
@@ -68,7 +68,7 @@ def test_soc_direct_x_primal_infeasible(device):
     b = np.array([-1.0])
     cones = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="soc", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="soc", indices=[0, 1, 2])],
     )
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=_settings(device))
     solver.solve()
@@ -86,7 +86,7 @@ def test_soc_direct_x_dual_infeasible(device):
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="soc", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="soc", indices=[0, 1, 2])],
     )
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=_settings(device))
     solver.solve()
@@ -108,7 +108,7 @@ def test_psd_direct_x_primal_infeasible(device):
     b = np.array([-1.0])
     cones = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="psd_triangle", indices=[0, 1, 2], psd_k=2)],
+        dir_cones=[moreau.DirectConeSpec(kind="psd_triangle", indices=[0, 1, 2], psd_k=2)],
     )
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=_settings(device))
     solver.solve()
@@ -129,7 +129,7 @@ def test_mixed_direct_x_primal_infeasible(device):
     b = np.array([-2.0])
     cones = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0, 1])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1])],
     )
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=_settings(device))
     solver.solve()

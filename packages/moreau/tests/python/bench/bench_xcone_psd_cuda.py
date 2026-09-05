@@ -5,7 +5,7 @@ Run:
 
 Same problem instance runs through all four paths via `moreau.Solver`
 with `device='cpu'` vs `device='cuda'` and Cones configured for slack
-(non-empty `psd_dims`, A = -I) vs direct-x (non-empty `x_cones`,
+(non-empty `psd_dims`, A = -I) vs direct-x (non-empty `dir_cones`,
 m = 0). Reports wall-clock (mean / p95 / min), iterations, and
 pairwise speedups.
 
@@ -168,8 +168,8 @@ def _make_single_psd(k: int, seed: int = 0) -> Dict[str, Callable[[], tuple]]:
         A = sparse.csr_matrix(np.zeros((0, n)))
         b = np.array([])
         cones = moreau.Cones(
-            x_cones=[
-                moreau.XConeSpec(
+            dir_cones=[
+                moreau.DirectConeSpec(
                     kind="psd_triangle",
                     indices=list(range(n)),
                     psd_k=k,
@@ -211,15 +211,15 @@ def _make_tiled_psds(n_psd: int, k: int, seed: int = 0) -> Dict[str, Callable[[]
     def _direct(settings):
         A = sparse.csr_matrix(np.zeros((0, n)))
         b = np.array([])
-        x_cones = [
-            moreau.XConeSpec(
+        dir_cones = [
+            moreau.DirectConeSpec(
                 kind="psd_triangle",
                 indices=list(range(c * svec_block, (c + 1) * svec_block)),
                 psd_k=k,
             )
             for c in range(n_psd)
         ]
-        return _solve(P, q, A, b, cones=moreau.Cones(x_cones=x_cones), settings=settings)
+        return _solve(P, q, A, b, cones=moreau.Cones(dir_cones=dir_cones), settings=settings)
 
     return {
         "cpu-slack": lambda: _slack(s_cpu),
@@ -298,7 +298,7 @@ def _make_batched_single_psd(
     A_direct = sparse.csr_matrix(np.zeros((0, n)))
     b_direct = np.zeros((batch_size, 0))
     cones_direct = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="psd_triangle", indices=list(range(n)), psd_k=k)],
+        dir_cones=[moreau.DirectConeSpec(kind="psd_triangle", indices=list(range(n)), psd_k=k)],
     )
 
     return {

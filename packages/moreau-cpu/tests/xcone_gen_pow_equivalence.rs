@@ -33,7 +33,7 @@ fn test_gen_pow_direct_x_scaffolding_does_not_crash() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         alphas.clone(),
         dim2,
@@ -46,7 +46,7 @@ fn test_gen_pow_direct_x_scaffolding_does_not_crash() {
     settings.max_iter = 200;
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones, settings)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones, settings)
             .expect("GenPowerCone direct-x construction must succeed");
     solver.solve();
 
@@ -72,7 +72,7 @@ fn test_gen_pow_direct_x_solves_simple_problem() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         alphas,
         dim2,
@@ -85,7 +85,7 @@ fn test_gen_pow_direct_x_solves_simple_problem() {
     settings.max_iter = 200;
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones, settings)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones, settings)
             .unwrap();
     solver.solve();
     assert!(
@@ -120,7 +120,7 @@ fn test_gen_pow_direct_x_high_dim_solves() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         alphas,
         dim2,
@@ -133,7 +133,7 @@ fn test_gen_pow_direct_x_high_dim_solves() {
     settings.max_iter = 200;
 
     let mut solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones, settings)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones, settings)
             .unwrap();
     solver.solve();
     assert!(
@@ -180,13 +180,13 @@ fn test_gen_pow_direct_x_matches_slack() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         alphas,
         dim2,
     )];
     let mut d_solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones, settings)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones, settings)
             .unwrap();
     d_solver.solve();
     assert!(
@@ -263,13 +263,13 @@ fn test_gen_pow_direct_x_sparse_pd_matches_slack() {
     let A_dx = CscMatrix::<f64>::zeros((0, n));
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         alphas,
         dim2,
     )];
     let mut d_solver =
-        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &x_cones, settings)
+        DefaultSolver::new_with_xcones(&P, &q, &A_dx, &b_dx, &cones_dx, &dir_cones, settings)
             .unwrap();
     d_solver.solve();
     assert!(
@@ -358,7 +358,7 @@ fn test_gen_pow_direct_x_dense_sparse_parity() {
     }
 
     // Default threshold → dense path.
-    let x_cones_dense = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones_dense = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         alphas.clone(),
         dim2,
@@ -369,7 +369,7 @@ fn test_gen_pow_direct_x_dense_sparse_parity() {
         &A_dx,
         &b_dx,
         &cones_dx,
-        &x_cones_dense,
+        &dir_cones_dense,
         settings.clone(),
     )
     .unwrap();
@@ -385,7 +385,7 @@ fn test_gen_pow_direct_x_dense_sparse_parity() {
 
     // Threshold = 0 → forces sparse path even at small dim.
     let _guard = EnvGuard::set("0");
-    let x_cones_sparse = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones_sparse = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         alphas,
         dim2,
@@ -396,7 +396,7 @@ fn test_gen_pow_direct_x_dense_sparse_parity() {
         &A_dx,
         &b_dx,
         &cones_dx,
-        &x_cones_sparse,
+        &dir_cones_sparse,
         settings.clone(),
     )
     .unwrap();
@@ -450,7 +450,7 @@ fn test_gen_pow_direct_x_dense_sparse_parity() {
         q_active[dim1 + j] = -10.0;
     }
 
-    let x_cones_active_dense = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones_active_dense = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         vec![1.0_f64 / dim1 as f64; dim1],
         dim2,
@@ -461,14 +461,14 @@ fn test_gen_pow_direct_x_dense_sparse_parity() {
         &A_dx,
         &b_dx,
         &cones_dx,
-        &x_cones_active_dense,
+        &dir_cones_active_dense,
         settings.clone(),
     )
     .unwrap();
     dense_active.solve();
 
     let _guard = EnvGuard::set("0");
-    let x_cones_active_sparse = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones_active_sparse = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         vec![1.0_f64 / dim1 as f64; dim1],
         dim2,
@@ -479,7 +479,7 @@ fn test_gen_pow_direct_x_dense_sparse_parity() {
         &A_dx,
         &b_dx,
         &cones_dx,
-        &x_cones_active_sparse,
+        &dir_cones_active_sparse,
         settings,
     )
     .unwrap();
@@ -551,13 +551,13 @@ fn test_backward_direct_x_gen_pow_matches_slack() {
         let A = CscMatrix::<f64>::zeros((0, n));
         let b: Vec<f64> = vec![];
         let cones: Vec<SupportedConeT<f64>> = vec![];
-        let x_cones = vec![SupportedXConeT::GenPowerXConeT(
+        let dir_cones = vec![SupportedXConeT::GenPowerXConeT(
             (0..n).collect(),
             alphas.clone(),
             dim2,
         )];
         let mut solver =
-            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, settings).unwrap();
+            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, settings).unwrap();
         solver.solve();
         let dz: Vec<f64> = vec![];
         let ds: Vec<f64> = vec![];

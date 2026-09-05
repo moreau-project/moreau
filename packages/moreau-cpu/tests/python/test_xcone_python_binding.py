@@ -16,11 +16,11 @@ def _direct_x_solve_nonneg(P, q, n):
     """Solve `min 0.5 x'Px + q'x s.t. x >= 0` via direct-x on all of x."""
     A = sparse.csr_matrix(np.zeros((0, n)))
     cones = []
-    x_cones = [cpu.NonnegativeXConeT(list(range(n)))]
+    dir_cones = [cpu.NonnegativeXConeT(list(range(n)))]
 
     settings = cpu.DefaultSettings()
     settings.ipm.presolve_enable = False
-    solver = cpu.DefaultSolver.new_with_xcones(P, list(q), A, [], cones, x_cones, settings)
+    solver = cpu.DefaultSolver.new_with_xcones(P, list(q), A, [], cones, dir_cones, settings)
     solver.solve()
     return solver.get_solution()
 
@@ -83,10 +83,10 @@ def test_soc_direct_x_matches_slack():
     # Direct-x form
     A_dx = sparse.csr_matrix(np.zeros((0, n)))
     cones_dx = []
-    x_cones = [cpu.SecondOrderXConeT(list(range(n)))]
+    dir_cones = [cpu.SecondOrderXConeT(list(range(n)))]
     settings2 = cpu.DefaultSettings()
     settings2.ipm.presolve_enable = False
-    dx_solver = cpu.DefaultSolver.new_with_xcones(P, q, A_dx, [], cones_dx, x_cones, settings2)
+    dx_solver = cpu.DefaultSolver.new_with_xcones(P, q, A_dx, [], cones_dx, dir_cones, settings2)
     dx_solver.solve()
     dx_sol = dx_solver.get_solution()
 

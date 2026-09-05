@@ -20,7 +20,7 @@ fn test_compiled_solver_grad_state_direct_x_nonneg_batch() {
     let A_ro: Vec<usize> = vec![0; m + 1];
     let A_ci: Vec<usize> = vec![];
     let cones: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::NonnegativeXConeT((0..n).collect())];
+    let dir_cones = vec![SupportedXConeT::NonnegativeXConeT((0..n).collect())];
 
     let P_values = vec![1.0, 1.0, 1.0];
     let A_values: Vec<f64> = vec![];
@@ -42,7 +42,7 @@ fn test_compiled_solver_grad_state_direct_x_nonneg_batch() {
         &A_ro,
         &A_ci,
         &cones,
-        &x_cones,
+        &dir_cones,
         settings.clone(),
         1,
         true,
@@ -80,7 +80,7 @@ fn test_compiled_solver_grad_state_direct_x_nonneg_batch() {
     let A = CscMatrix::<f64>::zeros((m, n));
     for (qb, expected) in [(q1, &batched[0]), (q2, &batched[1])] {
         let mut s =
-            DefaultSolver::new_with_xcones(&P, &qb, &A, &b, &cones, &x_cones, settings.clone())
+            DefaultSolver::new_with_xcones(&P, &qb, &A, &b, &cones, &dir_cones, settings.clone())
                 .unwrap();
         s.solve();
         assert_eq!(s.solution.status, SolverStatus::Solved);
@@ -123,7 +123,7 @@ fn test_compiled_solver_grad_state_direct_x_soc_batch() {
     let A_ro: Vec<usize> = vec![0; m + 1];
     let A_ci: Vec<usize> = vec![];
     let cones: Vec<SupportedConeT<f64>> = vec![];
-    let x_cones = vec![SupportedXConeT::SecondOrderXConeT((0..n).collect())];
+    let dir_cones = vec![SupportedXConeT::SecondOrderXConeT((0..n).collect())];
 
     let P_values = vec![1.0, 1.0, 1.0];
     let q1 = vec![1.0, 2.0, 0.0]; // SOC active boundary
@@ -142,7 +142,7 @@ fn test_compiled_solver_grad_state_direct_x_soc_batch() {
         &A_ro,
         &A_ci,
         &cones,
-        &x_cones,
+        &dir_cones,
         settings.clone(),
         1,
         true,
@@ -176,7 +176,7 @@ fn test_compiled_solver_grad_state_direct_x_soc_batch() {
     let A = CscMatrix::<f64>::zeros((m, n));
     for (qb, expected) in [(q1, &batched[0]), (q2, &batched[1])] {
         let mut s =
-            DefaultSolver::new_with_xcones(&P, &qb, &A, &b, &cones, &x_cones, settings.clone())
+            DefaultSolver::new_with_xcones(&P, &qb, &A, &b, &cones, &dir_cones, settings.clone())
                 .unwrap();
         s.solve();
         assert_eq!(s.solution.status, SolverStatus::Solved);

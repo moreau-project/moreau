@@ -17,7 +17,7 @@ fn solve_and_backward(
     q: &[f64],
     n: usize,
     j: usize,
-    x_cones: &[SupportedXConeT],
+    dir_cones: &[SupportedXConeT],
 ) -> (Vec<f64>, Vec<f64>) {
     let A = CscMatrix::<f64>::zeros((0, n));
     let b: Vec<f64> = vec![];
@@ -29,7 +29,7 @@ fn solve_and_backward(
     settings.verbose = false;
 
     let mut solver =
-        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, x_cones, settings).unwrap();
+        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, dir_cones, settings).unwrap();
     solver.solve();
     assert_eq!(solver.solution.status, SolverStatus::Solved);
 
@@ -74,12 +74,12 @@ fn test_dz_x_dq_matches_finite_difference_nonneg() {
         vec![1.0, 1.0, 1.0],
     );
     let q = vec![-0.5, -0.5, 1.0];
-    let x_cones = vec![SupportedXConeT::NonnegativeXConeT((0..n).collect())];
+    let dir_cones = vec![SupportedXConeT::NonnegativeXConeT((0..n).collect())];
     let j = 2usize;
 
-    let (_z_x_base, analytic_dq) = solve_and_backward(&P, &q, n, j, &x_cones);
+    let (_z_x_base, analytic_dq) = solve_and_backward(&P, &q, n, j, &dir_cones);
     let fd_dq = fd_dq_for_z_x_j(&q, j, |q_perturbed| {
-        let (z_x, _) = solve_and_backward(&P, q_perturbed, n, 0, &x_cones);
+        let (z_x, _) = solve_and_backward(&P, q_perturbed, n, 0, &dir_cones);
         z_x
     });
 
@@ -108,12 +108,12 @@ fn test_dz_x_dq_matches_finite_difference_psd() {
         vec![1.0, 1.0, 1.0],
     );
     let q = vec![-0.5, 1.0, -0.5];
-    let x_cones = vec![SupportedXConeT::PSDTriangleXConeT((0..n).collect(), 2)];
+    let dir_cones = vec![SupportedXConeT::PSDTriangleXConeT((0..n).collect(), 2)];
     let j = 1usize;
 
-    let (_z_x_base, analytic_dq) = solve_and_backward(&P, &q, n, j, &x_cones);
+    let (_z_x_base, analytic_dq) = solve_and_backward(&P, &q, n, j, &dir_cones);
     let fd_dq = fd_dq_for_z_x_j(&q, j, |q_perturbed| {
-        let (z_x, _) = solve_and_backward(&P, q_perturbed, n, 0, &x_cones);
+        let (z_x, _) = solve_and_backward(&P, q_perturbed, n, 0, &dir_cones);
         z_x
     });
 
@@ -141,12 +141,12 @@ fn test_dz_x_dq_matches_finite_difference_soc() {
         vec![1.0, 1.0, 1.0],
     );
     let q = vec![1.0, 2.0, 0.0];
-    let x_cones = vec![SupportedXConeT::SecondOrderXConeT((0..n).collect())];
+    let dir_cones = vec![SupportedXConeT::SecondOrderXConeT((0..n).collect())];
     let j = 0usize; // dz_x on the cone-axis dual.
 
-    let (_z_x_base, analytic_dq) = solve_and_backward(&P, &q, n, j, &x_cones);
+    let (_z_x_base, analytic_dq) = solve_and_backward(&P, &q, n, j, &dir_cones);
     let fd_dq = fd_dq_for_z_x_j(&q, j, |q_perturbed| {
-        let (z_x, _) = solve_and_backward(&P, q_perturbed, n, 0, &x_cones);
+        let (z_x, _) = solve_and_backward(&P, q_perturbed, n, 0, &dir_cones);
         z_x
     });
 
@@ -177,7 +177,7 @@ fn test_dz_x_dq_matches_finite_difference_nonneg_smoothed() {
         vec![1.0, 1.0, 1.0],
     );
     let q = vec![-0.5, -0.5, 1.0];
-    let x_cones = vec![SupportedXConeT::NonnegativeXConeT((0..n).collect())];
+    let dir_cones = vec![SupportedXConeT::NonnegativeXConeT((0..n).collect())];
     let j = 2usize;
 
     let solve_smoothed = |q_in: &[f64]| -> (Vec<f64>, Vec<f64>) {
@@ -192,7 +192,7 @@ fn test_dz_x_dq_matches_finite_difference_nonneg_smoothed() {
         settings.enable_grad = true;
         settings.verbose = false;
         let mut solver =
-            DefaultSolver::new_with_xcones(&P, q_in, &A, &b, &cones, &x_cones, settings).unwrap();
+            DefaultSolver::new_with_xcones(&P, q_in, &A, &b, &cones, &dir_cones, settings).unwrap();
         solver.solve();
         let z_x_orig = solver.variables.z_x.clone();
         let mut dz_x = vec![0.0; z_x_orig.len()];

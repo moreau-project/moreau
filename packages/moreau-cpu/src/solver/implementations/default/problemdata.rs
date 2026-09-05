@@ -30,7 +30,7 @@ pub struct DefaultProblemData<T> {
     pub cones: Vec<SupportedConeT<T>>,
     /// Direct-x cones constraining sub-vectors of `x` to cones directly.
     /// Empty when the problem has only slack cones.
-    pub x_cones: Vec<SupportedXConeT>,
+    pub dir_cones: Vec<SupportedXConeT>,
     /// Number of variables
     pub n: usize,
     /// Number of constraints
@@ -73,7 +73,7 @@ where
         A: &CscMatrix<T>,
         b: &[T],
         cones: &[SupportedConeT<T>],
-        x_cones: &[SupportedXConeT],
+        dir_cones: &[SupportedXConeT],
         settings: &DefaultSettings<T>,
     ) -> Self {
         // clean up the cones by consolidating repeated NNs,
@@ -168,7 +168,7 @@ where
             A: A_new,
             b: b_new,
             cones: cones_new,
-            x_cones: x_cones.to_vec(),
+            dir_cones: dir_cones.to_vec(),
             n,
             m,
             equilibration,
@@ -181,8 +181,8 @@ where
     }
 
     /// Build a `CompositeXCone<T>` from the stored direct-x cone specs.
-    pub fn composite_x_cones(&self) -> CompositeXCone<T> {
-        CompositeXCone::<T>::new(&self.x_cones)
+    pub fn composite_dir_cones(&self) -> CompositeXCone<T> {
+        CompositeXCone::<T>::new(&self.dir_cones)
     }
 
     pub(crate) fn get_normq(&mut self) -> T {
@@ -316,7 +316,7 @@ where
         // all-ones `e` so only the D direction moves.
         let mut rectified_any = false;
         dwork.fill(T::one());
-        for xcone in &data.x_cones {
+        for xcone in &data.dir_cones {
             let x_cone_entry = crate::solver::core::cones::make_x_cone::<T>(xcone);
             if !x_cone_entry.requires_uniform_x_scaling() {
                 continue;
@@ -478,11 +478,11 @@ mod xcone_equilibration_tests {
         let A = CscMatrix::<f64>::from(&[[1.0, 1.0, 1.0, 1.0]]);
         let b = vec![1.0];
         let cones = vec![SupportedConeT::<f64>::ZeroConeT(1)];
-        let x_cones = vec![SupportedXConeT::SecondOrderXConeT(vec![0, 1, 2])];
+        let dir_cones = vec![SupportedXConeT::SecondOrderXConeT(vec![0, 1, 2])];
 
         let settings = DefaultSettings::default();
         let mut data =
-            DefaultProblemData::<f64>::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, &settings);
+            DefaultProblemData::<f64>::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, &settings);
         let composite = CompositeCone::<f64>::new(&data.cones);
         data.equilibrate(&composite, &settings);
 
@@ -510,11 +510,11 @@ mod xcone_equilibration_tests {
         let A = CscMatrix::<f64>::from(&[[1.0, 1.0, 1.0]]);
         let b = vec![1.0];
         let cones = vec![SupportedConeT::<f64>::ZeroConeT(1)];
-        let x_cones = vec![SupportedXConeT::NonnegativeXConeT(vec![0, 1, 2])];
+        let dir_cones = vec![SupportedXConeT::NonnegativeXConeT(vec![0, 1, 2])];
 
         let settings = DefaultSettings::default();
         let mut data =
-            DefaultProblemData::<f64>::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, &settings);
+            DefaultProblemData::<f64>::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, &settings);
         let composite = CompositeCone::<f64>::new(&data.cones);
         data.equilibrate(&composite, &settings);
 

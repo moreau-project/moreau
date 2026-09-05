@@ -173,12 +173,12 @@ fn make_active_directx(
     let A = CscMatrix::<f64>::new(dim1, n, col_ptrs, row_idxs, vals);
     let b = p_bar.clone();
     let cones_slack = vec![ZeroConeT(dim1)];
-    let x_cones = vec![SupportedXConeT::GenPowerXConeT(
+    let dir_cones = vec![SupportedXConeT::GenPowerXConeT(
         (0..n).collect(),
         alphas,
         dim2,
     )];
-    (P, q, A, b, cones_slack, x_cones)
+    (P, q, A, b, cones_slack, dir_cones)
 }
 
 fn run_directx(
@@ -187,7 +187,7 @@ fn run_directx(
     A: &CscMatrix<f64>,
     b: &[f64],
     cones: &[SupportedConeT<f64>],
-    x_cones: &[SupportedXConeT],
+    dir_cones: &[SupportedXConeT],
     max_iter: u32,
 ) -> (SolverStatus, u32, f64) {
     let mut settings = DefaultSettings::default();
@@ -196,7 +196,7 @@ fn run_directx(
     settings.ipm.presolve_enable = false;
     settings.ipm.equilibrate_enable = std::env::var("BENCH_EQ").is_ok();
 
-    let mut solver = DefaultSolver::new_with_xcones(P, q, A, b, cones, x_cones, settings)
+    let mut solver = DefaultSolver::new_with_xcones(P, q, A, b, cones, dir_cones, settings)
         .expect("solver construction must succeed");
     let t = Instant::now();
     solver.solve();

@@ -72,8 +72,8 @@ pub struct GradState<T: FloatT> {
     /// Problem dimensions: m (constraints)
     m: usize,
     /// Direct-x cone specs (empty for slack-only).
-    x_cones: Vec<crate::solver::core::cones::SupportedXConeT>,
-    /// Per-cone indices for direct-x cones (parallel to `x_cones`).
+    dir_cones: Vec<crate::solver::core::cones::SupportedXConeT>,
+    /// Per-cone indices for direct-x cones (parallel to `dir_cones`).
     xcone_indices: Vec<Vec<usize>>,
 }
 
@@ -98,7 +98,7 @@ impl<T: FloatT + LDLConfiguration> GradState<T> {
 
     /// Create a new GradState with direct-x cones. The augmented KKT system
     /// includes `xn = sum(|J_xc|)` extra rows + `du_x` columns carrying the
-    /// direct-x cone-projection Jacobian `H_x`. Pass an empty `x_cones`
+    /// direct-x cone-projection Jacobian `H_x`. Pass an empty `dir_cones`
     /// slice for the slack-only path.
     pub fn new_with_xcones(
         P: &CscMatrix<T>,
@@ -106,19 +106,19 @@ impl<T: FloatT + LDLConfiguration> GradState<T> {
         A: &CscMatrix<T>,
         b: &[T],
         cones: &[SupportedConeT<T>],
-        x_cones: &[crate::solver::core::cones::SupportedXConeT],
+        dir_cones: &[crate::solver::core::cones::SupportedXConeT],
         settings: &CoreSettings<T>,
     ) -> Result<Self, crate::solver::SolverError> {
         let n = q.len();
         let m = b.len();
 
         let xcone_indices: Vec<Vec<usize>> =
-            x_cones.iter().map(|xc| xc.indices().to_vec()).collect();
+            dir_cones.iter().map(|xc| xc.indices().to_vec()).collect();
         let xn: usize = xcone_indices.iter().map(|ix| ix.len()).sum();
 
         // Build HSDE KKT system with placeholder values.
         let H_blocks = build_placeholder_H_blocks(cones);
-        let H_x_blocks = build_placeholder_H_x_blocks::<T>(x_cones);
+        let H_x_blocks = build_placeholder_H_x_blocks::<T>(dir_cones);
         let c1 = vec![T::one(); n];
         let c2 = vec![T::one(); m];
         let c3 = T::one();
@@ -164,7 +164,7 @@ impl<T: FloatT + LDLConfiguration> GradState<T> {
             kkt,
             n,
             m,
-            x_cones: x_cones.to_vec(),
+            dir_cones: dir_cones.to_vec(),
             xcone_indices,
         })
     }

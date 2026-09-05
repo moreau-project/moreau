@@ -87,14 +87,14 @@ where
     /// Create a new solver with direct-x cones constraining sub-vectors of
     /// `x` to cones directly (in addition to the slack cones via `A`).
     ///
-    /// When `x_cones` is empty this is identical to [`DefaultSolver::new`].
+    /// When `dir_cones` is empty this is identical to [`DefaultSolver::new`].
     pub fn new_with_xcones(
         P: &CscMatrix<T>,
         q: &[T],
         A: &CscMatrix<T>,
         b: &[T],
         cones: &[SupportedConeT<T>],
-        x_cones: &[SupportedXConeT],
+        dir_cones: &[SupportedXConeT],
         settings: DefaultSettings<T>,
     ) -> Result<Self, SolverError> {
         //sanity check problem dimensions
@@ -116,12 +116,12 @@ where
         // then take an internal copy of the problem data
         let mut data;
         timeit!{timers => "presolve"; {
-            data = DefaultProblemData::<T>::new_with_xcones(P,q,A,b,cones,x_cones,&settings);
+            data = DefaultProblemData::<T>::new_with_xcones(P,q,A,b,cones,dir_cones,&settings);
         }}
 
         let cones = CompositeCone::<T>::new(&data.cones);
         assert_eq!(cones.numel, data.m);
-        let xn: usize = data.x_cones.iter().map(|c| c.indices().len()).sum();
+        let xn: usize = data.dir_cones.iter().map(|c| c.indices().len()).sum();
         let variables = DefaultVariables::<T>::new_with_xn(data.n,data.m,xn);
         let residuals = DefaultResiduals::<T>::new(data.n,data.m);
 
@@ -247,14 +247,14 @@ where
 
     /// Create a solver with symbolic factorization and direct-x cones,
     /// reusing a cached AMD permutation. Generalizes `new_symbolic_with_perm`
-    /// to support `x_cones`; pass an empty slice for the slack-only case.
+    /// to support `dir_cones`; pass an empty slice for the slack-only case.
     pub fn new_symbolic_with_xcones_and_perm(
         n: usize,
         m: usize,
         P_pattern: &CscMatrix<T>,
         A_pattern: &CscMatrix<T>,
         cones: &[SupportedConeT<T>],
-        x_cones: &[SupportedXConeT],
+        dir_cones: &[SupportedXConeT],
         mut settings: DefaultSettings<T>,
         perm: Option<Vec<usize>>,
     ) -> Result<Self, SolverError> {
@@ -288,17 +288,17 @@ where
         let solution = DefaultSolution::<T>::new(n, m);
 
         // Create problem data (with direct-x cones threaded through) with
-        // zero-valued patterns. Empty x_cones reduces to the slack-only path.
+        // zero-valued patterns. Empty dir_cones reduces to the slack-only path.
         let data;
         timeit!{timers => "presolve"; {
             data = DefaultProblemData::<T>::new_with_xcones(
-                P_pattern, &q_zeros, A_pattern, &b_zeros, cones, x_cones, &settings,
+                P_pattern, &q_zeros, A_pattern, &b_zeros, cones, dir_cones, &settings,
             );
         }}
 
         let cones = CompositeCone::<T>::new(&data.cones);
         assert_eq!(cones.numel, data.m);
-        let xn: usize = data.x_cones.iter().map(|c| c.indices().len()).sum();
+        let xn: usize = data.dir_cones.iter().map(|c| c.indices().len()).sum();
         let variables = DefaultVariables::<T>::new_with_xn(data.n, data.m, xn);
         let residuals = DefaultResiduals::<T>::new(data.n, data.m);
 
@@ -637,7 +637,7 @@ where
         // without rebuilding `A`, `cones`, or the iterate at backward time.
         // Per v1 scope, direct-x dual gradients are dropped (zero on the
         // direct-x slot of the adjoint RHS).
-        let has_x_cones = !self.data.x_cones.is_empty();
+        let has_dir_cones = !self.data.dir_cones.is_empty();
 
         // Resolve Auto using the converged μ and cone types.
         let diff_method =
@@ -732,11 +732,11 @@ where
         // `z_x_eq[k] = z_x_orig[k] * c / d[J[k]]`.
         let xcone_indices: Vec<Vec<usize>> = self
             .data
-            .x_cones
+            .dir_cones
             .iter()
             .map(|xc| xc.indices().to_vec())
             .collect();
-        let z_x_eq: Vec<T> = if has_x_cones {
+        let z_x_eq: Vec<T> = if has_dir_cones {
             let mut out = Vec::with_capacity(xcone_indices.iter().map(|ix| ix.len()).sum());
             let mut zx_off = 0usize;
             for ix in &xcone_indices {
@@ -755,7 +755,7 @@ where
         // Empty input means "no upstream gradient on z_x" — same as before
         // task-5 plumbing. xn-zero in this case.
         let xn_total: usize = xcone_indices.iter().map(|ix| ix.len()).sum();
-        let dz_x_eq: Vec<T> = if has_x_cones && !dz_x.is_empty() {
+        let dz_x_eq: Vec<T> = if has_dir_cones && !dz_x.is_empty() {
             if dz_x.len() != xn_total {
                 return Err(SolverError::BadInputData(
                     "dz_x length must equal total direct-x dimension",
@@ -775,7 +775,7 @@ where
         };
 
         let mut result = if let Some(gs) = grad_state {
-            // Cached path: slack-only when `x_cones` were empty at construction,
+            // Cached path: slack-only when `dir_cones` were empty at construction,
             // otherwise reuses the augmented symbolic factorization.
             gs.solve_adjoint(
                 &self.data.P,
@@ -802,7 +802,7 @@ where
                 &self.data.A,
                 &self.data.b,
                 &self.data.cones,
-                &self.data.x_cones,
+                &self.data.dir_cones,
                 &xcone_indices,
                 &x_eq,
                 &s_eq,

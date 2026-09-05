@@ -185,7 +185,7 @@ pub struct PyDefaultSolution {
     pub s: Vec<f64>,
     #[pyo3(get)]
     pub z: Vec<f64>,
-    /// Direct-x cone duals (length = sum of `Cones.x_cones` dimensions).
+    /// Direct-x cone duals (length = sum of `Cones.dir_cones` dimensions).
     /// Empty when the solver has no direct-x cones.
     #[pyo3(get)]
     pub z_x: Vec<f64>,
@@ -870,7 +870,7 @@ impl PyDefaultSolver {
     }
 
     /// Create a new solver with direct-x cones. Equivalent to `new` but
-    /// additionally accepts `x_cones` — a list of direct-x cone specs
+    /// additionally accepts `dir_cones` — a list of direct-x cone specs
     /// (e.g. `NonnegativeXConeT(indices)` or `SecondOrderXConeT(indices)`)
     /// constraining sub-vectors of the primal `x` to cones directly.
     #[staticmethod]
@@ -880,11 +880,11 @@ impl PyDefaultSolver {
         A: PyCsrMatrix,
         b: Vec<f64>,
         cones: Vec<PySupportedCone>,
-        x_cones: Vec<super::cones_py::PySupportedXCone>,
+        dir_cones: Vec<super::cones_py::PySupportedXCone>,
         settings: PyDefaultSettings,
     ) -> PyResult<Self> {
         let cones = _py_to_native_cones(cones);
-        let x_cones = super::cones_py::_py_to_native_x_cones(x_cones);
+        let dir_cones = super::cones_py::_py_to_native_dir_cones(dir_cones);
         let settings = settings.to_internal()?;
 
         let P_csr: CsrMatrix<f64> = P.into();
@@ -893,7 +893,7 @@ impl PyDefaultSolver {
         let A_csc = A_csr.to_csc();
 
         let solver =
-            DefaultSolver::new_with_xcones(&P_csc, &q, &A_csc, &b, &cones, &x_cones, settings)?;
+            DefaultSolver::new_with_xcones(&P_csc, &q, &A_csc, &b, &cones, &dir_cones, settings)?;
 
         Ok(Self { inner: solver })
     }

@@ -21,19 +21,19 @@ fn solve_slack_soc_qp(P: &CscMatrix<f64>, q: &[f64], n: usize) -> DefaultSolutio
     solver.solution
 }
 
-/// Direct-x SOC: same constraint via x_cones = SecondOrderXConeT on all of x.
+/// Direct-x SOC: same constraint via dir_cones = SecondOrderXConeT on all of x.
 fn solve_direct_x_soc_qp(P: &CscMatrix<f64>, q: &[f64], n: usize) -> DefaultSolution<f64> {
     let A = CscMatrix::<f64>::zeros((0, n));
     let b: Vec<f64> = vec![];
     let cones: Vec<SupportedConeT<f64>> = vec![];
 
     let indices: Vec<usize> = (0..n).collect();
-    let x_cones = vec![SupportedXConeT::SecondOrderXConeT(indices)];
+    let dir_cones = vec![SupportedXConeT::SecondOrderXConeT(indices)];
 
     let mut settings = DefaultSettings::default();
     settings.ipm.presolve_enable = false;
     let mut solver =
-        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, &x_cones, settings).unwrap();
+        DefaultSolver::new_with_xcones(P, q, &A, &b, &cones, &dir_cones, settings).unwrap();
     solver.solve();
     solver.solution
 }
@@ -201,12 +201,12 @@ fn test_backward_direct_x_soc_matches_slack() {
         let A = CscMatrix::<f64>::zeros((0, n));
         let b: Vec<f64> = vec![];
         let cones: Vec<SupportedConeT<f64>> = vec![];
-        let x_cones = vec![SupportedXConeT::SecondOrderXConeT((0..n).collect())];
+        let dir_cones = vec![SupportedXConeT::SecondOrderXConeT((0..n).collect())];
         let mut settings = DefaultSettings::default();
         settings.ipm.presolve_enable = false;
         settings.ipm.equilibrate_enable = false;
         let mut solver =
-            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, settings).unwrap();
+            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, settings).unwrap();
         solver.solve();
         assert_eq!(solver.solution.status, SolverStatus::Solved);
         let dz: Vec<f64> = vec![];
@@ -271,13 +271,13 @@ fn test_backward_direct_x_soc_high_dim_matches_slack() {
         let A = CscMatrix::<f64>::zeros((0, n));
         let b: Vec<f64> = vec![];
         let cones: Vec<SupportedConeT<f64>> = vec![];
-        let x_cones = vec![SupportedXConeT::SecondOrderXConeT((0..n).collect())];
+        let dir_cones = vec![SupportedXConeT::SecondOrderXConeT((0..n).collect())];
         let mut settings = DefaultSettings::default();
         settings.ipm.presolve_enable = false;
         settings.ipm.equilibrate_enable = false;
         settings.verbose = false;
         let mut solver =
-            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &x_cones, settings).unwrap();
+            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, settings).unwrap();
         solver.solve();
         let dz: Vec<f64> = vec![];
         let ds: Vec<f64> = vec![];

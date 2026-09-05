@@ -40,7 +40,7 @@ TEST(XConeEndToEndTest, SOCDirectXInteriorOptimum) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -90,7 +90,7 @@ TEST(XConeEndToEndTest, SOCDirectXBoundaryActive) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -140,7 +140,7 @@ TEST(XConeEndToEndTest, SOCDirectXInteriorMultipleNonzero) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -197,7 +197,7 @@ TEST(XConeEndToEndTest, SOCDirectXNonUniformP) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -257,7 +257,7 @@ TEST(XConeEndToEndTest, SOCDirectXDim6BoundaryActive) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::SOC, {0, 1, 2, 3, 4, 5}});
 
     Settings settings;
@@ -312,7 +312,7 @@ TEST(XConeEndToEndTest, SOCDirectXDim10BoundaryActive) {
     Cones cones{};
     std::vector<int64_t> indices;
     for (int i = 0; i < n; ++i) indices.push_back(i);
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, indices});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, indices});
 
     Settings settings;
     settings.maxIter = 200;
@@ -367,7 +367,7 @@ TEST(XConeEndToEndTest, SOCDirectXDim40BoundaryActive) {
     Cones cones{};
     std::vector<int64_t> indices;
     for (int i = 0; i < n; ++i) indices.push_back(i);
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, indices});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, indices});
 
     Settings settings;
     settings.maxIter = 200;
@@ -415,7 +415,7 @@ TEST(XConeEndToEndTest, SOCDirectXDim4BoundaryActive) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2, 3}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2, 3}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -471,8 +471,8 @@ TEST(XConeEndToEndTest, MixedNonnegAndSOCDirectX) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -526,7 +526,7 @@ TEST(XConeEndToEndTest, MixedPsdExpPowerSlackOrderWithDirectX) {
     cones.psdConeDims = {2};
     cones.numExpCones = 1;
     cones.powerAlphas = {0.4};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -586,7 +586,7 @@ TEST(XConeEndToEndTest, SOCDirectXDim2Interior) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -641,7 +641,7 @@ TEST(XConeEndToEndTest, KKTIndexMapInterleavedSOCXCone) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::SOC, {2, 1, 0}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {2, 1, 0}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -690,7 +690,7 @@ TEST(XConeEndToEndTest, ScalarNonnegDirectXUnconstrainedOpt) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
 
     Settings settings;
     settings.maxIter = 100;
@@ -750,7 +750,7 @@ TEST(XConeEndToEndTest, ThreeDimPartialDirectXTwoOfThreeInterior) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -796,7 +796,7 @@ TEST(XConeEndToEndTest, FourDimAllDirectXInterior) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2, 3}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2, 3}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -847,7 +847,7 @@ TEST(XConeEndToEndTest, ThreeDimAllDirectXWithDummyEq) {
 
     Cones cones{};
     cones.numZeroCones = 1;
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -895,7 +895,7 @@ TEST(XConeEndToEndTest, ThreeDimAllDirectXAllInterior) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -940,7 +940,7 @@ TEST(XConeEndToEndTest, ThreeDimNonnegDirectXMatchesCPUReference) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -993,7 +993,7 @@ TEST(XConeEndToEndTest, TwoDimAllDirectXNonneg) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -1036,7 +1036,7 @@ TEST(XConeEndToEndTest, PartialDirectXNonnegTwoOfThree) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 2}});
 
     Settings settings;
     settings.maxIter = 200;
@@ -1084,7 +1084,7 @@ TEST(XConeEndToEndTest, ScalarNonnegDirectXBoundaryActive) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
 
     Settings settings;
     settings.maxIter = 100;
@@ -1140,7 +1140,7 @@ TEST(XConeEndToEndTest, PSDDirectXInteriorOptimum) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::PSD, {0, 1, 2}, /*psd_k=*/2});
 
     Settings settings;
@@ -1188,7 +1188,7 @@ TEST(XConeEndToEndTest, PSDDirectX1x1ActsAsNonneg) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::PSD, {0}, /*psd_k=*/1});
 
     Settings settings;
@@ -1236,7 +1236,7 @@ TEST(XConeEndToEndTest, PSDDirectXBoundaryActive) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::PSD, {0, 1, 2}, /*psd_k=*/2});
 
     Settings settings;
@@ -1289,7 +1289,7 @@ TEST(XConeEndToEndTest, PSDDirectXWithEquality) {
 
     Cones cones{};
     cones.numZeroCones = 1;                   // equality
-    cones.x_cones.push_back(
+    cones.dir_cones.push_back(
         SupportedXConeT{XConeKind::PSD, {0, 1, 2}, /*psd_k=*/2});
 
     Settings settings;
@@ -1349,7 +1349,7 @@ TEST(XConeEndToEndTest, YoloModeWithDirectXCone) {
     std::vector<int64_t> A_ci = {};
 
     Cones cones{};
-    cones.x_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0}});
 
     Settings settings;
     settings.yolo = true;

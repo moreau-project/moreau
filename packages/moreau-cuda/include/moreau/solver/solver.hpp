@@ -248,21 +248,21 @@ public:
           residuals(n_, m_, batchSize_),
           // Direct-x totals aren't populated until Cones::initialize()
           // runs (see data.cones below), so we read from the user-
-          // supplied cones_.x_cones directly here — numXCones mirrors
-          // x_cones.size() + each cone's dim accumulates into a total.
+          // supplied cones_.dir_cones directly here — numXCones mirrors
+          // dir_cones.size() + each cone's dim accumulates into a total.
           variables(n_, m_, batchSize_,
                     [&]{ int64_t t = 0;
-                         for (const auto& xc : cones_.x_cones)
+                         for (const auto& xc : cones_.dir_cones)
                              t += static_cast<int64_t>(xc.indices.size());
                          return t; }()),
           step_rhs(n_, m_, batchSize_,
                    [&]{ int64_t t = 0;
-                        for (const auto& xc : cones_.x_cones)
+                        for (const auto& xc : cones_.dir_cones)
                             t += static_cast<int64_t>(xc.indices.size());
                         return t; }()),
           step_lhs(n_, m_, batchSize_,
                    [&]{ int64_t t = 0;
-                        for (const auto& xc : cones_.x_cones)
+                        for (const auto& xc : cones_.dir_cones)
                             t += static_cast<int64_t>(xc.indices.size());
                         return t; }()),
           x1(n_, batchSize_),
@@ -324,7 +324,7 @@ public:
         }
 
         // Direct-x cone index bounds check. Python's
-        // `Cones.validate_x_cone_indices` enforces idx ∈ [0, n) at the unified
+        // `Cones.validate_dir_cone_indices` enforces idx ∈ [0, n) at the unified
         // API, but FFI entry points (JAX, torch) build SupportedXConeT
         // straight from device-side metadata and bypass that validator. An
         // out-of-range index later indexes `xsoc_row_v_col` (sized n) inside
@@ -332,28 +332,28 @@ public:
         // buffer overflow that corrupts surrounding allocations.
         //
         // Also enforce disjointness across all direct-x cones (matches
-        // Python's `validate_x_cones_disjoint`). KKTData only catches the
+        // Python's `validate_dir_cones_disjoint`). KKTData only catches the
         // overlap when two *sparse SOC* cones collide; Nonneg + SOC,
         // Nonneg + Nonneg, dense SOC + dense SOC, or any combination
         // involving Exp/Power/PSD/GenPow indices share the same primal
         // slot silently — Hs writes overwrite each other and backward
         // gradients double-count.
         std::vector<int64_t> xcone_seen_by(static_cast<size_t>(n_), int64_t{-1});
-        for (size_t ci = 0; ci < cones_.x_cones.size(); ++ci) {
-            const auto& xc = cones_.x_cones[ci];
+        for (size_t ci = 0; ci < cones_.dir_cones.size(); ++ci) {
+            const auto& xc = cones_.dir_cones[ci];
             for (int64_t idx : xc.indices) {
                 if (idx < 0 || idx >= n_) {
                     throw std::invalid_argument(
-                        "CompiledSolver: x_cones[" + std::to_string(ci) +
+                        "CompiledSolver: dir_cones[" + std::to_string(ci) +
                         "] index " + std::to_string(idx) +
                         " out of range [0, " + std::to_string(n_) + ")");
                 }
                 int64_t& slot = xcone_seen_by[static_cast<size_t>(idx)];
                 if (slot != -1) {
                     throw std::invalid_argument(
-                        "CompiledSolver: x_cones index " + std::to_string(idx) +
-                        " appears in both x_cones[" + std::to_string(slot) +
-                        "] and x_cones[" + std::to_string(ci) +
+                        "CompiledSolver: dir_cones index " + std::to_string(idx) +
+                        " appears in both dir_cones[" + std::to_string(slot) +
+                        "] and dir_cones[" + std::to_string(ci) +
                         "]; indices must be disjoint across all direct-x cones");
                 }
                 slot = static_cast<int64_t>(ci);
@@ -376,7 +376,7 @@ public:
         // HSDE system (n + 2m + xn + 1).
         if (settings.enableGrad) {
             int64_t total_xn = 0;
-            for (const auto& xc : cones_.x_cones) {
+            for (const auto& xc : cones_.dir_cones) {
                 total_xn += static_cast<int64_t>(xc.indices.size());
             }
             diff_state_ = std::make_unique<DiffState>(
@@ -395,7 +395,7 @@ public:
             d_yolo_has_nan_.reset(p);
 
             int64_t total_xn = 0;
-            for (const auto& xc : cones_.x_cones) {
+            for (const auto& xc : cones_.dir_cones) {
                 total_xn += static_cast<int64_t>(xc.indices.size());
             }
             if (total_xn > 0) {
@@ -410,7 +410,7 @@ public:
         // α threshold, so one shared gate is correct.
         bool any_genpow = data.cones.numGenPowerCones > 0;
         if (!any_genpow) {
-            for (const auto& xc : data.cones.x_cones) {
+            for (const auto& xc : data.cones.dir_cones) {
                 if (xc.kind == XConeKind::GenPower) { any_genpow = true; break; }
             }
         }
@@ -508,7 +508,7 @@ public:
         const double* d_warm_z,
         const double* d_warm_s,
         cudaStream_t stream = 0,
-        const double* d_warm_z_x = nullptr  // direct-x dual warm start; ignored when no x_cones
+        const double* d_warm_z_x = nullptr  // direct-x dual warm start; ignored when no dir_cones
     );
 
     /**

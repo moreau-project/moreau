@@ -933,7 +933,7 @@ where
     /// `∇F_primal(s)`, storing in the same `(d1, d2, p, q, r, grad)`
     /// fields that `update_dual_grad_H(z)` uses for the *dual* side.
     ///
-    /// In direct-x mode the cone primitive is owned by `x_cones`, so
+    /// In direct-x mode the cone primitive is owned by `dir_cones`, so
     /// slack-side methods like `update_scaling` are never invoked on the
     /// same instance — overwriting the dual fields is safe.
     ///

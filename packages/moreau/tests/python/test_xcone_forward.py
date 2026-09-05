@@ -1,6 +1,6 @@
 """Forward-solve tests for direct-x cones.
 
-Compares moreau.Solver with `x_cones=...` against the equivalent slack
+Compares moreau.Solver with `dir_cones=...` against the equivalent slack
 form across CPU + CUDA backends, and covers the `enable_grad=True`
 construction flag for each supported direct-x kind. Backward parity
 (slack reference + finite differences + torch/jax autograd) lives in
@@ -14,7 +14,7 @@ from scipy import sparse
 import moreau
 
 
-def test_solver_with_x_cones_cpu_matches_slack():
+def test_solver_with_dir_cones_cpu_matches_slack():
     # CPU direct-x forward pass is wired via DirectXSolverCpu. Compare
     # `min 0.5x'x + q'x s.t. x >= 0, [A|b constraint]` against the
     # equivalent slack form.
@@ -25,7 +25,7 @@ def test_solver_with_x_cones_cpu_matches_slack():
 
     cones_direct = moreau.Cones(
         num_zero_cones=1,
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0, 1])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1])],
     )
     settings = moreau.Settings(device="cpu", verbose=False)
     solver_direct = moreau.Solver(P, q, A, b, cones=cones_direct, settings=settings)
@@ -41,7 +41,7 @@ def test_solver_with_x_cones_cpu_matches_slack():
     np.testing.assert_allclose(sol_direct.x, sol_slack.x, atol=1e-6)
 
 
-def test_solver_with_x_cones_cuda_nonneg_scalar():
+def test_solver_with_dir_cones_cuda_nonneg_scalar():
     # CUDA nonneg direct-x forward. Scalar nonneg QP:
     # min 0.5 x^2 - 4x  s.t. x ≥ 0. Optimum is x = 4 (interior).
     from moreau._backend import device_available
@@ -54,7 +54,7 @@ def test_solver_with_x_cones_cuda_nonneg_scalar():
     A = sparse.csr_matrix(np.zeros((0, 1)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0])],
     )
     settings = moreau.Settings(device="cuda", verbose=False)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
@@ -62,7 +62,7 @@ def test_solver_with_x_cones_cuda_nonneg_scalar():
     np.testing.assert_allclose(solution.x, [4.0], atol=1e-5)
 
 
-def test_solver_with_x_cones_cuda_soc_dense_boundary_active():
+def test_solver_with_dir_cones_cuda_soc_dense_boundary_active():
     # CUDA direct-x SOC (dense, dim ≤ 4) landed alongside the nonneg path.
     # Mirrors CPU test_soc_constraint_active_boundary: q=(1, 2, 0) pushes
     # x[0] negative; optimum lies on the SOC boundary at x* = (0.5, -0.5, 0).
@@ -76,7 +76,7 @@ def test_solver_with_x_cones_cuda_soc_dense_boundary_active():
     A = sparse.csr_matrix(np.zeros((0, 3)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="soc", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="soc", indices=[0, 1, 2])],
     )
     settings = moreau.Settings(device="cuda", verbose=False)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
@@ -84,7 +84,7 @@ def test_solver_with_x_cones_cuda_soc_dense_boundary_active():
     np.testing.assert_allclose(solution.x, [0.5, -0.5, 0.0], atol=1e-4)
 
 
-def test_solver_with_x_cones_cuda_soc_rank2_boundary_active():
+def test_solver_with_dir_cones_cuda_soc_rank2_boundary_active():
     # Rank-2 sparse SOC (dim > 4) on CUDA uses the u/v expansion path
     # end-to-end. q pulls the scalar negative, optimum sits on the SOC
     # boundary with ||x[1..]|| = x[0].
@@ -99,7 +99,7 @@ def test_solver_with_x_cones_cuda_soc_rank2_boundary_active():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="soc", indices=list(range(n)))],
+        dir_cones=[moreau.DirectConeSpec(kind="soc", indices=list(range(n)))],
     )
     settings = moreau.Settings(device="cuda", verbose=False)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
@@ -110,7 +110,7 @@ def test_solver_with_x_cones_cuda_soc_rank2_boundary_active():
     assert solution.x[0] > 0.0
 
 
-def test_solver_with_x_cones_cuda_soc_large_dim_boundary_active():
+def test_solver_with_dir_cones_cuda_soc_large_dim_boundary_active():
     # Large-dim (> stack-friendly) direct-x SOC on CUDA — kernels stream
     # over cone entries with no dim cap. Exercise dim=40.
     from moreau._backend import device_available
@@ -127,7 +127,7 @@ def test_solver_with_x_cones_cuda_soc_large_dim_boundary_active():
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="soc", indices=list(range(n)))],
+        dir_cones=[moreau.DirectConeSpec(kind="soc", indices=list(range(n)))],
     )
     settings = moreau.Settings(device="cuda", verbose=False)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
@@ -137,7 +137,7 @@ def test_solver_with_x_cones_cuda_soc_large_dim_boundary_active():
     assert solution.x[0] > 0.0
 
 
-def test_solver_with_x_cones_cuda_nonneg_enable_grad_supported():
+def test_solver_with_dir_cones_cuda_nonneg_enable_grad_supported():
     # Native CUDA direct-x backward (nonneg) is supported via the
     # IFT-direct augmented-system path; constructing a solver with
     # enable_grad=True on CUDA must not raise.
@@ -146,7 +146,7 @@ def test_solver_with_x_cones_cuda_nonneg_enable_grad_supported():
     A = sparse.csr_matrix(np.zeros((0, 1)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="nonneg", indices=[0])],
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0])],
     )
     settings = moreau.Settings(device="cuda", verbose=False, enable_grad=True)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
@@ -154,7 +154,7 @@ def test_solver_with_x_cones_cuda_nonneg_enable_grad_supported():
     np.testing.assert_allclose(sol.x, [4.0], atol=1e-5)
 
 
-def test_solver_with_x_cones_cuda_soc_enable_grad_supported():
+def test_solver_with_dir_cones_cuda_soc_enable_grad_supported():
     # Native CUDA direct-x SOC backward via IFT-direct: same SOC-active
     # boundary problem as the forward-only test. Constructing the solver
     # with enable_grad=True must not raise.
@@ -163,7 +163,7 @@ def test_solver_with_x_cones_cuda_soc_enable_grad_supported():
     A = sparse.csr_matrix(np.zeros((0, 3)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="soc", indices=[0, 1, 2])],
+        dir_cones=[moreau.DirectConeSpec(kind="soc", indices=[0, 1, 2])],
     )
     settings = moreau.Settings(device="cuda", verbose=False, enable_grad=True)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
@@ -171,7 +171,7 @@ def test_solver_with_x_cones_cuda_soc_enable_grad_supported():
     np.testing.assert_allclose(sol.x, [0.5, -0.5, 0.0], atol=1e-5)
 
 
-def test_solver_with_x_cones_cuda_psd_enable_grad_supported():
+def test_solver_with_dir_cones_cuda_psd_enable_grad_supported():
     # CUDA direct-x PSD backward is wired natively via cuSOLVER
     # eigendecomp + Ω-matrix Jacobian construction. Constructing a
     # solver with enable_grad=True must not raise.
@@ -180,7 +180,7 @@ def test_solver_with_x_cones_cuda_psd_enable_grad_supported():
     A = sparse.csr_matrix(np.zeros((0, 3)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[moreau.XConeSpec(kind="psd_triangle", indices=[0, 1, 2], psd_k=2)],
+        dir_cones=[moreau.DirectConeSpec(kind="psd_triangle", indices=[0, 1, 2], psd_k=2)],
     )
     settings = moreau.Settings(device="cuda", verbose=False, enable_grad=True)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
@@ -188,7 +188,7 @@ def test_solver_with_x_cones_cuda_psd_enable_grad_supported():
     assert solver.info.status.name in ("Solved", "AlmostSolved")
 
 
-def test_solver_with_x_cones_cpu_psd_matches_slack():
+def test_solver_with_dir_cones_cpu_psd_matches_slack():
     # Direct-x PSD forward on CPU. PSD(2): svec dim 3. Push the
     # unconstrained optimum outside the PSD cone so the constraint is
     # active, then confirm direct-x and slack agree.
@@ -200,8 +200,8 @@ def test_solver_with_x_cones_cpu_psd_matches_slack():
     q = np.array([0.0, -1.0, 0.0])
 
     cones_direct = moreau.Cones(
-        x_cones=[
-            moreau.XConeSpec(
+        dir_cones=[
+            moreau.DirectConeSpec(
                 kind="psd_triangle",
                 indices=[0, 1, 2],
                 psd_k=2,
@@ -231,7 +231,7 @@ def test_solver_with_x_cones_cpu_psd_matches_slack():
     assert a * c - b * b + 1e-8 >= 0.0
 
 
-def test_solver_with_x_cones_cuda_psd_supported():
+def test_solver_with_dir_cones_cuda_psd_supported():
     # Direct-x PSD on CUDA is wired. Solve must succeed and
     # produce the same result as CPU.
     from moreau._backend import device_available
@@ -245,8 +245,8 @@ def test_solver_with_x_cones_cuda_psd_supported():
     A = sparse.csr_matrix(np.zeros((0, 3)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[
-            moreau.XConeSpec(
+        dir_cones=[
+            moreau.DirectConeSpec(
                 kind="psd_triangle",
                 indices=[0, 1, 2],
                 psd_k=2,
@@ -262,7 +262,7 @@ def test_solver_with_x_cones_cuda_psd_supported():
     np.testing.assert_allclose(sol_cuda.x, sol_cpu.x, atol=1e-3)
 
 
-def test_solver_with_x_cones_cuda_psd_enable_grad_runs():
+def test_solver_with_dir_cones_cuda_psd_enable_grad_runs():
     # CUDA direct-x PSD backward is wired natively. Smoke-test that
     # enable_grad=True solves without raising. Numerical parity vs the
     # CPU IFT-direct path is covered by C++ gtests.
@@ -276,8 +276,8 @@ def test_solver_with_x_cones_cuda_psd_enable_grad_runs():
     A = sparse.csr_matrix(np.zeros((0, 3)))
     b = np.array([])
     cones = moreau.Cones(
-        x_cones=[
-            moreau.XConeSpec(
+        dir_cones=[
+            moreau.DirectConeSpec(
                 kind="psd_triangle",
                 indices=[0, 1, 2],
                 psd_k=2,

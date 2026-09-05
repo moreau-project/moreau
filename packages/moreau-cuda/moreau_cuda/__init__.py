@@ -153,68 +153,68 @@ def _cones_to_cuda(cones: Cones) -> _CudaCones:
     else:
         cuda_cones.num_gen_power_cones = 0
 
-    # Direct-x cones: translate each XConeSpec to a C++ SupportedXConeT.
-    x_cones = list(getattr(cones, "x_cones", []) or [])
-    cuda_x_cones = []
-    for spec in x_cones:
+    # Direct cones: translate each DirectConeSpec to a C++ SupportedXConeT.
+    dir_cones = list(getattr(cones, "dir_cones", []) or [])
+    cuda_dir_cones = []
+    for spec in dir_cones:
         kind = spec.kind
         if kind not in _XCONE_KIND_MAP:
             raise NotImplementedError(
-                f"CUDA direct-x cones do not yet support kind={kind!r}. "
+                f"CUDA direct cones do not yet support kind={kind!r}. "
                 f"Supported kinds on CUDA: {sorted(_XCONE_KIND_MAP)}."
             )
         indices = [int(i) for i in spec.indices]
 
         if kind == "nonneg" or kind == "soc":
-            cuda_x_cones.append(_CudaSupportedXConeT(_XCONE_KIND_MAP[kind], indices))
+            cuda_dir_cones.append(_CudaSupportedXConeT(_XCONE_KIND_MAP[kind], indices))
         elif kind == "psd_triangle":
             psd_k = getattr(spec, "psd_k", None)
             if psd_k is None:
-                raise ValueError("XConeSpec(kind='psd_triangle') requires psd_k")
-            cuda_x_cones.append(
+                raise ValueError("DirectConeSpec(kind='psd_triangle') requires psd_k")
+            cuda_dir_cones.append(
                 _CudaSupportedXConeT(_XCONE_KIND_MAP[kind], indices, psd_k=int(psd_k))
             )
         elif kind == "exp":
             if len(indices) != 3:
                 raise ValueError(
-                    f"XConeSpec(kind='exp') requires exactly 3 indices, got {len(indices)}"
+                    f"DirectConeSpec(kind='exp') requires exactly 3 indices, got {len(indices)}"
                 )
-            cuda_x_cones.append(_CudaSupportedXConeT(_XCONE_KIND_MAP[kind], indices))
+            cuda_dir_cones.append(_CudaSupportedXConeT(_XCONE_KIND_MAP[kind], indices))
         elif kind == "power":
             alpha = getattr(spec, "alpha", None)
             if alpha is None:
-                raise ValueError("XConeSpec(kind='power') requires alpha")
+                raise ValueError("DirectConeSpec(kind='power') requires alpha")
             alpha = float(alpha)
             if not (0.0 < alpha < 1.0):
-                raise ValueError(f"XConeSpec(kind='power') alpha must be in (0, 1), got {alpha}")
+                raise ValueError(f"DirectConeSpec(kind='power') alpha must be in (0, 1), got {alpha}")
             if len(indices) != 3:
                 raise ValueError(
-                    f"XConeSpec(kind='power') requires exactly 3 indices, got {len(indices)}"
+                    f"DirectConeSpec(kind='power') requires exactly 3 indices, got {len(indices)}"
                 )
-            cuda_x_cones.append(
+            cuda_dir_cones.append(
                 _CudaSupportedXConeT(_XCONE_KIND_MAP[kind], indices, power_alpha=alpha)
             )
         elif kind == "gen_power":
             alphas = getattr(spec, "alphas", None)
             dim2 = getattr(spec, "dim2", None)
             if alphas is None or dim2 is None:
-                raise ValueError("XConeSpec(kind='gen_power') requires alphas and dim2")
+                raise ValueError("DirectConeSpec(kind='gen_power') requires alphas and dim2")
             alphas = [float(a) for a in alphas]
             dim2 = int(dim2)
             if dim2 < 1:
-                raise ValueError(f"XConeSpec(kind='gen_power') dim2 must be >= 1, got {dim2}")
+                raise ValueError(f"DirectConeSpec(kind='gen_power') dim2 must be >= 1, got {dim2}")
             expected_len = len(alphas) + dim2
             if len(indices) != expected_len:
                 raise ValueError(
-                    f"XConeSpec(kind='gen_power'): len(indices)={len(indices)} "
+                    f"DirectConeSpec(kind='gen_power'): len(indices)={len(indices)} "
                     f"must equal len(alphas)+dim2={expected_len}"
                 )
-            cuda_x_cones.append(
+            cuda_dir_cones.append(
                 _CudaSupportedXConeT(
                     _XCONE_KIND_MAP[kind], indices, gen_power_alphas=alphas, gen_power_dim2=dim2
                 )
             )
-    cuda_cones.x_cones = cuda_x_cones
+    cuda_cones.dir_cones = cuda_dir_cones
     return cuda_cones
 
 
@@ -674,7 +674,7 @@ class CompiledSolver:
                 warm_z_2d = np.ascontiguousarray(warm_z)
                 warm_s_2d = np.ascontiguousarray(warm_s)
 
-            # Optional direct-x dual: only forward if non-empty.
+            # Optional direct dual: only forward if non-empty.
             if warm_z_x is not None:
                 warm_z_x_arr = np.asarray(warm_z_x, dtype=np.float64)
                 if warm_z_x_arr.size > 0:
@@ -710,7 +710,7 @@ class CompiledSolver:
             self._impl.refine_smoothing_iterate()
 
         # Convert result to match unified API
-        # Direct-x cone duals (z_x): shape (batch, total_xn) when present,
+        # Direct cone duals (z_x): shape (batch, total_xn) when present,
         # (batch, 0) otherwise. Pass through to the unified Solution.
         z_x_2d = result.get("z_x")
 
@@ -773,7 +773,7 @@ class CompiledSolver:
                 If None, defaults to zeros.
             ds: Upstream gradient w.r.t. s. Shape (m,) for single, (batch, m) for batched
                 If None, defaults to zeros.
-            dz_x: Upstream gradient w.r.t. direct-x cone duals z_x. Same
+            dz_x: Upstream gradient w.r.t. direct cone duals z_x. Same
                 shape as the `z_x` returned by solve(); leave None to skip.
 
         Returns:
@@ -806,7 +806,7 @@ class CompiledSolver:
         dz_2d = np.ascontiguousarray(dz_2d)
         ds_2d = np.ascontiguousarray(ds_2d)
 
-        # Optional direct-x dual gradient.
+        # Optional direct dual gradient.
         dz_x_2d = None
         if dz_x is not None:
             dz_x_arr = np.asarray(dz_x, dtype=np.float64)
