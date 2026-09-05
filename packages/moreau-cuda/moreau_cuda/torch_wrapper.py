@@ -650,6 +650,9 @@ class TorchCompiledSolver:
         self._P_values = P_values.contiguous()
         self._A_values = A_values.contiguous()
 
+    # The native solver consumes raw device pointers and mutates solver state;
+    # Dynamo must treat this boundary as opaque rather than trace nanobind calls.
+    @torch.compiler.disable
     def solve(
         self,
         q: torch.Tensor,
