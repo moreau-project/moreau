@@ -10,7 +10,7 @@ This guide covers the core concepts and features of Moreau.
 basic-usage
 psd-cones
 batching
-direct-x-cones
+direct-cones
 warm-starting
 device-selection
 solver-settings
@@ -38,7 +38,7 @@ $$
 $$
 
 Where $\mathcal{K}_2$ constrains the slack $s$ and $\mathcal{K}_1$ constrains $x$
-directly (direct-x cones); each is a Cartesian product of convex cones.
+directly (direct cones); each is a Cartesian product of convex cones.
 
 ## Key Concepts
 

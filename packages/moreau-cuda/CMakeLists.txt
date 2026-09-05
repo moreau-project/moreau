@@ -382,14 +382,14 @@ if(MOREAU_BUILD_TESTS)
             tests/cpp/test_riccati.cpp
             tests/cpp/test_woodbury.cpp
             tests/cpp/test_warm_start.cpp
-            tests/cpp/test_xcone_scaffolding.cpp
-            tests/cpp/test_xcone_endtoend.cpp
-            tests/cpp/test_xcone_infeasibility.cpp
-            tests/cpp/test_xcone_backward.cpp
-            tests/cpp/test_xcone_exp_direct_x.cpp
-            tests/cpp/test_xcone_pow_direct_x.cpp
-            tests/cpp/test_xcone_genpow_direct_x.cpp
-            tests/cpp/test_xcone_asymm_backward.cpp
+            tests/cpp/test_direct_cone_scaffolding.cpp
+            tests/cpp/test_direct_cone_endtoend.cpp
+            tests/cpp/test_direct_cone_infeasibility.cpp
+            tests/cpp/test_direct_cone_backward.cpp
+            tests/cpp/test_direct_cone_exp.cpp
+            tests/cpp/test_direct_cone_pow.cpp
+            tests/cpp/test_direct_cone_genpow.cpp
+            tests/cpp/test_direct_cone_asymm_backward.cpp
             tests/cpp/test_multi_psd_mre.cpp
             tests/cpp/test_compiled_solver_move_semantics.cpp
         )
@@ -453,17 +453,17 @@ if(MOREAU_BUILD_EXAMPLES)
     target_link_libraries(bench_soc_scaling PRIVATE moreau_cuda_lib)
     target_include_directories(bench_soc_scaling PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-    add_executable(bench_xcone_asymmetric examples/cpp/bench_xcone_asymmetric.cpp)
-    target_link_libraries(bench_xcone_asymmetric PRIVATE moreau_cuda_lib)
-    target_include_directories(bench_xcone_asymmetric PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_executable(bench_direct_cone_asymmetric examples/cpp/bench_direct_cone_asymmetric.cpp)
+    target_link_libraries(bench_direct_cone_asymmetric PRIVATE moreau_cuda_lib)
+    target_include_directories(bench_direct_cone_asymmetric PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
     add_executable(bench_eta_perf ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/bench_eta_perf.cpp)
     target_link_libraries(bench_eta_perf PRIVATE moreau_cuda_lib)
     target_include_directories(bench_eta_perf PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-    add_executable(bench_xcone_backward ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/bench_xcone_backward.cpp)
-    target_link_libraries(bench_xcone_backward PRIVATE moreau_cuda_lib)
-    target_include_directories(bench_xcone_backward PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_executable(bench_direct_cone_backward ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/bench_direct_cone_backward.cpp)
+    target_link_libraries(bench_direct_cone_backward PRIVATE moreau_cuda_lib)
+    target_include_directories(bench_direct_cone_backward PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
     message(STATUS "Examples enabled - ${CMAKE_CURRENT_SOURCE_DIR}/examples/cpp")
 endif()

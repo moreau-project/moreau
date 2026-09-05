@@ -9,13 +9,13 @@ pub mod direct;
 
 pub trait KKTSolver<T: FloatT>: HasLinearSolverInfo {
     /// Refresh the KKT numeric values from current cone scalings and
-    /// refactor. The direct-x `x_cones` contribute additive Hs blocks to
+    /// refactor. The direct-x `dir_cones` contribute additive Hs blocks to
     /// the (1,1) block; pass an empty `CompositeXCone` when the problem
     /// has no direct-x constraints.
     fn update(
         &mut self,
         cones: &mut CompositeCone<T>,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
         settings: &CoreSettings<T>,
     ) -> bool;
     fn setrhs(&mut self, x: &[T], z: &[T]);

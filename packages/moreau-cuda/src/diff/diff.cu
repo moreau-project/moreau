@@ -182,7 +182,7 @@ ConeDerivatives::ConeDerivatives(
       genpow_sparse_c3(1, batchSize_),
       genpow_diff_work_vec(1, batchSize_),
       genpow_diff_work_dim1(1, batchSize_),
-      // Direct-x cone derivative storage; resized below based on cones.x_cones.
+      // Direct-x cone derivative storage; resized below based on cones.dir_cones.
       xcone_nonneg_H(1, batchSize_),
       xcone_soc_H(1, batchSize_),
       xcone_psd_H(1, batchSize_),
@@ -281,7 +281,7 @@ ConeDerivatives::ConeDerivatives(
     {
         int64_t nn = 0, soc_kkt = 0, psd_kkt = 0;
         int64_t exp_kkt = 0, pow_kkt = 0, gp_kkt = 0;
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             int64_t d = static_cast<int64_t>(xc.indices.size());
             switch (xc.kind) {
                 case XConeKind::Nonneg:   nn      += d;       break;
@@ -338,7 +338,7 @@ ConeDerivatives::ConeDerivatives(
         // Direct-x SOC rank-2 stripe storage for sparse expansion path.
         int64_t total_xsoc_sparse_dim = 0;
         int64_t num_xsoc_sparse = 0;
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             if (xc.kind == XConeKind::SOC && xc.indices.size() > 4) {
                 total_xsoc_sparse_dim += static_cast<int64_t>(xc.indices.size());
                 ++num_xsoc_sparse;
@@ -1113,7 +1113,7 @@ static void backward_impl(
         // Total per-kind sizes for kernel dispatch.
         int64_t total_xn = 0, total_x_nn = 0, total_x_soc_kkt = 0, total_x_psd_kkt = 0;
         int64_t total_x_exp_kkt = 0, total_x_pow_kkt = 0, total_x_genpow_kkt = 0;
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             int64_t d = static_cast<int64_t>(xc.indices.size());
             total_xn += d;
             if (xc.kind == XConeKind::Nonneg)         total_x_nn         += d;
@@ -1129,7 +1129,7 @@ static void backward_impl(
         // Recomputed each backward — small, ~4 bytes per cone, batch-agnostic.
         std::vector<int64_t> kinds, dims, numel_offsets(1, 0), h_off, indices_flat;
         int64_t nn_acc = 0, soc_acc = 0, exp_acc = 0, pow_acc = 0, gp_acc = 0;
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             int64_t d = static_cast<int64_t>(xc.indices.size());
             dims.push_back(d);
             numel_offsets.push_back(numel_offsets.back() + d);
@@ -1334,7 +1334,7 @@ static void backward_impl(
     std::unique_ptr<BatchedVector> dz_x_eq_buf;
     const double* dz_x_eq_ptr = nullptr;
     int64_t xn = 0;
-    for (const auto& xc : cones.x_cones) {
+    for (const auto& xc : cones.dir_cones) {
         xn += static_cast<int64_t>(xc.indices.size());
     }
     if (dz_x_bar != nullptr && xn > 0) {
@@ -1361,7 +1361,7 @@ static void backward_impl(
     }
 
     // DiffWoodbury has no direct-x adjoint path (its setup() takes only the
-    // slack rank-2 expansion, no x_cones). When the forward used Woodbury
+    // slack rank-2 expansion, no dir_cones). When the forward used Woodbury
     // *and* the problem has direct-x cones, route the backward through the
     // general DiffKKT/cuDSS path instead — the Woodbury forward solution is
     // still valid; only the adjoint solver differs. DiffKKT builds its own
@@ -1485,7 +1485,7 @@ static void backward_impl(
     // τ slot of `state.sol` is at index n+2m+xn when direct-x cones are present.
     {
         int64_t xn = 0;
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             xn += static_cast<int64_t>(xc.indices.size());
         }
         extract_gradients_hsde_with_xcones(
@@ -1511,7 +1511,7 @@ static void backward_impl(
     // λ_τ slot is at index n + 2m + xn (direct-x cones shift it).
     {
         int64_t xn_dp = 0;
-        for (const auto& xc : cones.x_cones) {
+        for (const auto& xc : cones.dir_cones) {
             xn_dp += static_cast<int64_t>(xc.indices.size());
         }
         compute_dP_gradient_hsde_with_xcones(
@@ -1540,7 +1540,7 @@ static void backward_impl(
     // `state.sol`. Without this, lambda's tau slot is read at the wrong
     // offset on direct-x problems, corrupting both dA and dP gradients.
     int64_t xn_stride = 0;
-    for (const auto& xc : cones.x_cones) {
+    for (const auto& xc : cones.dir_cones) {
         xn_stride += static_cast<int64_t>(xc.indices.size());
     }
     int64_t jdim = n + 2 * m + xn_stride + 1;

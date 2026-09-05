@@ -15,7 +15,7 @@ pub struct DefaultSolution<T> {
     pub z: Vec<T>,
     /// vector of slacks (in primal cone)
     pub s: Vec<T>,
-    /// direct-x cone duals, flat across all `x_cones` in spec order
+    /// direct-x cone duals, flat across all `dir_cones` in spec order
     /// (length = `Σ |J_xc|`; empty when no direct-x cones).
     pub z_x: Vec<T>,
     /// final solver status

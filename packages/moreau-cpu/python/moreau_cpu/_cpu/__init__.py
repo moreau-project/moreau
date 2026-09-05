@@ -92,15 +92,15 @@ class Cones:
         return len(self.psd_dims)
 
 
-def _xcones_to_cpu(cones) -> List:
-    """Extract direct-x cones from a `Cones`-like object and convert to the
+def _dir_cones_to_cpu(cones) -> List:
+    """Extract direct cones from a `Cones`-like object and convert to the
     pyo3 `SupportedXConeT` variants.
 
-    Returns an empty list if the input has no `x_cones` attribute or its
+    Returns an empty list if the input has no `dir_cones` attribute or its
     value is empty. `kind='psd_triangle'` requires the CPU backend to be
     built with the `sdp` feature (normally via `sdp-openblas,python`).
     """
-    x_specs = getattr(cones, "x_cones", None)
+    x_specs = getattr(cones, "dir_cones", None)
     if not x_specs:
         return []
     out = []
@@ -116,13 +116,13 @@ def _xcones_to_cpu(cones) -> List:
         elif kind == "power":
             alpha = getattr(spec, "alpha", None)
             if alpha is None:
-                raise ValueError("XConeSpec(kind='power') requires alpha")
+                raise ValueError("DirectConeSpec(kind='power') requires alpha")
             out.append(_cpu_solver.PowerXConeT(indices, float(alpha)))
         elif kind == "gen_power":
             alphas = getattr(spec, "alphas", None)
             dim2 = getattr(spec, "dim2", None)
             if alphas is None or dim2 is None:
-                raise ValueError("XConeSpec(kind='gen_power') requires alphas and dim2")
+                raise ValueError("DirectConeSpec(kind='gen_power') requires alphas and dim2")
             out.append(
                 _cpu_solver.GenPowerXConeT(
                     indices,
@@ -133,25 +133,24 @@ def _xcones_to_cpu(cones) -> List:
         elif kind == "psd_triangle":
             psd_k = getattr(spec, "psd_k", None)
             if psd_k is None:
-                raise ValueError("XConeSpec(kind='psd_triangle') requires psd_k")
+                raise ValueError("DirectConeSpec(kind='psd_triangle') requires psd_k")
             xcone_t = getattr(_cpu_solver, "PSDTriangleXConeT", None)
             if xcone_t is None:
                 raise NotImplementedError(
-                    "PSD direct-x cones require the CPU backend to be built "
-                    "with the `sdp` feature"
+                    "PSD direct cones require the CPU backend to be built " "with the `sdp` feature"
                 )
             out.append(xcone_t(indices, int(psd_k)))
         else:
-            raise ValueError(f"Unknown XConeSpec.kind: {kind!r}")
+            raise ValueError(f"Unknown DirectConeSpec.kind: {kind!r}")
     return out
 
 
 def cones_to_cpu(cones) -> List:
     """Convert Cones dataclass to CPU solver SLACK cone list format.
 
-    Direct-x cones (`cones.x_cones`) are NOT included in the returned
-    list — they go via a separate x_cones argument on the CPU solver
-    (see `_xcones_to_cpu`). Call both helpers to materialize the full
+    Direct cones (`cones.dir_cones`) are NOT included in the returned
+    list — they go via a separate dir_cones argument on the CPU solver
+    (see `_dir_cones_to_cpu`). Call both helpers to materialize the full
     cone set for CompiledSolver / DefaultSolver.
     """
     cpu_cones = []
@@ -272,18 +271,18 @@ class ActiveSetSolver:
         self._batch_size = batch_size or 1
 
         # Active-set CPU solver only supports zero + nonneg slack cones.
-        # Direct-x cones (cones.x_cones) and exotic slack cones (SOC, exp,
+        # Direct cones (cones.dir_cones) and exotic slack cones (SOC, exp,
         # power, gen_power, psd_triangle) are not handled here: silently
         # dropping them would solve the wrong problem. The unified
         # `moreau.Solver` auto-resolver avoids routing such problems here
         # (see `_resolve_solver_type` in moreau/__init__.py), but reject
         # explicit `solver='active_set'` requests too.
-        x_cones = getattr(cones, "x_cones", None) or []
-        if x_cones:
+        dir_cones = getattr(cones, "dir_cones", None) or []
+        if dir_cones:
             raise ValueError(
-                "ActiveSetSolver does not support direct-x cones "
-                f"(`cones.x_cones` has {len(x_cones)} entries). Use "
-                "`solver='ipm'` or `solver='auto'` for problems with x_cones."
+                "ActiveSetSolver does not support direct cones "
+                f"(`cones.dir_cones` has {len(dir_cones)} entries). Use "
+                "`solver='ipm'` or `solver='auto'` for problems with dir_cones."
             )
         for attr, label in (
             ("num_exp_cones", "exponential"),
@@ -452,16 +451,16 @@ class ActiveSetSolver:
         if not self._enable_grad:
             raise RuntimeError("backward() requires enable_grad=True")
 
-        # Active-set CPU path doesn't support direct-x cones. The unified
+        # Active-set CPU path doesn't support direct cones. The unified
         # `Solver.backward` wrapper passes `dz_x=dz_x` unconditionally
-        # (default None) since direct-x problems exist on the IPM path,
+        # (default None) since direct problems exist on the IPM path,
         # so we accept the kwarg but raise on a non-trivial upstream.
         if dz_x is not None:
             dz_x_arr = np.asarray(dz_x, dtype=np.float64)
             if dz_x_arr.size > 0 and not np.all(dz_x_arr == 0.0):
                 raise RuntimeError(
-                    "ActiveSetSolver does not support direct-x cones; "
-                    "use the IPM solver for problems with `x_cones`"
+                    "ActiveSetSolver does not support direct cones; "
+                    "use the IPM solver for problems with `dir_cones`"
                 )
 
         dx = np.asarray(dx, dtype=np.float64)
@@ -635,10 +634,10 @@ class Solver:
         # Convert cones
         if hasattr(cones, "num_zero_cones"):
             self._cones = cones_to_cpu(cones)
-            self._x_cones = _xcones_to_cpu(cones)
+            self._dir_cones = _dir_cones_to_cpu(cones)
         else:
             self._cones = cones
-            self._x_cones = []
+            self._dir_cones = []
 
         # Handle settings (for IPM path)
         if settings is None:
@@ -691,7 +690,7 @@ class Solver:
             cones=self._cones,
             settings=self._settings,
             enable_grad=self._enable_grad,
-            x_cones=self._x_cones if self._x_cones else None,
+            dir_cones=self._dir_cones if self._dir_cones else None,
             b_sparsity_pattern=self._b_sparsity_pattern,
         )
 
@@ -768,7 +767,7 @@ class Solver:
             cones=self._cones,
             settings=self._settings,
             enable_grad=self._enable_grad,
-            x_cones=self._x_cones if self._x_cones else None,
+            dir_cones=self._dir_cones if self._dir_cones else None,
             b_sparsity_pattern=b_sparsity_pattern,
         )
         self._cached_single_P = None
@@ -1036,7 +1035,7 @@ class Solver:
             dx: Upstream gradient w.r.t. x (required)
             dz: Upstream gradient w.r.t. z (optional, defaults to zeros)
             ds: Upstream gradient w.r.t. s (optional, defaults to zeros)
-            dz_x: Upstream gradient w.r.t. direct-x dual z_x. Same shape
+            dz_x: Upstream gradient w.r.t. direct dual z_x. Same shape
                 as the `z_x` field returned by solve(); leave as None to
                 skip (equivalent to all-zero dz_x).
 
@@ -1165,7 +1164,7 @@ class Solver:
 
         All inputs are flat contiguous arrays: batch_size * per-problem-size.
 
-        For direct-x cones, also supply `z_x_flat` (the saved direct-x
+        For direct cones, also supply `z_x_flat` (the saved direct
         cone duals from `solve()`) and optionally `dz_x_flat` (upstream
         gradient on `z_x`).
 
@@ -1269,10 +1268,10 @@ class Solver:
 
 
 class DirectXSolverCpu:
-    """Direct-x CPU solver (single or batched).
+    """Direct CPU solver (single or batched).
 
     Thin wrapper around `_cpu_solver.CompiledSolver` configured with
-    `x_cones`. The CompiledSolver does symbolic factorisation **once**
+    `dir_cones`. The CompiledSolver does symbolic factorisation **once**
     at construction; `setup()` updates equilibration when matrix values
     change, and `solve()` reuses the precompiled structure for every
     call. This matches the slack-only CompiledSolver path and avoids
@@ -1309,13 +1308,13 @@ class DirectXSolverCpu:
         self._nnz_P = len(P_col_indices)
         self._nnz_A = len(A_col_indices)
 
-        # Separate slack cones and direct-x cones.
+        # Separate slack cones and direct cones.
         if hasattr(cones, "num_zero_cones"):
             self._slack_cones = cones_to_cpu(cones)
-            self._x_cones = _xcones_to_cpu(cones)
+            self._dir_cones = _dir_cones_to_cpu(cones)
         else:
             self._slack_cones = cones
-            self._x_cones = []
+            self._dir_cones = []
 
         self._settings = (
             _cpu_solver.DefaultSettings() if settings is None else settings_to_cpu(settings)
@@ -1335,7 +1334,7 @@ class DirectXSolverCpu:
             settings=self._settings,
             num_threads=1,
             enable_grad=enable_grad,
-            x_cones=self._x_cones if self._x_cones else None,
+            dir_cones=self._dir_cones if self._dir_cones else None,
         )
 
         # Matrix values set via `.setup()`.
@@ -1389,7 +1388,7 @@ class DirectXSolverCpu:
 
         # Warm-start vectors (each None, or shape (batch, dim)); flattened
         # to contiguous 1-D buffers as `solve_flat` expects. `warm_z_x` is
-        # the direct-x cone dual; omitting it cold-inits the cone block.
+        # the direct cone dual; omitting it cold-inits the cone block.
         def _warm_flat(name):
             v = kwargs.get(name)
             if v is None:

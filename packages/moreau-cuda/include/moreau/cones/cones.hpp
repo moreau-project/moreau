@@ -139,7 +139,7 @@ struct Cones {
     // GenPower, PSD). initialize() validates each entry's kind/dimensions
     // (e.g. SOC needs >= 2 indices, PSD needs indices.size() == k(k+1)/2) and
     // rejects only genuinely malformed cones.
-    std::vector<SupportedXConeT> x_cones;
+    std::vector<SupportedXConeT> dir_cones;
     int64_t numXCones;
 
     // SOC cone dimensions (set by user, host vector)
@@ -194,7 +194,7 @@ struct Cones {
     int64_t numLargeSoc;
 
     // Derived direct-x quantities (computed in initialize(); zero when numXCones == 0)
-    int64_t totalXConeNumel;       // sum of indices.size() across x_cones
+    int64_t totalXConeNumel;       // sum of indices.size() across dir_cones
     int64_t totalXConeHsEntries;   // sum of Hs entries per x-cone (nonneg: dim, SOC dense: tri, SOC sparse: dim, PSD: svec_dim*(svec_dim+1)/2)
     int64_t totalSparseXSocDim;    // sum of dim over x-cone SOC with dim > 4
     int64_t numSparseXSoc;         // count of x-cone SOC with dim > 4
@@ -737,7 +737,7 @@ struct Cones {
           numPowerCones(other.numPowerCones),
           numGenPowerCones(other.numGenPowerCones),
           numPsdCones(other.numPsdCones),
-          x_cones(other.x_cones),
+          dir_cones(other.dir_cones),
           numXCones(other.numXCones),
           totalXConeNumel(0),
           totalXConeHsEntries(0),
@@ -934,17 +934,17 @@ struct Cones {
             return;  // Already initialized
         }
 
-        // Sync numXCones from x_cones (x_cones is authoritative).
+        // Sync numXCones from dir_cones (dir_cones is authoritative).
         // Direct-x nonneg and SOC both supported end-to-end on CUDA (any
         // dim ≥ 2). SOC with dim ≤ 4 uses the dense Hs form; dim > 4
         // uses the rank-2 u/v/d sparse expansion. Both paths are
         // streaming (no stack-array dim cap), matching CPU.
-        numXCones = static_cast<int64_t>(x_cones.size());
+        numXCones = static_cast<int64_t>(dir_cones.size());
         if (numXCones > 0) {
-            for (const auto& xc : x_cones) {
+            for (const auto& xc : dir_cones) {
                 if (xc.kind == XConeKind::Nonneg) continue;
                 if (xc.kind == XConeKind::SOC) {
-                    // Match Python `XConeSpec.validate_kind_size` line 110
+                    // Match Python `DirectConeSpec.validate_kind_size` line 110
                     // (`SOC x-cone requires >= 2 indices`). Direct construction
                     // from FFI (JAX / torch) bypasses the Python validator, so
                     // CUDA needs the same floor: a 1-index SOC has empty `v`,
@@ -1365,14 +1365,14 @@ struct Cones {
         }
         // cuSOLVER / cuBLAS handles + workspaces are shared between slack PSD
         // and direct-x PSD; size them to the largest k across both.
-        // (Direct-x PSD x_cones[].psd_k is captured below in numXPsdCones; we
-        // peek into x_cones here since the direct-x init runs after this block.)
+        // (Direct-x PSD dir_cones[].psd_k is captured below in numXPsdCones; we
+        // peek into dir_cones here since the direct-x init runs after this block.)
         int64_t max_dim_for_psd = 0;
         if (numPsdCones > 0) {
             max_dim_for_psd = std::max(max_dim_for_psd,
                 *std::max_element(psdConeDims.begin(), psdConeDims.end()));
         }
-        for (const auto& xc : x_cones) {
+        for (const auto& xc : dir_cones) {
             if (xc.kind == XConeKind::PSD && xc.psd_k > max_dim_for_psd) {
                 max_dim_for_psd = xc.psd_k;
             }
@@ -1700,7 +1700,7 @@ struct Cones {
             std::vector<double>  genpow_alphas_host;
 
             for (int64_t c = 0; c < numXCones; ++c) {
-                const auto& xc = x_cones[(size_t)c];
+                const auto& xc = dir_cones[(size_t)c];
                 kinds_host[(size_t)c] = static_cast<int64_t>(xc.kind);
                 const int64_t dim = static_cast<int64_t>(xc.indices.size());
                 dims_host[(size_t)c] = dim;
@@ -1786,7 +1786,7 @@ struct Cones {
                         if (a <= 0.0) throw std::runtime_error("GenPowerXCone: alphas must be > 0");
                         asum += a;
                     }
-                    // Match Python `XConeSpec._types.py:178` (relative
+                    // Match Python `DirectConeSpec._types.py:178` (relative
                     // tolerance scaled by dim1) and slack genpow at
                     // line 1438. Absolute 1e-8 was tighter than Python
                     // for dim1 > 1, so a problem that passed the
@@ -2138,7 +2138,7 @@ struct Cones {
           genpow_pd_signs(std::move(other.genpow_pd_signs)),
           genpow_pd_active(std::move(other.genpow_pd_active)),
           genpow_pd_workspace(std::move(other.genpow_pd_workspace)),
-          x_cones(std::move(other.x_cones)),
+          dir_cones(std::move(other.dir_cones)),
           numXCones(other.numXCones),
           totalXConeNumel(other.totalXConeNumel),
           totalXConeHsEntries(other.totalXConeHsEntries),
@@ -2417,7 +2417,7 @@ struct Cones {
             numSparseXSoc = other.numSparseXSoc;
 
             // Move vectors
-            x_cones = std::move(other.x_cones);
+            dir_cones = std::move(other.dir_cones);
             socConeDims = std::move(other.socConeDims);
             socConeDimsOriginal = std::move(other.socConeDimsOriginal);
             socSortPerm = std::move(other.socSortPerm);
@@ -3065,7 +3065,7 @@ struct Cones {
         // contributes 1 per cone, PSD contributes psd_k per cone (matches
         // the CPU CompositeXCone layout and slack PSD).
         int64_t xDeg = 0;
-        for (const auto& xc : x_cones) {
+        for (const auto& xc : dir_cones) {
             if (xc.kind == XConeKind::Nonneg) {
                 xDeg += static_cast<int64_t>(xc.indices.size());
             } else if (xc.kind == XConeKind::SOC) {

@@ -161,13 +161,13 @@ class JaxSolverCuda:
                     jnp.array([], dtype=jnp.int64), cuda_device
                 )
 
-            # Direct-x cone descriptors. We materialise the same flat
+            # Direct cone descriptors. We materialise the same flat
             # arrays the FFI handler reads (kinds + indices_offsets +
             # indices_flat + per-kind parameter slices). Keeps the FFI
-            # signature stable across direct-x / slack-only problems —
-            # zero-length buffers when no x_cones are present.
-            x_specs = list(getattr(cones, "x_cones", None) or [])
-            self._num_x_cones = len(x_specs)
+            # signature stable across direct / slack-only problems —
+            # zero-length buffers when no dir_cones are present.
+            x_specs = list(getattr(cones, "dir_cones", None) or [])
+            self._num_dir_cones = len(x_specs)
             x_kinds, x_idx_off, x_idx_flat = [], [0], []
             x_pow_alphas, x_psd_ks = [], []
             x_gp_dim1s, x_gp_dim2s, x_gp_alphas_flat = [], [], []
@@ -183,7 +183,7 @@ class JaxSolverCuda:
                 kind_str = (getattr(spec, "kind", "") or "").lower()
                 if kind_str not in kind_map:
                     raise ValueError(
-                        f"Unknown XConeSpec.kind={kind_str!r}; "
+                        f"Unknown DirectConeSpec.kind={kind_str!r}; "
                         "supported: nonneg, soc, psd_triangle, exp, power, gen_power"
                     )
                 x_kinds.append(kind_map[kind_str])
@@ -193,18 +193,20 @@ class JaxSolverCuda:
                 if kind_str == "power":
                     alpha = getattr(spec, "alpha", None)
                     if alpha is None:
-                        raise ValueError("XConeSpec(kind='power') requires alpha")
+                        raise ValueError("DirectConeSpec(kind='power') requires alpha")
                     x_pow_alphas.append(float(alpha))
                 elif kind_str == "psd_triangle":
                     psd_k = getattr(spec, "psd_k", None)
                     if psd_k is None:
-                        raise ValueError("XConeSpec(kind='psd_triangle') requires psd_k")
+                        raise ValueError("DirectConeSpec(kind='psd_triangle') requires psd_k")
                     x_psd_ks.append(int(psd_k))
                 elif kind_str == "gen_power":
                     alphas = list(getattr(spec, "alphas", []) or [])
                     dim2 = getattr(spec, "dim2", None)
                     if not alphas or dim2 is None:
-                        raise ValueError("XConeSpec(kind='gen_power') requires alphas and dim2")
+                        raise ValueError(
+                            "DirectConeSpec(kind='gen_power') requires alphas and dim2"
+                        )
                     x_gp_dim1s.append(len(alphas))
                     x_gp_dim2s.append(int(dim2))
                     x_gp_alphas_flat.extend(alphas)
@@ -334,7 +336,7 @@ class JaxSolverCuda:
                     ),
                     self._cones.num_power_cones,
                     self._num_gen_power,
-                    self._num_x_cones,
+                    self._num_dir_cones,
                     self._total_xn,
                     self._P_row_offsets_gpu,
                     self._P_col_indices_gpu,
@@ -388,7 +390,7 @@ class JaxSolverCuda:
                     ),
                     self._cones.num_power_cones,
                     self._num_gen_power,
-                    self._num_x_cones,
+                    self._num_dir_cones,
                     self._total_xn,
                     self._P_row_offsets_gpu,
                     self._P_col_indices_gpu,

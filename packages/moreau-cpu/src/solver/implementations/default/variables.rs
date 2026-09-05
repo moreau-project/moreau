@@ -20,7 +20,7 @@ pub struct DefaultVariables<T> {
     /// scaled dual variables
     pub z: Vec<T>,
     /// direct-x cone dual variables (one entry per index across all
-    /// direct-x cones, in the order they appear in `x_cones`). The
+    /// direct-x cones, in the order they appear in `dir_cones`). The
     /// corresponding primal `s_x` is implicit: `s_x = x[J]` for each
     /// direct-x cone J.
     pub z_x: Vec<T>,
@@ -79,13 +79,13 @@ where
         &mut self,
         residuals: &DefaultResiduals<T>,
         cones: &CompositeCone<T>,
-        x_cones: &CompositeXCone<T>,
+        dir_cones: &CompositeXCone<T>,
     ) -> T {
         // Direct-x cones contribute `<x[J], z_J>` to the primal-dual gap
         // and `cone.degree()` to the central-path normalization.
         let mut extra_sz = T::zero();
         let mut off = 0usize;
-        for entry in x_cones.iter() {
+        for entry in dir_cones.iter() {
             let k = entry.indices.len();
             let zx = &self.z_x[off..off + k];
             for (i, &idx) in entry.indices.iter().enumerate() {
@@ -93,7 +93,7 @@ where
             }
             off += k;
         }
-        let denom = T::from(cones.degree() + x_cones.degree() + 1).unwrap();
+        let denom = T::from(cones.degree() + dir_cones.degree() + 1).unwrap();
         let mu = (residuals.dot_sz + extra_sz + self.τ * self.κ) / denom;
 
         // Debug output for CPU/CUDA comparison (set MOREAU_DEBUG=1 to enable)
@@ -119,7 +119,7 @@ where
         residuals: &DefaultResiduals<T>,
         variables: &Self,
         cones: &CompositeCone<T>,
-        x_cones: &CompositeXCone<T>,
+        dir_cones: &CompositeXCone<T>,
     ) {
         self.x.copy_from(&residuals.rx);
         self.z.copy_from(&residuals.rz);
@@ -128,7 +128,7 @@ where
         // cone's direct-x affine_ds. Primal x[J] is not needed here —
         // for symmetric cones the affine shortcut depends only on z.
         let mut off = 0usize;
-        for entry in x_cones.iter() {
+        for entry in dir_cones.iter() {
             let k = entry.indices.len();
             entry
                 .cone
@@ -146,7 +146,7 @@ where
         residuals: &DefaultResiduals<T>,
         variables: &Self,
         cones: &mut CompositeCone<T>,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
         step: &mut Self,
         σ: T,
         μ: T,
@@ -184,7 +184,7 @@ where
         // shift is accumulated into `self.z_x` which already holds
         // affine_ds from affine_step_rhs.
         let mut off = 0usize;
-        for entry in x_cones.iter_mut() {
+        for entry in dir_cones.iter_mut() {
             let k = entry.indices.len();
             let mut step_x_gather = vec![T::zero(); k];
             for (i, &idx) in entry.indices.iter().enumerate() {
@@ -208,7 +208,7 @@ where
         &self,
         step: &Self,
         cones: &mut CompositeCone<T>,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
         settings: &DefaultSettings<T>,
         step_direction: StepDirection,
     ) -> T {
@@ -241,7 +241,7 @@ where
         // Direct-x step length — `direct_x_step_length(dx, dz, x, z, ...)`
         // takes the natural primal-first ordering.
         let mut off = 0usize;
-        for entry in x_cones.iter_mut() {
+        for entry in dir_cones.iter_mut() {
             let k = entry.indices.len();
             let mut x_gather = vec![T::zero(); k];
             let mut dx_gather = vec![T::zero(); k];
@@ -280,7 +280,7 @@ where
     fn symmetric_initialization(
         &mut self,
         cones: &mut CompositeCone<T>,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
     ) {
         _shift_to_cone_interior(&mut self.s, cones, PrimalOrDualCone::PrimalCone);
         _shift_to_cone_interior(&mut self.z, cones, PrimalOrDualCone::DualCone);
@@ -291,7 +291,7 @@ where
         // (where margins are the same formula) but future asymmetric
         // direct-x cones need the distinction.
         let mut off = 0usize;
-        for entry in x_cones.iter_mut() {
+        for entry in dir_cones.iter_mut() {
             let k = entry.indices.len();
             let mut xj = vec![T::zero(); k];
             for (i, &idx) in entry.indices.iter().enumerate() {
@@ -315,7 +315,7 @@ where
         debug_println!("self after symmetric initialization: {:?}", self);
     }
 
-    fn unit_initialization(&mut self, cones: &CompositeCone<T>, x_cones: &CompositeXCone<T>) {
+    fn unit_initialization(&mut self, cones: &CompositeCone<T>, dir_cones: &CompositeXCone<T>) {
         cones.unit_initialization(&mut self.z, &mut self.s);
 
         self.x.set(T::zero());
@@ -324,7 +324,7 @@ where
         // ordering. Gather `x[J]` into a local buffer, initialize, then
         // scatter back.
         let mut off = 0usize;
-        for entry in x_cones.iter() {
+        for entry in dir_cones.iter() {
             let k = entry.indices.len();
             let mut xj = vec![T::zero(); k];
             entry
@@ -352,7 +352,7 @@ where
     fn scale_cones(
         &self,
         cones: &mut CompositeCone<T>,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
         μ: T,
         scaling_strategy: ScalingStrategy,
     ) -> bool {
@@ -365,7 +365,7 @@ where
         // the default impl produces Hs = Hs_inv which matches commit 3's
         // additive contribution to (1,1). Asymmetric cones override.
         let mut off = 0usize;
-        for entry in x_cones.iter_mut() {
+        for entry in dir_cones.iter_mut() {
             let k = entry.indices.len();
             let mut xj = vec![T::zero(); k];
             for (i, &idx) in entry.indices.iter().enumerate() {
@@ -389,9 +389,9 @@ where
         step: &Self,
         α: T,
         cones: &mut CompositeCone<T>,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
     ) -> T {
-        let central_coef = (cones.degree() + x_cones.degree() + 1).as_T();
+        let central_coef = (cones.degree() + dir_cones.degree() + 1).as_T();
 
         let cur_τ = self.τ + α * step.τ;
         let cur_κ = self.κ + α * step.κ;
@@ -401,7 +401,7 @@ where
         let mut sz_direct = T::zero();
         {
             let mut off = 0usize;
-            for entry in x_cones.iter() {
+            for entry in dir_cones.iter() {
                 let k = entry.indices.len();
                 for (i, &idx) in entry.indices.iter().enumerate() {
                     let x_cur = self.x[idx] + α * step.x[idx];
@@ -426,7 +426,7 @@ where
         // barriers from direct-x cones via `direct_x_compute_barrier(
         // x, z, dx, dz, α)` — primal-first ordering.
         let mut off = 0usize;
-        for entry in x_cones.iter_mut() {
+        for entry in dir_cones.iter_mut() {
             let k = entry.indices.len();
             let mut xj = vec![T::zero(); k];
             let mut dxj = vec![T::zero(); k];
@@ -527,11 +527,11 @@ where
     /// margin-shift vs. unit-init path, matching `default_start`.
     pub(crate) fn reinit_direct_x_cone_block(
         &mut self,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
         symmetric: bool,
     ) {
         let mut off = 0usize;
-        for entry in x_cones.iter_mut() {
+        for entry in dir_cones.iter_mut() {
             let k = entry.indices.len();
             let mut xj = vec![T::zero(); k];
             if symmetric {
@@ -586,7 +586,7 @@ where
         // required since `z_x` is a flat stacked Vec while `d` is length-n.
         if !self.z_x.is_empty() {
             let mut off = 0usize;
-            for xcone in &data.x_cones {
+            for xcone in &data.dir_cones {
                 let indices = xcone.indices();
                 for (k, &idx) in indices.iter().enumerate() {
                     self.z_x[off + k] = self.z_x[off + k] * d[idx] * scaleinv * cinv;

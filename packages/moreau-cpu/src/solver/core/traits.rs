@@ -44,7 +44,8 @@ pub trait Variables<T: FloatT>: std::fmt::Debug {
     type SE: Settings<T>;
 
     /// Compute the scaled duality gap.
-    fn calc_mu(&mut self, residuals: &Self::R, cones: &Self::C, x_cones: &CompositeXCone<T>) -> T;
+    fn calc_mu(&mut self, residuals: &Self::R, cones: &Self::C, dir_cones: &CompositeXCone<T>)
+        -> T;
 
     /// Compute the KKT RHS for a pure Newton step.
     fn affine_step_rhs(
@@ -52,7 +53,7 @@ pub trait Variables<T: FloatT>: std::fmt::Debug {
         residuals: &Self::R,
         variables: &Self,
         cones: &Self::C,
-        x_cones: &CompositeXCone<T>,
+        dir_cones: &CompositeXCone<T>,
     );
 
     /// Compute the KKT RHS for an interior point centering step.
@@ -62,7 +63,7 @@ pub trait Variables<T: FloatT>: std::fmt::Debug {
         residuals: &Self::R,
         variables: &Self,
         cones: &mut Self::C,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
         step: &mut Self, //mut allows step to double as working space
         σ: T,
         μ: T,
@@ -75,7 +76,7 @@ pub trait Variables<T: FloatT>: std::fmt::Debug {
         &self,
         step_lhs: &Self,
         cones: &mut Self::C,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
         settings: &Self::SE,
         step_direction: StepDirection,
     ) -> T;
@@ -84,10 +85,10 @@ pub trait Variables<T: FloatT>: std::fmt::Debug {
     fn add_step(&mut self, step_lhs: &Self, α: T);
 
     /// Bring the variables into the interior of the cone constraints.
-    fn symmetric_initialization(&mut self, cones: &mut Self::C, x_cones: &mut CompositeXCone<T>);
+    fn symmetric_initialization(&mut self, cones: &mut Self::C, dir_cones: &mut CompositeXCone<T>);
 
     /// Initialize all conic variables to unit values.
-    fn unit_initialization(&mut self, cones: &Self::C, x_cones: &CompositeXCone<T>);
+    fn unit_initialization(&mut self, cones: &Self::C, dir_cones: &CompositeXCone<T>);
 
     /// Overwrite values with those from another object
     fn copy_from(&mut self, src: &Self);
@@ -96,14 +97,18 @@ pub trait Variables<T: FloatT>: std::fmt::Debug {
     fn scale_cones(
         &self,
         cones: &mut Self::C,
-        x_cones: &mut CompositeXCone<T>,
+        dir_cones: &mut CompositeXCone<T>,
         μ: T,
         scaling_strategy: ScalingStrategy,
     ) -> bool;
 
     /// Compute the barrier function
     fn barrier(
-        &self, step: &Self, α: T, cones: &mut Self::C, x_cones: &mut CompositeXCone<T>
+        &self,
+        step: &Self,
+        α: T,
+        cones: &mut Self::C,
+        dir_cones: &mut CompositeXCone<T>,
     ) -> T;
 
     /// Rescale variables, e.g. to renormalize iterates
@@ -142,12 +147,12 @@ pub trait KKTSystem<T: FloatT> {
     fn update(&mut self, data: &Self::D, cones: &mut Self::C, settings: &Self::SE) -> bool;
 
     /// Mutable access to the direct-x cone state owned by the KKT system.
-    /// The IPM loop borrows this to pass `x_cones` into `Variables` trait
+    /// The IPM loop borrows this to pass `dir_cones` into `Variables` trait
     /// methods without re-plumbing ownership.
-    fn x_cones_mut(&mut self) -> &mut CompositeXCone<T>;
+    fn dir_cones_mut(&mut self) -> &mut CompositeXCone<T>;
 
     /// Immutable access to the direct-x cone state owned by the KKT system.
-    fn x_cones_ref(&self) -> &CompositeXCone<T>;
+    fn dir_cones_ref(&self) -> &CompositeXCone<T>;
 
     /// Solve the KKT system for the given RHS.
     #[allow(clippy::too_many_arguments)]

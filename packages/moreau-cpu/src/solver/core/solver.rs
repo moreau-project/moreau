@@ -295,7 +295,7 @@ where
             //--------------
             μ = self
                 .variables
-                .calc_mu(&self.residuals, &self.cones, self.kktsystem.x_cones_ref());
+                .calc_mu(&self.residuals, &self.cones, self.kktsystem.dir_cones_ref());
 
             debug_println!("μ: {:?}", μ);
 
@@ -359,7 +359,7 @@ where
             timeit!{timers => "scale cones"; {
                 is_scaling_success = self.variables.scale_cones(
                     &mut self.cones,
-                    self.kktsystem.x_cones_mut(),
+                    self.kktsystem.dir_cones_mut(),
                     μ,
                     scaling,
                 );
@@ -397,7 +397,7 @@ where
                 &self.residuals,
                 &self.variables,
                 &self.cones,
-                self.kktsystem.x_cones_ref(),
+                self.kktsystem.dir_cones_ref(),
             );
 
             debug_block! {
@@ -444,7 +444,7 @@ where
                     &self.residuals,
                     &self.variables,
                     &mut self.cones,
-                    self.kktsystem.x_cones_mut(),
+                    self.kktsystem.dir_cones_mut(),
                     &mut self.step_lhs,
                     σ,
                     μ,
@@ -634,13 +634,13 @@ mod internal {
         SE: Settings<T>,
     {
         fn default_start(&mut self) {
-            if self.cones.is_symmetric() && self.kktsystem.x_cones_ref().is_symmetric() {
+            if self.cones.is_symmetric() && self.kktsystem.dir_cones_ref().is_symmetric() {
                 // set all scalings to identity (or zero for the zero cone)
                 self.cones.set_identity_scaling();
                 // Direct-x cones also start at identity scaling so the KKT
                 // (1,1) contribution `Σ E' Hs E` is well-defined on the
                 // first factorization.
-                for entry in self.kktsystem.x_cones_mut().iter_mut() {
+                for entry in self.kktsystem.dir_cones_mut().iter_mut() {
                     entry.cone.set_identity_scaling();
                 }
                 // Refactor
@@ -651,11 +651,11 @@ mod internal {
                     .solve_initial_point(&mut self.variables, &self.data, &self.settings);
                 // fix up (z,s) so that they are in the cone
                 self.variables
-                    .symmetric_initialization(&mut self.cones, self.kktsystem.x_cones_mut());
+                    .symmetric_initialization(&mut self.cones, self.kktsystem.dir_cones_mut());
             } else {
                 // Assigns unit (z,s) and zeros the primal variables
                 self.variables
-                    .unit_initialization(&self.cones, self.kktsystem.x_cones_ref());
+                    .unit_initialization(&self.cones, self.kktsystem.dir_cones_ref());
             }
         }
 
@@ -672,13 +672,13 @@ mod internal {
             let mut α = self.variables.calc_step_length(
                 &self.step_lhs,
                 &mut self.cones,
-                self.kktsystem.x_cones_mut(),
+                self.kktsystem.dir_cones_mut(),
                 &self.settings,
                 step_direction,
             );
 
             // additional barrier function limits for asymmetric cones
-            if !(self.cones.is_symmetric() && self.kktsystem.x_cones_ref().is_symmetric())
+            if !(self.cones.is_symmetric() && self.kktsystem.dir_cones_ref().is_symmetric())
                 && step_direction == StepDirection::Combined
                 && scaling == ScalingStrategy::Dual
             {
@@ -697,7 +697,7 @@ mod internal {
                     &self.step_lhs,
                     α,
                     &mut self.cones,
-                    self.kktsystem.x_cones_mut(),
+                    self.kktsystem.dir_cones_mut(),
                 );
                 if barrier < T::one() {
                     return α;
@@ -723,7 +723,7 @@ mod internal {
                     .reset_to_prev_iterate(&mut self.variables, &self.prev_vars);
 
                 // If problem is asymmetric, we can try to continue with the dual-only strategy
-                if !(self.cones.is_symmetric() && self.kktsystem.x_cones_ref().is_symmetric())
+                if !(self.cones.is_symmetric() && self.kktsystem.dir_cones_ref().is_symmetric())
                     && (scaling == ScalingStrategy::PrimalDual)
                 {
                     self.info.set_status(SolverStatus::Unsolved);
@@ -746,7 +746,7 @@ mod internal {
                 output = StrategyCheckpoint::NoUpdate;
             }
             // If problem is asymmetric, we can try to continue with the dual-only strategy
-            else if !(self.cones.is_symmetric() && self.kktsystem.x_cones_ref().is_symmetric())
+            else if !(self.cones.is_symmetric() && self.kktsystem.dir_cones_ref().is_symmetric())
                 && (scaling == ScalingStrategy::PrimalDual)
             {
                 output = StrategyCheckpoint::Update(ScalingStrategy::Dual);
@@ -765,7 +765,7 @@ mod internal {
         ) -> StrategyCheckpoint {
             let output;
 
-            if !(self.cones.is_symmetric() && self.kktsystem.x_cones_ref().is_symmetric())
+            if !(self.cones.is_symmetric() && self.kktsystem.dir_cones_ref().is_symmetric())
                 && scaling == ScalingStrategy::PrimalDual
                 && α < self.settings.core().ipm.min_switch_step_length
             {
@@ -871,14 +871,14 @@ mod internal {
                 let μ = self.variables.calc_mu(
                     &self.residuals,
                     &self.cones,
-                    self.kktsystem.x_cones_ref(),
+                    self.kktsystem.dir_cones_ref(),
                 );
 
                 let μ_step = T::min(μ * eff_factor, μ_target_comp);
 
                 if !self.variables.scale_cones(
                     &mut self.cones,
-                    self.kktsystem.x_cones_mut(),
+                    self.kktsystem.dir_cones_mut(),
                     μ,
                     scaling,
                 ) {
@@ -896,14 +896,14 @@ mod internal {
                     &self.residuals,
                     &self.variables,
                     &self.cones,
-                    self.kktsystem.x_cones_ref(),
+                    self.kktsystem.dir_cones_ref(),
                 );
 
                 self.step_rhs.combined_step_rhs(
                     &self.residuals,
                     &self.variables,
                     &mut self.cones,
-                    self.kktsystem.x_cones_mut(),
+                    self.kktsystem.dir_cones_mut(),
                     &mut self.step_lhs,
                     T::one(),
                     μ_step,

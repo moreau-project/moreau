@@ -445,7 +445,7 @@ void compute_xcone_psd_derivative(
     // Find direct-x PSD cones; nothing to do if none.
     bool has_psd = false;
     int64_t max_n_dim = 0, max_svec_dim = 0;
-    for (const auto& xc : cones.x_cones) {
+    for (const auto& xc : cones.dir_cones) {
         if (xc.kind == XConeKind::PSD) {
             has_psd = true;
             max_n_dim = std::max(max_n_dim, xc.psd_k);
@@ -498,7 +498,7 @@ void compute_xcone_psd_derivative(
     // Upload flattened xcone indices (per-cone, rebuilt each call — small).
     std::vector<int64_t> indices_flat;
     indices_flat.reserve(totalXConeNumel);
-    for (const auto& xc : cones.x_cones) {
+    for (const auto& xc : cones.dir_cones) {
         for (int64_t v : xc.indices) indices_flat.push_back(v);
     }
     int64_t* d_indices_flat = nullptr;
@@ -512,7 +512,7 @@ void compute_xcone_psd_derivative(
     //   psd_off:  into xcone_psd_H (sum of svec_dim² so far for PSD cones)
     int64_t xc_off = 0;
     int64_t psd_off = 0;
-    for (const auto& xc : cones.x_cones) {
+    for (const auto& xc : cones.dir_cones) {
         int64_t cone_dim = static_cast<int64_t>(xc.indices.size());
         if (xc.kind != XConeKind::PSD) {
             xc_off += cone_dim;

@@ -68,9 +68,9 @@ class _CudaSolveFunction(torch.autograd.Function):
         status = torch.empty(batch_size, dtype=torch.int32, device=device)
         obj_val = torch.empty(batch_size, dtype=torch.float64, device=device)
 
-        # Direct-x cone duals output (empty tensor when no direct-x cones).
+        # Direct cone duals output (empty tensor when no direct cones).
         # Read from the precomputed `_total_x_dim` instead of the nanobind
-        # `x_cones` property — dynamo can't trace nb_method accessors.
+        # `dir_cones` property — dynamo can't trace nb_method accessors.
         total_xn = solver._total_x_dim
         if total_xn > 0:
             z_x = torch.empty((batch_size, total_xn), dtype=torch.float64, device=device)
@@ -81,8 +81,8 @@ class _CudaSolveFunction(torch.autograd.Function):
 
         # Check for pending warm start (non-differentiable side data).
         # `pending_warm` is a 3-tuple (warm_x, warm_z, warm_s) when there are
-        # no direct-x cones, or a 4-tuple (warm_x, warm_z, warm_s, warm_z_x)
-        # when direct-x cones are present.
+        # no direct cones, or a 4-tuple (warm_x, warm_z, warm_s, warm_z_x)
+        # when direct cones are present.
         pending_warm = getattr(solver, "_pending_warm_start", None)
         if pending_warm is not None:
             if len(pending_warm) == 4:
@@ -158,7 +158,7 @@ class _CudaSolveFunction(torch.autograd.Function):
         z_2d = z if z.dim() == 2 else z.unsqueeze(0)
         s_2d = s if s.dim() == 2 else s.unsqueeze(0)
 
-        # Direct-x dual: forward saved z_x; only meaningful when non-empty.
+        # Direct dual: forward saved z_x; only meaningful when non-empty.
         # Bind the contiguous tensor to a name: `t.contiguous().data_ptr()`
         # on a non-contiguous `t` allocates a fresh copy whose only
         # reference is the temporary — CPython frees it the moment the
@@ -187,7 +187,7 @@ class _CudaSolveFunction(torch.autograd.Function):
         dz_2d = dz if dz.dim() == 2 else dz.unsqueeze(0)
         ds_2d = ds if ds.dim() == 2 else ds.unsqueeze(0)
 
-        # Direct-x upstream dz_x: pass through to the zero-copy backward
+        # Direct upstream dz_x: pass through to the zero-copy backward
         # binding (added in #7); the C++ side dispatches via
         # `backward_with_dz_x`. dz_x_ptr=0 → skip the dz_x branch.
         dz_x_has_data = (
@@ -270,11 +270,11 @@ def _cones_to_cuda(cones: Cones) -> _CudaCones:
         cuda_cones.num_gen_power_cones = len(gen_params)
     else:
         cuda_cones.num_gen_power_cones = 0
-    # Direct-x cones: thread through to CUDA backend so direct-x routing
-    # fires. Each XConeSpec is mapped to the CUDA SupportedXConeT, threading
+    # Direct cones: thread through to CUDA backend so direct routing
+    # fires. Each DirectConeSpec is mapped to the CUDA SupportedXConeT, threading
     # per-kind parameters (alpha for Power, alphas/dim2 for GenPower, psd_k
     # for PSD) so the CUDA backend sees the full descriptor.
-    x_specs = getattr(cones, "x_cones", None) or []
+    x_specs = getattr(cones, "dir_cones", None) or []
     if x_specs:
         from ._moreau_cuda import (
             SupportedXConeT as _CudaSupportedXConeT,
@@ -293,7 +293,7 @@ def _cones_to_cuda(cones: Cones) -> _CudaCones:
         for spec in x_specs:
             kind_str = (getattr(spec, "kind", "") or "").lower()
             if kind_str not in kind_map:
-                raise ValueError(f"Unknown XConeSpec.kind: {kind_str!r}")
+                raise ValueError(f"Unknown DirectConeSpec.kind: {kind_str!r}")
             kwargs = dict(
                 kind=kind_map[kind_str],
                 indices=list(spec.indices),
@@ -301,22 +301,22 @@ def _cones_to_cuda(cones: Cones) -> _CudaCones:
             if kind_str == "power":
                 alpha = getattr(spec, "alpha", None)
                 if alpha is None:
-                    raise ValueError("XConeSpec(kind='power') requires alpha")
+                    raise ValueError("DirectConeSpec(kind='power') requires alpha")
                 kwargs["power_alpha"] = float(alpha)
             elif kind_str == "gen_power":
                 alphas = getattr(spec, "alphas", None)
                 dim2 = getattr(spec, "dim2", None)
                 if alphas is None or dim2 is None:
-                    raise ValueError("XConeSpec(kind='gen_power') requires alphas and dim2")
+                    raise ValueError("DirectConeSpec(kind='gen_power') requires alphas and dim2")
                 kwargs["gen_power_alphas"] = [float(a) for a in alphas]
                 kwargs["gen_power_dim2"] = int(dim2)
             elif kind_str == "psd_triangle":
                 psd_k = getattr(spec, "psd_k", None)
                 if psd_k is None:
-                    raise ValueError("XConeSpec(kind='psd_triangle') requires psd_k")
+                    raise ValueError("DirectConeSpec(kind='psd_triangle') requires psd_k")
                 kwargs["psd_k"] = int(psd_k)
             cuda_xs.append(_CudaSupportedXConeT(**kwargs))
-        cuda_cones.x_cones = cuda_xs
+        cuda_cones.dir_cones = cuda_xs
     return cuda_cones
 
 
@@ -421,14 +421,16 @@ class TorchSolver:
         self._cones = cones
         self._cuda_cones = _cones_to_cuda(cones)
         self._cuda_settings = _settings_to_cuda(settings)
-        # Cache the direct-x cone total dimension so the autograd path
+        # Cache the direct cone total dimension so the autograd path
         # doesn't have to introspect nanobind properties at trace time —
         # `torch.compile`'s dynamo cannot inline `nb_method` accessors and
         # raises `AssertionError: expected FunctionType found nb_method`
-        # on `getattr(self._cuda_cones, 'x_cones', [])` calls inside
+        # on `getattr(self._cuda_cones, 'dir_cones', [])` calls inside
         # `_CudaSolveFunction.forward`. Pre-summing here keeps the hot
         # path numerical-only.
-        self._total_x_dim = sum(len(xc.indices) for xc in getattr(self._cuda_cones, "x_cones", []))
+        self._total_x_dim = sum(
+            len(xc.indices) for xc in getattr(self._cuda_cones, "dir_cones", [])
+        )
 
         # Extract CSR structure and convert to GPU tensors
         self._P_row_offsets = np.asarray(P_csr.indptr, dtype=np.int64)
@@ -583,9 +585,11 @@ class TorchCompiledSolver:
         self._cones = cones
         self._cuda_cones = _cones_to_cuda(cones)
         self._cuda_settings = _settings_to_cuda(settings)
-        # See `_CudaSolveFunction.forward` — cache total direct-x dim so
+        # See `_CudaSolveFunction.forward` — cache total direct dim so
         # dynamo doesn't trace into nanobind property accessors.
-        self._total_x_dim = sum(len(xc.indices) for xc in getattr(self._cuda_cones, "x_cones", []))
+        self._total_x_dim = sum(
+            len(xc.indices) for xc in getattr(self._cuda_cones, "dir_cones", [])
+        )
 
         # Stored matrix values (set via setup)
         self._P_values: Optional[torch.Tensor] = None
@@ -665,9 +669,9 @@ class TorchCompiledSolver:
             warm_x: Optional warm start primal, shape (batch, n), CUDA float64
             warm_z: Optional warm start dual, shape (batch, m), CUDA float64
             warm_s: Optional warm start slack, shape (batch, m), CUDA float64
-            warm_z_x: Optional direct-x cone dual warm start,
+            warm_z_x: Optional direct cone dual warm start,
                 shape (batch, sum |J|), CUDA float64. Required to be non-None
-                only when the problem has direct-x cones; ignored otherwise.
+                only when the problem has direct cones; ignored otherwise.
 
         Returns:
             Dict with keys: x, z, s, status, obj_val, iterations, solve_time
@@ -840,9 +844,9 @@ class TorchCompiledSolver:
         status = torch.empty(batch_size, dtype=torch.int32, device=device)
         obj_val = torch.empty(batch_size, dtype=torch.float64, device=device)
 
-        # Direct-x output (empty when no direct-x cones). Use the
+        # Direct output (empty when no direct cones). Use the
         # precomputed `_total_x_dim` so dynamo doesn't trace into the
-        # nanobind `x_cones` property (raises `AssertionError: expected
+        # nanobind `dir_cones` property (raises `AssertionError: expected
         # FunctionType found nb_method`).
         total_xn = self._total_x_dim
         if total_xn > 0:
@@ -964,7 +968,7 @@ class TorchCompiledSolver:
             dx: Upstream gradient w.r.t. x
             dz: Upstream gradient w.r.t. z (optional, defaults to zeros)
             ds: Upstream gradient w.r.t. s (optional, defaults to zeros)
-            dz_x: Upstream gradient w.r.t. direct-x cone duals z_x.
+            dz_x: Upstream gradient w.r.t. direct cone duals z_x.
                 Pass None or empty for slack-only problems.
 
         Returns:
@@ -1187,7 +1191,7 @@ class TorchCompiledSolver:
 
         # z_x is also threaded into the backward state: when present, the
         # binding's `load_backward_state_from_device_pointers` 8th arg
-        # restores the equilibrated direct-x dual into DiffState. (load
+        # restores the equilibrated direct dual into DiffState. (load
         # signature optional-zeroes when absent.)
         z_x_ptr = 0
         if z_x is not None and z_x.numel() > 0:

@@ -1986,7 +1986,7 @@ NB_MODULE(_moreau_cuda, m) {
             "dim1 (number of alphas) for each generalized power cone")
         .def_rw("gen_power_dim2s", &Cones::genPowerDim2s,
             "dim2 for each generalized power cone")
-        .def_rw("x_cones", &Cones::x_cones,
+        .def_rw("dir_cones", &Cones::dir_cones,
             "Direct-x cones: each entry constrains a subvector of x directly, "
             "rather than through a slack variable.")
         .def("total_constraints", &Cones::totalConstraints,
@@ -2197,7 +2197,7 @@ NB_MODULE(_moreau_cuda, m) {
                     warm_z_x: Optional warm start for direct-x cone duals,
                               shape (batch_size, total_x_dim). Required when
                               the problem has direct-x cones — pass None or
-                              omit when no x_cones are present.
+                              omit when no dir_cones are present.
                     warm_s: Warm start slack variables, shape (batch_size, m)
 
                 Returns:

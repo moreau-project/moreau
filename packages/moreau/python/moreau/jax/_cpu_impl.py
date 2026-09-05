@@ -88,11 +88,11 @@ class JaxSolverCpu:
         self._nnzP = len(self._P_col_indices)
         self._nnzA = len(self._A_col_indices)
 
-        # Direct-x cones: total dim across all x-cones, used to allocate the
+        # Direct cones: total dim across all x-cones, used to allocate the
         # z_x output buffer shape (and dz_x input shape) at the FFI boundary.
         # 0 for slack-only problems.
         self._total_x_dim = sum(
-            len(getattr(xc, "indices", [])) for xc in (getattr(cones, "x_cones", None) or [])
+            len(getattr(xc, "indices", [])) for xc in (getattr(cones, "dir_cones", None) or [])
         )
 
         # Register this solver in the global registry
@@ -274,11 +274,11 @@ def _solve_cpu_callback(
     z = np.asarray(result["z"], dtype=np.float64)
     s = np.asarray(result["s"], dtype=np.float64)
 
-    # Direct-x cone duals. CompiledSolver returns `z_x` only when x_cones
+    # Direct cone duals. CompiledSolver returns `z_x` only when dir_cones
     # are present; otherwise we synthesise a zero-length buffer with the
     # right batch dimension. Active-set CPU solver is zero+nonneg-only and
     # does not include z_x in its result dict — for solver='auto' the
-    # IPM path is selected when x_cones are present, so reaching this
+    # IPM path is selected when dir_cones are present, so reaching this
     # branch with `z_x` absent should be impossible. Fall back to zeros
     # defensively.
     total_xn = solver_wrapper._total_x_dim
@@ -555,7 +555,7 @@ def _solve_cpu_fwd(
         _solve_cpu_raw(solver_id, P_data, A_data, q, b)
     )
 
-    # Save everything needed for backward (including z_x for direct-x dz_x).
+    # Save everything needed for backward (including z_x for direct dz_x).
     residuals = (P_data, A_data, q, b, x, z, s, z_x)
     return (
         x,

@@ -1858,7 +1858,7 @@ void CompiledSolver::runIPMLoop(cudaStream_t stream) {
     // `compute_xgenpow_pd_axes_kernel` (direct-x) and
     // `try_compute_pd_axes_genpow_kernel` (slack).
     bool has_xcone_genpow = false;
-    for (const auto& xc : data.cones.x_cones) {
+    for (const auto& xc : data.cones.dir_cones) {
         if (xc.kind == XConeKind::GenPower) { has_xcone_genpow = true; break; }
     }
     bool has_slack_genpow = data.cones.numGenPowerCones > 0;

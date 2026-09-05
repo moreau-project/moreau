@@ -41,9 +41,9 @@ class JaxSolution(NamedTuple):
         x: Primal solution array
         z: Dual variable array (Lagrange multipliers)
         s: Slack variable array
-        z_x: Direct-x cone duals (length sum |J|, or zero-length when no
-            direct-x cones are present). Carrying it as the 4th field keeps
-            JAX pytree-flatten / unflatten consistent across direct-x and
+        z_x: Direct cone duals (length sum |J|, or zero-length when no
+            direct cones are present). Carrying it as the 4th field keeps
+            JAX pytree-flatten / unflatten consistent across direct and
             slack-only problems.
     """
 

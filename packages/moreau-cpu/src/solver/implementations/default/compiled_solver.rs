@@ -188,7 +188,7 @@ pub struct CompiledSolver<T: FloatT> {
     /// Cone constraints
     cones: Vec<SupportedConeT<T>>,
     /// Direct-x cone constraints (empty = slack-only)
-    x_cones: Vec<SupportedXConeT>,
+    dir_cones: Vec<SupportedXConeT>,
     /// Solver settings
     settings: DefaultSettings<T>,
     /// Thread pool for parallel processing
@@ -298,7 +298,7 @@ impl<T: FloatT> CompiledSolver<T> {
     /// to cones (in addition to the slack cones). Pass an empty slice for
     /// the slack-only case.
     ///
-    /// `enable_grad=true` with non-empty `x_cones` routes through the cached
+    /// `enable_grad=true` with non-empty `dir_cones` routes through the cached
     /// `backward()` path. `backward_with_data()` (the stateless autograd
     /// API) does not yet support direct-x — see `backward_with_data` for
     /// the rejection.
@@ -311,7 +311,7 @@ impl<T: FloatT> CompiledSolver<T> {
         A_row_offsets: &[usize],
         A_col_indices: &[usize],
         cones: &[SupportedConeT<T>],
-        x_cones: &[SupportedXConeT],
+        dir_cones: &[SupportedXConeT],
         settings: DefaultSettings<T>,
         num_threads: usize,
         enable_grad: bool,
@@ -324,7 +324,7 @@ impl<T: FloatT> CompiledSolver<T> {
             A_row_offsets,
             A_col_indices,
             cones,
-            x_cones,
+            dir_cones,
             settings,
             num_threads,
             enable_grad,
@@ -364,7 +364,7 @@ impl<T: FloatT> CompiledSolver<T> {
         )
     }
 
-    /// Core constructor: combines direct-x cones (`x_cones`) with PSD
+    /// Core constructor: combines direct-x cones (`dir_cones`) with PSD
     /// chordal-decomposition `b_sparsity_pattern`. The other constructors
     /// are thin wrappers around this one.
     #[allow(clippy::too_many_arguments)]
@@ -376,7 +376,7 @@ impl<T: FloatT> CompiledSolver<T> {
         A_row_offsets: &[usize],
         A_col_indices: &[usize],
         cones: &[SupportedConeT<T>],
-        x_cones: &[SupportedXConeT],
+        dir_cones: &[SupportedXConeT],
         mut settings: DefaultSettings<T>,
         num_threads: usize,
         enable_grad: bool,
@@ -384,7 +384,7 @@ impl<T: FloatT> CompiledSolver<T> {
     ) -> Result<Self, SolverError> {
         // Direct-x cones with chordal-decomposed PSD slack: chordal
         // augmentation only changes the slack/row dimension; the primal x
-        // (and thus the x_cones index set) is preserved. We thread x_cones
+        // (and thus the dir_cones index set) is preserved. We thread dir_cones
         // through the augmented solver below.
 
         // Create a local thread pool (not global)
@@ -540,7 +540,7 @@ impl<T: FloatT> CompiledSolver<T> {
             &P_csc_solver,
             &A_csc_solver,
             &cones_internal,
-            x_cones,
+            dir_cones,
             settings.clone(),
             None,
         )?;
@@ -553,7 +553,7 @@ impl<T: FloatT> CompiledSolver<T> {
                 &P_csc_solver,
                 &A_csc_solver,
                 &cones_internal,
-                x_cones,
+                dir_cones,
                 settings.clone(),
                 cached_amd_perm.clone(),
             )?;
@@ -574,7 +574,7 @@ impl<T: FloatT> CompiledSolver<T> {
                     &A_csc_solver,
                     &b_placeholder,
                     &cones_internal,
-                    x_cones,
+                    dir_cones,
                     settings.core(),
                 )?;
                 states.push(Mutex::new(state));
@@ -652,7 +652,7 @@ impl<T: FloatT> CompiledSolver<T> {
             P_csc_pattern: P_csc_solver,
             A_csc_pattern: A_csc_solver,
             cones: cones_internal,
-            x_cones: x_cones.to_vec(),
+            dir_cones: dir_cones.to_vec(),
             settings,
             thread_pool,
             solver_pool,
@@ -930,7 +930,7 @@ impl<T: FloatT> CompiledSolver<T> {
                 &self.P_csc_pattern,
                 &self.A_csc_pattern,
                 &self.cones,
-                &self.x_cones,
+                &self.dir_cones,
                 self.settings.clone(),
                 self.cached_amd_perm.clone(),
             )
@@ -1024,7 +1024,7 @@ impl<T: FloatT> CompiledSolver<T> {
     ) -> Result<Vec<DefaultSolution<T>>, SolverError> {
         let n = self.n;
         let m = self.m;
-        let xn: usize = self.x_cones.iter().map(|c| c.indices().len()).sum();
+        let xn: usize = self.dir_cones.iter().map(|c| c.indices().len()).sum();
 
         if q_flat.len() != batch_size * n {
             return Err(SolverError::BadInputData(
@@ -1192,7 +1192,7 @@ impl<T: FloatT> CompiledSolver<T> {
         // problems diverge from the DefaultSolver direct path.
         let mut rectified_any = false;
         dwork.fill(T::one());
-        for xcone in &data.x_cones {
+        for xcone in &data.dir_cones {
             let x_cone_entry = crate::solver::core::cones::make_x_cone::<T>(xcone);
             if !x_cone_entry.requires_uniform_x_scaling() {
                 continue;
@@ -1254,7 +1254,7 @@ impl<T: FloatT> CompiledSolver<T> {
                 &self.P_csc_pattern,
                 &self.A_csc_pattern,
                 &self.cones,
-                &self.x_cones,
+                &self.dir_cones,
                 self.settings.clone(),
                 self.cached_amd_perm.clone(),
             )
@@ -1448,7 +1448,7 @@ impl<T: FloatT> CompiledSolver<T> {
                     "warm_z_xs must have the same batch size as qs/bs",
                 ));
             }
-            let xn: usize = self.x_cones.iter().map(|c| c.indices().len()).sum();
+            let xn: usize = self.dir_cones.iter().map(|c| c.indices().len()).sum();
             for zx in zxs {
                 if zx.len() != xn {
                     return Err(SolverError::BadInputData(
@@ -1752,7 +1752,7 @@ impl<T: FloatT> CompiledSolver<T> {
                                     let c = solver_ref.data.equilibration.c;
                                     let d = &solver_ref.data.equilibration.d;
                                     let mut off = 0usize;
-                                    for xcone in &solver_ref.data.x_cones {
+                                    for xcone in &solver_ref.data.dir_cones {
                                         for (k, &idx) in xcone.indices().iter().enumerate() {
                                             solver_ref.variables.z_x[off + k] =
                                                 warm_z_x[off + k] * c / d[idx];
@@ -1762,10 +1762,10 @@ impl<T: FloatT> CompiledSolver<T> {
                                 }
                                 None => {
                                     let symmetric = solver.cones.is_symmetric()
-                                        && solver.kktsystem.x_cones_ref().is_symmetric();
+                                        && solver.kktsystem.dir_cones_ref().is_symmetric();
                                     let solver_ref = &mut *solver;
                                     solver_ref.variables.reinit_direct_x_cone_block(
-                                        solver_ref.kktsystem.x_cones_mut(),
+                                        solver_ref.kktsystem.dir_cones_mut(),
                                         symmetric,
                                     );
                                 }
@@ -2570,12 +2570,12 @@ impl<T: FloatT> CompiledSolver<T> {
             ));
         }
 
-        let has_x_cones = !self.x_cones.is_empty();
-        let xn_total: usize = self.x_cones.iter().map(|xc| xc.indices().len()).sum();
+        let has_dir_cones = !self.dir_cones.is_empty();
+        let xn_total: usize = self.dir_cones.iter().map(|xc| xc.indices().len()).sum();
         // If the solver has direct-x cones, z_x_batch must be supplied with
         // matching dimensions. (Empty slice means "no z_x" — only valid for
         // slack-only solvers.)
-        if has_x_cones && z_x_batch.is_empty() {
+        if has_dir_cones && z_x_batch.is_empty() {
             return Err(SolverError::BadInputData(
                 "backward_with_data() requires z_x_batch when the solver has direct-x cones",
             ));
@@ -2599,7 +2599,7 @@ impl<T: FloatT> CompiledSolver<T> {
                 "All batch arguments must have the same length",
             ));
         }
-        if has_x_cones {
+        if has_dir_cones {
             for zx in z_x_batch {
                 if zx.len() != xn_total {
                     return Err(SolverError::BadInputData(
@@ -2673,7 +2673,7 @@ impl<T: FloatT> CompiledSolver<T> {
                     solver.solution.x.copy_from_slice(&x_batch[i]);
                     solver.solution.z.copy_from_slice(&z_batch[i]);
                     solver.solution.s.copy_from_slice(&s_batch[i]);
-                    if has_x_cones {
+                    if has_dir_cones {
                         // Restore direct-x dual z_x (user frame, post-unscale).
                         // backward_batch_with_dz_x reads `solver.variables.z_x`
                         // and converts it to the equilibrated frame internally.
@@ -2803,9 +2803,9 @@ impl<T: FloatT> CompiledSolver<T> {
         self.A_col_indices.len()
     }
 
-    /// Total direct-x cone dimension (sum over all x_cones). Zero for
+    /// Total direct-x cone dimension (sum over all dir_cones). Zero for
     /// slack-only solvers.
     pub fn total_xcone_dim(&self) -> usize {
-        self.x_cones.iter().map(|xc| xc.indices().len()).sum()
+        self.dir_cones.iter().map(|xc| xc.indices().len()).sum()
     }
 }

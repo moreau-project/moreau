@@ -45,12 +45,12 @@ struct SolverKey {
     // Direct-x cones: parallel arrays one entry per direct-x cone.
     // Per-cone descriptors:
     //   x_kinds[c]            — XConeKind enum value (Nonneg=0, SOC=1, PSD=2, Exp=3, Power=4, GenPower=5).
-    //   x_indices_offsets     — prefix sum into x_indices_flat (length num_x_cones+1).
+    //   x_indices_offsets     — prefix sum into x_indices_flat (length num_dir_cones+1).
     //   x_indices_flat        — concatenated cone indices.
     //   x_power_alphas_flat   — alpha per Power x-cone (length = #Power x-cones, in cone order).
     //   x_psd_ks_flat         — psd_k per PSD x-cone.
     //   x_gen_power_*         — alphas/dim2 per GenPower x-cone (parallel to x_kinds for those entries).
-    int64_t num_x_cones;
+    int64_t num_dir_cones;
     std::vector<int64_t> x_kinds;
     std::vector<int64_t> x_indices_offsets;
     std::vector<int64_t> x_indices_flat;
@@ -75,7 +75,7 @@ struct SolverKey {
                gen_power_dim1s == other.gen_power_dim1s &&
                gen_power_dim2s == other.gen_power_dim2s &&
                gen_power_alphas == other.gen_power_alphas &&
-               num_x_cones == other.num_x_cones &&
+               num_dir_cones == other.num_dir_cones &&
                x_kinds == other.x_kinds &&
                x_indices_offsets == other.x_indices_offsets &&
                x_indices_flat == other.x_indices_flat &&
@@ -129,7 +129,7 @@ struct SolverKeyHash {
             hash_combine(std::hash<uint64_t>{}(bits));
         }
         // Direct-x descriptors
-        hash_combine(std::hash<int64_t>{}(k.num_x_cones));
+        hash_combine(std::hash<int64_t>{}(k.num_dir_cones));
         for (auto v : k.x_kinds)            hash_combine(std::hash<int64_t>{}(v));
         for (auto v : k.x_indices_offsets)  hash_combine(std::hash<int64_t>{}(v));
         for (auto v : k.x_indices_flat)     hash_combine(std::hash<int64_t>{}(v));
@@ -162,9 +162,9 @@ static std::mutex g_cache_mutex;
 
 // Bundle of direct-x descriptors copied from device to host. Built once
 // per FFI handler invocation and consumed by both the cache key build and
-// the `cones.x_cones` construction.
+// the `cones.dir_cones` construction.
 struct XConeHostBuffers {
-    int64_t num_x_cones = 0;
+    int64_t num_dir_cones = 0;
     int64_t total_xn = 0;
     std::vector<int64_t> x_kinds;
     std::vector<int64_t> x_indices_offsets;
@@ -177,7 +177,7 @@ struct XConeHostBuffers {
 };
 
 static XConeHostBuffers read_xcone_metadata(
-    int64_t num_x_cones,
+    int64_t num_dir_cones,
     const int64_t* d_x_kinds,
     const int64_t* d_x_indices_offsets,
     const int64_t* d_x_indices_flat, int64_t num_x_indices_flat,
@@ -188,14 +188,14 @@ static XConeHostBuffers read_xcone_metadata(
     const double*  d_x_gen_power_alphas_flat, int64_t num_x_gen_power_alphas_flat
 ) {
     XConeHostBuffers out;
-    out.num_x_cones = num_x_cones;
-    if (num_x_cones <= 0) return out;
-    out.x_kinds.resize(num_x_cones);
+    out.num_dir_cones = num_dir_cones;
+    if (num_dir_cones <= 0) return out;
+    out.x_kinds.resize(num_dir_cones);
     cudaMemcpy(out.x_kinds.data(), d_x_kinds,
-               num_x_cones * sizeof(int64_t), cudaMemcpyDeviceToHost);
-    out.x_indices_offsets.resize(num_x_cones + 1);
+               num_dir_cones * sizeof(int64_t), cudaMemcpyDeviceToHost);
+    out.x_indices_offsets.resize(num_dir_cones + 1);
     cudaMemcpy(out.x_indices_offsets.data(), d_x_indices_offsets,
-               (num_x_cones + 1) * sizeof(int64_t), cudaMemcpyDeviceToHost);
+               (num_dir_cones + 1) * sizeof(int64_t), cudaMemcpyDeviceToHost);
     out.total_xn = out.x_indices_offsets.back();
     if (num_x_indices_flat > 0) {
         out.x_indices_flat.resize(num_x_indices_flat);
@@ -230,15 +230,15 @@ static XConeHostBuffers read_xcone_metadata(
     return out;
 }
 
-// Build `Cones::x_cones` from the host-side direct-x descriptors. Walks
+// Build `Cones::dir_cones` from the host-side direct-x descriptors. Walks
 // `x_kinds` in order, slicing the per-cone-kind parameter arrays via
 // running counters (Power and PSD cones consume one entry per cone;
 // GenPower consumes one (dim1, dim2) and a contiguous slice of alphas).
-static std::vector<SupportedXConeT> build_x_cones(const XConeHostBuffers& xb) {
+static std::vector<SupportedXConeT> build_dir_cones(const XConeHostBuffers& xb) {
     std::vector<SupportedXConeT> out;
-    out.reserve(xb.num_x_cones);
+    out.reserve(xb.num_dir_cones);
     int64_t pow_idx = 0, psd_idx = 0, gp_idx = 0, gp_alpha_off = 0;
-    for (int64_t c = 0; c < xb.num_x_cones; ++c) {
+    for (int64_t c = 0; c < xb.num_dir_cones; ++c) {
         SupportedXConeT xc;
         xc.kind = static_cast<XConeKind>(xb.x_kinds[c]);
         int64_t off = xb.x_indices_offsets[c];
@@ -353,7 +353,7 @@ static CachedSolver* get_or_create_solver(
                   soc_dims_host, psd_dims_host,
                   num_power, power_alphas_host,
                   num_gen_power, gen_power_dim1s_host, gen_power_dim2s_host, gen_power_alphas_host,
-                  xb.num_x_cones, xb.x_kinds, xb.x_indices_offsets, xb.x_indices_flat,
+                  xb.num_dir_cones, xb.x_kinds, xb.x_indices_offsets, xb.x_indices_flat,
                   xb.x_power_alphas, xb.x_psd_ks,
                   xb.x_gen_power_dim1s, xb.x_gen_power_dim2s, xb.x_gen_power_alphas_flat};
 
@@ -399,8 +399,8 @@ static CachedSolver* get_or_create_solver(
     cones.genPowerAlphas = gen_power_alphas_host;
     cones.genPowerDim1s = gen_power_dim1s_host;
     cones.genPowerDim2s = gen_power_dim2s_host;
-    cones.x_cones = build_x_cones(xb);
-    cones.numXCones = static_cast<int64_t>(cones.x_cones.size());
+    cones.dir_cones = build_dir_cones(xb);
+    cones.numXCones = static_cast<int64_t>(cones.dir_cones.size());
 
     Settings settings;
     settings.verbose = false;  // Suppress output for FFI handlers
@@ -501,7 +501,7 @@ ffi::Error MoreauSolveFwdImpl(
     int64_t num_psd,
     int64_t num_power,
     int64_t num_gen_power,
-    int64_t num_x_cones,
+    int64_t num_dir_cones,
     ffi::Buffer<ffi::S64> P_row_offsets,
     ffi::Buffer<ffi::S64> P_col_indices,
     ffi::Buffer<ffi::S64> A_row_offsets,
@@ -547,7 +547,7 @@ ffi::Error MoreauSolveFwdImpl(
 
     cudaStreamSynchronize(stream);
     XConeHostBuffers xb = read_xcone_metadata(
-        num_x_cones,
+        num_dir_cones,
         x_kinds_buf.typed_data(),
         x_indices_offsets_buf.typed_data(),
         x_indices_flat_buf.typed_data(), x_indices_flat_buf.element_count(),
@@ -615,7 +615,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<int64_t>("num_psd")
         .Attr<int64_t>("num_power")
         .Attr<int64_t>("num_gen_power")
-        .Attr<int64_t>("num_x_cones")
+        .Attr<int64_t>("num_dir_cones")
         .Arg<ffi::Buffer<ffi::S64>>()  // P_row_offsets
         .Arg<ffi::Buffer<ffi::S64>>()  // P_col_indices
         .Arg<ffi::Buffer<ffi::S64>>()  // A_row_offsets
@@ -665,7 +665,7 @@ ffi::Error MoreauSolveBwdImpl(
     int64_t num_psd,
     int64_t num_power,
     int64_t num_gen_power,
-    int64_t num_x_cones,
+    int64_t num_dir_cones,
     ffi::Buffer<ffi::S64> P_row_offsets,
     ffi::Buffer<ffi::S64> P_col_indices,
     ffi::Buffer<ffi::S64> A_row_offsets,
@@ -757,7 +757,7 @@ ffi::Error MoreauSolveBwdImpl(
     }
 
     XConeHostBuffers xb = read_xcone_metadata(
-        num_x_cones,
+        num_dir_cones,
         x_kinds_buf.typed_data(),
         x_indices_offsets_buf.typed_data(),
         x_indices_flat_buf.typed_data(), x_indices_flat_buf.element_count(),
@@ -773,7 +773,7 @@ ffi::Error MoreauSolveBwdImpl(
                   soc_dims_host, psd_dims_host,
                   num_power, power_alphas_host,
                   num_gen_power, gen_power_dim1s_host, gen_power_dim2s_host, gen_power_alphas_host,
-                  xb.num_x_cones, xb.x_kinds, xb.x_indices_offsets, xb.x_indices_flat,
+                  xb.num_dir_cones, xb.x_kinds, xb.x_indices_offsets, xb.x_indices_flat,
                   xb.x_power_alphas, xb.x_psd_ks,
                   xb.x_gen_power_dim1s, xb.x_gen_power_dim2s, xb.x_gen_power_alphas_flat};
 
@@ -886,7 +886,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<int64_t>("num_psd")
         .Attr<int64_t>("num_power")
         .Attr<int64_t>("num_gen_power")
-        .Attr<int64_t>("num_x_cones")
+        .Attr<int64_t>("num_dir_cones")
         .Arg<ffi::Buffer<ffi::S64>>()  // P_row_offsets
         .Arg<ffi::Buffer<ffi::S64>>()  // P_col_indices
         .Arg<ffi::Buffer<ffi::S64>>()  // A_row_offsets
@@ -939,7 +939,7 @@ ffi::Error MoreauSolveFwdWarmImpl(
     int64_t num_psd,
     int64_t num_power,
     int64_t num_gen_power,
-    int64_t num_x_cones,
+    int64_t num_dir_cones,
     ffi::Buffer<ffi::S64> P_row_offsets,
     ffi::Buffer<ffi::S64> P_col_indices,
     ffi::Buffer<ffi::S64> A_row_offsets,
@@ -989,7 +989,7 @@ ffi::Error MoreauSolveFwdWarmImpl(
 
     cudaStreamSynchronize(stream);
     XConeHostBuffers xb = read_xcone_metadata(
-        num_x_cones,
+        num_dir_cones,
         x_kinds_buf.typed_data(),
         x_indices_offsets_buf.typed_data(),
         x_indices_flat_buf.typed_data(), x_indices_flat_buf.element_count(),
@@ -1057,7 +1057,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<int64_t>("num_psd")
         .Attr<int64_t>("num_power")
         .Attr<int64_t>("num_gen_power")
-        .Attr<int64_t>("num_x_cones")
+        .Attr<int64_t>("num_dir_cones")
         .Arg<ffi::Buffer<ffi::S64>>()  // P_row_offsets
         .Arg<ffi::Buffer<ffi::S64>>()  // P_col_indices
         .Arg<ffi::Buffer<ffi::S64>>()  // A_row_offsets

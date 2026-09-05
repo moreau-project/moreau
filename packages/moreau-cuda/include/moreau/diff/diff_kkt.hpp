@@ -308,7 +308,7 @@ struct DiffKKT {
     device_unique_ptr<int64_t> H_xcone_soc_exp_v2_du_idx_;    // [totalSparseXSocDim]
     device_unique_ptr<int64_t> H_xcone_soc_exp_diag_idx_;     // [2*numSparseXSoc]
     device_unique_ptr<int64_t> d_xcone_soc_sparse_dim_offsets_; // [numSparseXSoc+1] prefix of dim
-    device_unique_ptr<int64_t> d_xcone_soc_sparse_to_xc_;       // [numSparseXSoc] -> position in cones.x_cones
+    device_unique_ptr<int64_t> d_xcone_soc_sparse_to_xc_;       // [numSparseXSoc] -> position in cones.dir_cones
     device_unique_ptr<int64_t> d_xcone_soc_sparse_dims_;        // [numSparseXSoc] dim per cone
 
     // cuDSS structures
@@ -397,7 +397,7 @@ struct DiffKKT {
         const double* genpow_sparse_left3, // GenPowerCone left3 (g) [batchSize][totalGenpowDim]
         const double* genpow_sparse_c3,    // GenPowerCone c_ww [batchSize][numGenPowerCones]
         // Direct-x cone projection Jacobians (IFT-direct path).
-        // Pass nullptr (or arbitrary) when `cones.x_cones` is empty.
+        // Pass nullptr (or arbitrary) when `cones.dir_cones` is empty.
         const double* xcone_nonneg_H,      // [batchSize][totalXNonneg_]   diagonal
         const double* xcone_soc_H,         // [batchSize][total_x_soc_kkt_] dense per cone
         const double* xcone_psd_H,         // [batchSize][total_x_psd_kkt_] dense per cone

@@ -236,13 +236,13 @@ pub fn get_cone_derivative_sparse<T: FloatT>(
 /// for the smoothed-mode equivalent.
 pub fn get_cone_derivative_sparse_xcones<T: FloatT>(
     u_x_flat: &[T],
-    x_cones: &[crate::solver::core::cones::SupportedXConeT],
+    dir_cones: &[crate::solver::core::cones::SupportedXConeT],
     dual: bool,
 ) -> Vec<ConeDerivativeBlock<T>> {
     use crate::solver::core::cones::SupportedXConeT;
-    let mut blocks = Vec::with_capacity(x_cones.len());
+    let mut blocks = Vec::with_capacity(dir_cones.len());
     let mut offset = 0usize;
-    for xc in x_cones {
+    for xc in dir_cones {
         let dim = xc.indices().len();
         let u_slice = &u_x_flat[offset..offset + dim];
         // Map direct-x cone variant to the equivalent slack cone variant
@@ -803,13 +803,13 @@ pub fn get_central_path_derivative_sparse<T: FloatT>(
 pub fn get_central_path_derivative_sparse_xcones<T: FloatT>(
     _s_x_flat: &[T],
     z_x_flat: &[T],
-    x_cones: &[crate::solver::core::cones::SupportedXConeT],
+    dir_cones: &[crate::solver::core::cones::SupportedXConeT],
     mu: T,
 ) -> Vec<ConeDerivativeBlock<T>> {
     use crate::solver::core::cones::SupportedXConeT;
-    let mut blocks = Vec::with_capacity(x_cones.len());
+    let mut blocks = Vec::with_capacity(dir_cones.len());
     let mut offset = 0usize;
-    for xc in x_cones {
+    for xc in dir_cones {
         let dim = xc.indices().len();
         let z_slice = &z_x_flat[offset..offset + dim];
         let block = match xc {

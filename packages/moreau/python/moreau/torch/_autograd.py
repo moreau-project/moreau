@@ -72,8 +72,8 @@ def _solve_backward_op(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Backward pass: compute gradients via implicit differentiation.
 
-    `z_x` (the saved direct-x dual) and `dz_x` (the upstream gradient on
-    Solution.z_x) may be empty tensors when the solver has no direct-x
+    `z_x` (the saved direct dual) and `dz_x` (the upstream gradient on
+    Solution.z_x) may be empty tensors when the solver has no direct
     cones; the impl handles either case.
     """
     impl = _get_impl(impl_handle.item())
@@ -209,7 +209,7 @@ def _solve_backward_op_vmap(
     x = _expand(x, x_bd)
     z = _expand(z, z_bd)
     s = _expand(s, s_bd)
-    # Direct-x state: empty tensors when no x-cones; expand only when non-empty.
+    # Direct state: empty tensors when no x-cones; expand only when non-empty.
     if z_x.numel() > 0:
         z_x = _expand(z_x, z_x_bd)
     if dz_x.numel() > 0:
@@ -266,7 +266,7 @@ class _SolveFunction(torch.autograd.Function):
         with torch.no_grad():
             result = solver._impl.solve(q, b, **warm_kwargs)
         solver._last_result = result
-        # `z_x` (direct-x dual) is exposed when the solver has direct-x
+        # `z_x` (direct dual) is exposed when the solver has direct
         # cones; otherwise an empty tensor (same dtype/device as q).
         z_x = result.get("z_x")
         if z_x is None or (hasattr(z_x, "numel") and z_x.numel() == 0):

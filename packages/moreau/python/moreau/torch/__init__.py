@@ -142,10 +142,10 @@ class Solver:
         b_sparsity_pattern: Optional[Sequence[bool]] = None,
     ):
         # Check for old CVXPY with SOC cones
-        from moreau import _warn_cvxpy_soc_if_needed, _require_x_cones_compatible
+        from moreau import _warn_cvxpy_soc_if_needed, _require_dir_cones_compatible
 
         _warn_cvxpy_soc_if_needed(cones)
-        _require_x_cones_compatible(cones, settings)
+        _require_dir_cones_compatible(cones, settings)
 
         # Use default settings if not provided, with enable_grad=True for torch
         # For torch.Solver, we always enable gradients since that's its purpose

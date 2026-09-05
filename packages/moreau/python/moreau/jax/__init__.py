@@ -123,12 +123,12 @@ class Solver:
         b_sparsity_pattern: Optional[Sequence[bool]] = None,
     ):
         # Check for old CVXPY with SOC cones
-        from moreau import _warn_cvxpy_soc_if_needed, _require_x_cones_compatible
+        from moreau import _warn_cvxpy_soc_if_needed, _require_dir_cones_compatible
 
         _warn_cvxpy_soc_if_needed(cones)
-        _require_x_cones_compatible(cones, settings)
+        _require_dir_cones_compatible(cones, settings)
 
-        # Direct-x cones thread through both CPU and CUDA JAX. CPU JAX uses
+        # Direct cones thread through both CPU and CUDA JAX. CPU JAX uses
         # `pure_callback` to dispatch to the numpy CPU solver. CUDA JAX
         # extends the FFI with x_cone descriptors (kinds, indices,
         # alphas/dim2 for asymm), a `z_x` output, and a `dz_x` backward
@@ -440,7 +440,7 @@ class Solver:
                 warm_x = jnp.asarray(warm_start.x, dtype=jnp.float64)
                 warm_z = jnp.asarray(warm_start.z, dtype=jnp.float64)
                 warm_s = jnp.asarray(warm_start.s, dtype=jnp.float64)
-                # Direct-x dual: pass through if present, else zero-length
+                # Direct dual: pass through if present, else zero-length
                 # placeholder (the FFI handler ignores it when total_xn==0).
                 total_xn = getattr(self._impl, "_total_xn", 0)
                 if warm_start.z_x is not None:

@@ -395,12 +395,12 @@ pub fn differentiate_adjoint_hsde<T: FloatT>(
 /// IFT-direct adjoint differentiation: HSDE Jacobian augmented with
 /// direct-x cone-projection rows + a `du_x` column block carrying H_x.
 ///
-/// `x_cones` and `xcone_indices` describe each direct-x cone (their slack
+/// `dir_cones` and `xcone_indices` describe each direct-x cone (their slack
 /// equivalents and which positions of `x` are constrained). `z_x_eq` is
 /// the equilibrated direct-x dual flat across all cones in the same order
-/// as `x_cones`.
+/// as `dir_cones`.
 ///
-/// When `x_cones` is empty this reduces to the slack-only HSDE backward.
+/// When `dir_cones` is empty this reduces to the slack-only HSDE backward.
 #[allow(clippy::too_many_arguments)]
 pub fn differentiate_adjoint_hsde_with_xcones<T: FloatT>(
     P: &CscMatrix<T>,
@@ -408,7 +408,7 @@ pub fn differentiate_adjoint_hsde_with_xcones<T: FloatT>(
     A: &CscMatrix<T>,
     b: &[T],
     cones: &[SupportedConeT<T>],
-    x_cones: &[crate::solver::core::cones::SupportedXConeT],
+    dir_cones: &[crate::solver::core::cones::SupportedXConeT],
     xcone_indices: &[Vec<usize>],
     x: &[T],
     s: &[T],
@@ -425,9 +425,9 @@ pub fn differentiate_adjoint_hsde_with_xcones<T: FloatT>(
     let n = x.len();
     let m = z.len();
     debug_assert_eq!(
-        x_cones.len(),
+        dir_cones.len(),
         xcone_indices.len(),
-        "x_cones and xcone_indices must have the same length"
+        "dir_cones and xcone_indices must have the same length"
     );
 
     let H_blocks = compute_H_blocks(s, z, cones, diff_method, mu);
@@ -442,10 +442,10 @@ pub fn differentiate_adjoint_hsde_with_xcones<T: FloatT>(
         z_x_eq.len(),
         xn
     );
-    let H_x_blocks = if x_cones.is_empty() {
+    let H_x_blocks = if dir_cones.is_empty() {
         Vec::new()
     } else {
-        compute_H_x_blocks(x, z_x_eq, xcone_indices, x_cones, cones, diff_method, mu)
+        compute_H_x_blocks(x, z_x_eq, xcone_indices, dir_cones, cones, diff_method, mu)
     };
 
     debug_block! { debug_print_h_blocks(&H_blocks); }

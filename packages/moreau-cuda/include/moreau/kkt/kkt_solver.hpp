@@ -107,7 +107,7 @@ public:
     // --- Direct-x cone hooks ---
     // Default no-ops so backends that don't support direct-x cones (Riccati,
     // Woodbury) simply reject them up-front via Cones::initialize() and
-    // never get called with non-empty x_cones. KKTData overrides these.
+    // never get called with non-empty dir_cones. KKTData overrides these.
     virtual void init_xcone_px_baseline(const Cones& /*cones*/,
                                         cudaStream_t /*stream*/ = 0) {}
     virtual void refresh_xcone_hs(const Cones& /*cones*/,
