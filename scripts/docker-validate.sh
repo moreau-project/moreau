@@ -9,7 +9,7 @@
 #
 # Environment variables:
 #   CUDA_VERSION   - CUDA version (default: 12.4.0)
-#   CUDSS_VERSION  - cuDSS version (default: 0.8.0.10)
+#   CUDSS_VERSION  - cuDSS version (default: 0.7.1.4)
 
 set -e
 
@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
 CUDA_VERSION="${CUDA_VERSION:-12.4.0}"
-CUDSS_VERSION="${CUDSS_VERSION:-0.8.0.10}"
+CUDSS_VERSION="${CUDSS_VERSION:-0.7.1.4}"
 
 MODE="${1:-all}"
 

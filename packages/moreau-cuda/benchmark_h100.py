@@ -17,7 +17,7 @@ image = (
     modal.Image.from_registry("nvidia/cuda:12.6.1-devel-ubuntu24.04", add_python="3.12")
     .apt_install("cmake", "build-essential", "libgtest-dev", "pkg-config", "wget")
     .run_commands(
-        "wget -q https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-x86_64/libcudss-linux-x86_64-0.8.0.10_cuda12-archive.tar.xz",
+        "wget -q https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-x86_64/libcudss-linux-x86_64-0.7.1.4_cuda12-archive.tar.xz",
         "tar xf libcudss-linux-x86_64-*.tar.xz",
         "cp -r libcudss-linux-x86_64-*/lib/* /usr/local/lib/",
         "cp -r libcudss-linux-x86_64-*/include/* /usr/local/include/",

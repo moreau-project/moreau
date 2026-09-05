@@ -1,7 +1,7 @@
 FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV CUDSS_VERSION=0.8.0.10
+ENV CUDSS_VERSION=0.7.1.4
 
 # Install system dependencies and Python 3.12
 RUN rm -f /etc/apt/sources.list.d/cuda*.list && \
@@ -17,7 +17,7 @@ RUN rm -f /etc/apt/sources.list.d/cuda*.list && \
 
 # Install cuDSS
 RUN wget -q https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-x86_64/libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz \
-    && echo "29716a05c64b28531309afcb7a9dd5044081a43197e72bdd0fbf29e9b4ee4707  libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz" | sha256sum -c - \
+    && echo "946571d9ea164f948e402dd97a14541cb90fbec800336cfa7ae644af5937632f  libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz" | sha256sum -c - \
     && tar -xf libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive.tar.xz \
     && cp -r libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive/lib/* /usr/local/lib/ \
     && cp -r libcudss-linux-x86_64-${CUDSS_VERSION}_cuda12-archive/include/* /usr/local/include/ \
