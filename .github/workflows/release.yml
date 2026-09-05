@@ -586,6 +586,8 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: dist-release/*
           body: |
+            ChatGPT generated:
+
             ## Release from commit ${{ github.sha }}
 
             ### Python Wheels

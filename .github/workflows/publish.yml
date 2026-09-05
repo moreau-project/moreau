@@ -22,6 +22,7 @@ jobs:
 
     outputs:
       version: ${{ steps.version.outputs.version }}
+      stable: ${{ steps.version.outputs.stable }}
 
     permissions:
       contents: read
@@ -72,7 +73,11 @@ jobs:
         id: version
         run: |
           python3 scripts/validate_release_wheels.py dist-pypi --require-complete --version-output release-version.txt
-          echo "version=$(cat release-version.txt)" >> "$GITHUB_OUTPUT"
+          VERSION=$(cat release-version.txt)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -132,11 +137,12 @@ jobs:
 
   # Fast-forward the `release` branch to the published tag so the out-of-band
   # docs build picks up the version users actually install from PyPI. Only
-  # runs after PyPI verification succeeds, so docs never point at a broken
-  # release. Uses a plain push (no --force); a non-fast-forward will
+  # runs for stable versions after PyPI verification succeeds. Prereleases
+  # keep the published documentation unchanged. Uses a plain push; a non-fast-forward will
   # fail the job and require manual intervention.
   update-release-branch:
-    needs: verify-python
+    needs: [publish, verify-python]
+    if: needs.publish.outputs.stable == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -161,3 +167,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh workflow run docs.yml --ref release
+
+      - name: Mark the verified GitHub release stable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release edit "$RELEASE_TAG" --prerelease=false
