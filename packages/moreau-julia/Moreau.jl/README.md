@@ -19,7 +19,7 @@ a new native release, download its C-library archives and regenerate the
 manifest before bumping the Julia package version:
 
 ```bash
-julia scripts/generate_artifacts.jl v0.3.4 /path/to/release-assets
+julia scripts/generate_artifacts.jl v0.4.0 /path/to/release-assets
 ```
 
 ## Quick Start
@@ -39,8 +39,8 @@ value(y)  # ≈ 0.5
 
 ## Documentation
 
-- [JuMP integration](https://docs.moreau.so/guide/jump-integration.html) — MOI wrapper, supported cones, solver options, examples
-- [Julia API](https://docs.moreau.so/guide/julia-integration.html) — `CompiledSolver`, batching, CUDA, gradients, ChainRules
+- [JuMP integration](https://moreau.so/guide/jump-integration.html) — MOI wrapper, supported cones, solver options, examples
+- [Julia API](https://moreau.so/guide/julia-integration.html) — `CompiledSolver`, batching, CUDA, gradients, ChainRules
 
 ## License
 

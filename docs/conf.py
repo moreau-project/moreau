@@ -74,7 +74,6 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "torch": ("https://docs.pytorch.org/docs/stable/", None),
     "jax": ("https://docs.jax.dev/en/latest/", None),
-    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
 }
 intersphinx_timeout = 15
 
@@ -126,6 +125,3 @@ pygments_dark_style = "monokai"
 
 # Custom CSS
 html_css_files = ["custom.css"]
-
-# Suppress specific warnings
-suppress_warnings = ["autodoc.import_object"]
