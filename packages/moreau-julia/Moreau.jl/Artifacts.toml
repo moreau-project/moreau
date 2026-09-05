@@ -1,0 +1,68 @@
+[[moreau_cpu]]
+arch = "x86_64"
+git-tree-sha1 = "94403de65113fb34e378d8dbc7364e8c137602cd"
+libc = "glibc"
+os = "linux"
+
+    [[moreau_cpu.download]]
+    sha256 = "fb850c4c3fec9fb2a5a3f46103576e1459f39fc6afc02add7c24279f45368f52"
+    url = "https://github.com/moreau-project/moreau/releases/download/v0.4.0-beta.1/moreau-cpu-linux-x86_64.tar.gz"
+[[moreau_cpu]]
+arch = "aarch64"
+git-tree-sha1 = "4f847d3bb6d1eeebdea293e6357159f1adf47adc"
+libc = "glibc"
+os = "linux"
+
+    [[moreau_cpu.download]]
+    sha256 = "5ec93d0748fc1076ea335249383a888557d608e95a2f7bc4d05e844d5475e77d"
+    url = "https://github.com/moreau-project/moreau/releases/download/v0.4.0-beta.1/moreau-cpu-linux-aarch64.tar.gz"
+[[moreau_cpu]]
+arch = "aarch64"
+git-tree-sha1 = "1283a48b46da78aba84d8d2e19cc8664ac43eb97"
+os = "macos"
+
+    [[moreau_cpu.download]]
+    sha256 = "aea340c55dfd409a3257fcad887f678a39758fff214cb621c86f09ce1ac8b7e4"
+    url = "https://github.com/moreau-project/moreau/releases/download/v0.4.0-beta.1/moreau-cpu-macos-arm64.tar.gz"
+
+[[moreau_cuda12]]
+arch = "x86_64"
+git-tree-sha1 = "677fb3aee303bc968c3e667a250e047ebbc457c7"
+lazy = true
+libc = "glibc"
+os = "linux"
+
+    [[moreau_cuda12.download]]
+    sha256 = "0fd25342b3e93c526db793f62297436958b249d14be9816da06e9e56c54ceac9"
+    url = "https://github.com/moreau-project/moreau/releases/download/v0.4.0-beta.1/moreau-cuda12-linux-x86_64.tar.gz"
+[[moreau_cuda12]]
+arch = "aarch64"
+git-tree-sha1 = "d801a2223470aedb1314516ab2098929ca2e8795"
+lazy = true
+libc = "glibc"
+os = "linux"
+
+    [[moreau_cuda12.download]]
+    sha256 = "2953ed254af1b3e1afe9df60217825c8a6454dc2362ec20fee15bfb48747425d"
+    url = "https://github.com/moreau-project/moreau/releases/download/v0.4.0-beta.1/moreau-cuda12-linux-aarch64.tar.gz"
+
+[[moreau_cuda13]]
+arch = "x86_64"
+git-tree-sha1 = "5402179d5f3c6c0ad47f71ce594bfc73a2f3edf9"
+lazy = true
+libc = "glibc"
+os = "linux"
+
+    [[moreau_cuda13.download]]
+    sha256 = "2c3840400ce9406915db1ef0c7dfb661bb90959bba708fa8a8752951bd918f27"
+    url = "https://github.com/moreau-project/moreau/releases/download/v0.4.0-beta.1/moreau-cuda13-linux-x86_64.tar.gz"
+[[moreau_cuda13]]
+arch = "aarch64"
+git-tree-sha1 = "9a1c05c8abeb29398974917acd1f71b6b28f0b25"
+lazy = true
+libc = "glibc"
+os = "linux"
+
+    [[moreau_cuda13.download]]
+    sha256 = "5bc6774d2c6ba9f7a8142579a9b21a82c4831eef51761e9334a65843d3805b88"
+    url = "https://github.com/moreau-project/moreau/releases/download/v0.4.0-beta.1/moreau-cuda13-linux-aarch64.tar.gz"

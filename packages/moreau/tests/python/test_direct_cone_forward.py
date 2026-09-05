@@ -137,6 +137,7 @@ def test_solver_with_dir_cones_cuda_soc_large_dim_boundary_active():
     assert solution.x[0] > 0.0
 
 
+@pytest.mark.cuda
 def test_solver_with_dir_cones_cuda_nonneg_enable_grad_supported():
     # Native CUDA direct-x backward (nonneg) is supported via the
     # IFT-direct augmented-system path; constructing a solver with
@@ -154,6 +155,7 @@ def test_solver_with_dir_cones_cuda_nonneg_enable_grad_supported():
     np.testing.assert_allclose(sol.x, [4.0], atol=1e-5)
 
 
+@pytest.mark.cuda
 def test_solver_with_dir_cones_cuda_soc_enable_grad_supported():
     # Native CUDA direct-x SOC backward via IFT-direct: same SOC-active
     # boundary problem as the forward-only test. Constructing the solver
@@ -171,6 +173,7 @@ def test_solver_with_dir_cones_cuda_soc_enable_grad_supported():
     np.testing.assert_allclose(sol.x, [0.5, -0.5, 0.0], atol=1e-5)
 
 
+@pytest.mark.cuda
 def test_solver_with_dir_cones_cuda_psd_enable_grad_supported():
     # CUDA direct-x PSD backward is wired natively via cuSOLVER
     # eigendecomp + Ω-matrix Jacobian construction. Constructing a

@@ -1,17 +1,17 @@
 # Build C API shared libraries for all platforms.
 #
 # Produces versioned tarballs:
-#   - moreau-0.1.5-cpu-macos-arm64.tar.gz
-#   - moreau-0.1.5-cpu-linux-x86_64.tar.gz
-#   - moreau-0.1.5-cpu-linux-aarch64.tar.gz
-#   - moreau-0.1.5-cuda12-linux-x86_64.tar.gz
-#   - moreau-0.1.5-cuda12-linux-aarch64.tar.gz
-#   - moreau-0.1.5-cuda13-linux-x86_64.tar.gz
-#   - moreau-0.1.5-cuda13-linux-aarch64.tar.gz
+#   - moreau-0.4.0-cpu-macos-arm64.tar.gz
+#   - moreau-0.4.0-cpu-linux-x86_64.tar.gz
+#   - moreau-0.4.0-cpu-linux-aarch64.tar.gz
+#   - moreau-0.4.0-cuda12-linux-x86_64.tar.gz
+#   - moreau-0.4.0-cuda12-linux-aarch64.tar.gz
+#   - moreau-0.4.0-cuda13-linux-x86_64.tar.gz
+#   - moreau-0.4.0-cuda13-linux-aarch64.tar.gz
 #
 # Trigger manually:
 #   gh workflow run build-c-lib.yml
-#   gh workflow run build-c-lib.yml -f version=0.1.5
+#   gh workflow run build-c-lib.yml -f version=0.4.0
 
 name: Build C Libraries
 
@@ -19,9 +19,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version (e.g., 0.1.5). Leave empty to read from Cargo.toml.'
+        description: 'Version (e.g., 0.4.0). Leave empty to read from Cargo.toml.'
         required: false
         type: string
+      publish:
+        description: 'Publish a C API prerelease on GitHub'
+        type: boolean
+        default: false
 env:
   CUDSS_VERSION: "0.7.1.4"
 
@@ -46,7 +50,9 @@ jobs:
             VER=$(grep '^version = ' packages/moreau-cpu/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
             echo "version=$VER" >> "$GITHUB_OUTPUT"
           fi
-          echo "Version: $(grep version= "$GITHUB_OUTPUT" | cut -d= -f2)"
+          VERSION=$(sed -n 's/^version=//p' "$GITHUB_OUTPUT")
+          python3 scripts/bump_version.py "$VERSION"
+          echo "Version: $VERSION"
 
   # =========================================================================
   # CPU: macOS ARM64
@@ -57,6 +63,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set build version
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: python3 scripts/bump_version.py "$VERSION"
 
       - name: Build CPU C API
         run: packages/moreau-c/build.sh cpu
@@ -91,6 +102,11 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set build version
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: python3 scripts/bump_version.py "$VERSION"
 
       - name: Build CPU C API in manylinux container
         env:
@@ -181,6 +197,11 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Set build version
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: python3 scripts/bump_version.py "$VERSION"
+
       - name: Build CUDA C API in Docker
         env:
           CUDSS_VER: ${{ env.CUDSS_VERSION }}
@@ -254,7 +275,7 @@ jobs:
             SIZE="$(stat --format=%s "$tarball")"
 
             # Derive platform info from filename: moreau-VERSION-VARIANT.tar.gz
-            # e.g. moreau-0.1.5-cpu-linux-x86_64.tar.gz -> cpu-linux-x86_64
+            # e.g. moreau-0.4.0-cpu-linux-x86_64.tar.gz -> cpu-linux-x86_64
             VARIANT="${NAME#moreau-${VERSION}-}"
             VARIANT="${VARIANT%.tar.gz}"
 
@@ -294,15 +315,26 @@ jobs:
           echo "=== Manifest ==="
           cat dist/moreau-manifest.json
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload C libraries and manifest
+        uses: actions/upload-artifact@v4
         with:
+          name: c-libraries
+          path: dist/*
+          retention-days: 7
+
+      - name: Create GitHub Release
+        if: inputs.publish
+        uses: softprops/action-gh-release@v2
+        with:
+          target_commitish: ${{ github.sha }}
           tag_name: c-api-v${{ needs.resolve-version.outputs.version }}
           name: c-api-v${{ needs.resolve-version.outputs.version }}
           files: |
             dist/*.tar.gz
             dist/moreau-manifest.json
           body: |
+            ChatGPT generated:
+
             ## Moreau C API Libraries v${{ needs.resolve-version.outputs.version }}
 
             ### Artifacts

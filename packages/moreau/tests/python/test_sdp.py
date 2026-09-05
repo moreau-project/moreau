@@ -373,6 +373,7 @@ class TestPSDValidation:
         assert cones.degree() == 5
 
 
+@pytest.mark.cuda
 class TestPSDForwardCUDA:
     """Test forward solve with PSD cones on CUDA backend."""
 
@@ -427,6 +428,7 @@ class TestPSDForwardCUDA:
         assert abs(x[0] + x[1] - 1.0) < 1e-4
 
 
+@pytest.mark.cuda
 class TestPSDBackwardCUDA:
     """Test backward pass with PSD cones on CUDA backend."""
 

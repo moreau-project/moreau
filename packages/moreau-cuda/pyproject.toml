@@ -7,7 +7,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "moreau-cuda"
-version = "0.3.3"
+version = "0.4.0"
 description = "Moreau CUDA: GPU-accelerated conic optimization solver"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -27,7 +27,7 @@ classifiers = [
     "Environment :: GPU :: NVIDIA CUDA",
 ]
 dependencies = [
-    "moreau>=0.3.3",
+    "moreau>=0.4.0",
     "numpy>=1.19.0",
     # Bounds must match the cuDSS the wheel was built against
     # (Dockerfile.wheel): cudssConfigParam_t enum values shift between
@@ -42,7 +42,7 @@ torch = ["torch>=2.4.0"]
 [project.urls]
 Homepage = "https://github.com/moreau-project/moreau"
 Repository = "https://github.com/moreau-project/moreau"
-Documentation = "https://github.com/moreau-project/moreau"
+Documentation = "https://moreau.so"
 
 [tool.scikit-build]
 wheel.py-api = "cp312"

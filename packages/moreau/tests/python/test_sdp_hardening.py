@@ -618,6 +618,7 @@ class TestPSDCudaCpuParity:
         ), f"CPU/CUDA x mismatch: max diff = {np.max(np.abs(x_cpu - x_cuda)):.2e}"
         return sol_cpu, sol_cuda
 
+    @pytest.mark.cuda
     def test_parity_psd3(self):
         """CPU/CUDA parity on PSD(3) projection."""
         mat_dim = 3
@@ -632,6 +633,7 @@ class TestPSDCudaCpuParity:
         cones = moreau.Cones(psd_dims=[mat_dim])
         self._compare_devices(P, A, q, b, cones)
 
+    @pytest.mark.cuda
     def test_parity_psd10(self):
         """CPU/CUDA parity on PSD(10)."""
         mat_dim = 10
@@ -646,6 +648,7 @@ class TestPSDCudaCpuParity:
         cones = moreau.Cones(psd_dims=[mat_dim])
         self._compare_devices(P, A, q, b, cones)
 
+    @pytest.mark.cuda
     def test_parity_multiple_psd(self):
         """CPU/CUDA parity with multiple PSD cones [2, 3, 4]."""
         dims = [2, 3, 4]
@@ -664,6 +667,7 @@ class TestPSDCudaCpuParity:
         cones = moreau.Cones(psd_dims=dims)
         self._compare_devices(P, A, q, b, cones)
 
+    @pytest.mark.cuda
     def test_parity_psd_plus_soc(self):
         """CPU/CUDA parity on PSD(2) + SOC(3)."""
         psd_dim = 2
@@ -684,6 +688,7 @@ class TestPSDCudaCpuParity:
         cones = moreau.Cones(psd_dims=[psd_dim], so_cone_dims=[soc_dim])
         self._compare_devices(P, A, q, b, cones)
 
+    @pytest.mark.cuda
     def test_parity_chordal_block_diagonal(self):
         """CPU/CUDA parity on block-diagonal PSD (triggers chordal decomposition)."""
         mat_dim = 6
@@ -743,6 +748,7 @@ class TestPSDCudaCpuParity:
             dq, dq_fd, atol=TOL_FD
         ), f"{device} PSD(3) dq mismatch: max diff = {np.max(np.abs(dq - dq_fd)):.2e}"
 
+    @pytest.mark.cuda
     def test_parity_mixed_kitchen_sink(self):
         """CPU/CUDA parity on zero + nonneg + SOC + PSD(3)."""
         psd_dim = 3

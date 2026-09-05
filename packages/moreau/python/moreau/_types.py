@@ -10,6 +10,7 @@ These are pure Python types that each backend converts internally.
 
 from dataclasses import dataclass, field
 from enum import IntEnum, Enum
+from math import isfinite
 from typing import Dict, FrozenSet, List, Literal, Optional, Tuple, Union, Annotated
 
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
@@ -61,14 +62,15 @@ class SolverStatus(IntEnum):
 
 
 class DirectConeSpec(BaseModel):
-    """Direct cone specification: constrain x[indices] ∈ K_{kind}.
+    """Direct conic constraint specification: constrain x[indices] ∈ K_{kind}.
 
-    Unlike slack cones (constraints ``Ax + s = b`` with ``s ∈ K``), a direct
-    cone constrains a subvector of the primal variable ``x`` directly. This
-    avoids introducing a slack variable and can be significantly faster.
+    A direct conic constraint applies to a subvector of the primal variable
+    ``x`` without introducing a slack variable or rows of ``A``. This can be
+    significantly faster than the equivalent slack formulation.
 
     Attributes:
-        kind: Cone type. One of 'nonneg', 'soc', 'psd_triangle', 'exp', 'power'.
+        kind: Cone type. One of 'nonneg', 'soc', 'psd_triangle', 'exp', 'power',
+            or 'gen_power'.
         indices: Distinct indices into ``x``, all in ``[0, n)``. Order matters
             for SOC (first entry is the scalar ``t``, remaining entries form the
             vector ``v``), for PSD (column-major ``svec`` ordering), for exp
@@ -80,6 +82,10 @@ class DirectConeSpec(BaseModel):
             Requires ``len(indices) == psd_k * (psd_k + 1) // 2``.
         alpha: Power cone parameter (only for ``kind='power'``); must be in
             ``(0, 1)``.
+        alphas: Positive, finite weights summing to one for ``kind='gen_power'``.
+        dim2: Positive dimension of the norm block for ``kind='gen_power'``.
+
+    Unknown fields are rejected.
 
     Example:
         >>> spec_soc = DirectConeSpec(kind='soc', indices=[3, 4, 5, 6])
@@ -89,7 +95,7 @@ class DirectConeSpec(BaseModel):
         >>> spec_pow = DirectConeSpec(kind='power', indices=[0, 1, 2], alpha=0.5)
     """
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     kind: Literal["nonneg", "soc", "psd_triangle", "exp", "power", "gen_power"]
     indices: List[int]
@@ -115,7 +121,7 @@ class DirectConeSpec(BaseModel):
         n = len(self.indices)
         if self.kind == "soc":
             if n < 2:
-                raise ValueError(f"SOC x-cone requires >= 2 indices, got {n}")
+                raise ValueError(f"SOC direct conic constraint requires >= 2 indices, got {n}")
             if self.psd_k is not None:
                 raise ValueError("psd_k must be None for kind='soc'")
             if self.alpha is not None:
@@ -135,7 +141,8 @@ class DirectConeSpec(BaseModel):
             expected = self.psd_k * (self.psd_k + 1) // 2
             if n != expected:
                 raise ValueError(
-                    f"PSD x-cone with psd_k={self.psd_k} requires " f"{expected} indices, got {n}"
+                    f"PSD direct conic constraint with psd_k={self.psd_k} requires "
+                    f"{expected} indices, got {n}"
                 )
             if self.alpha is not None:
                 raise ValueError("alpha must be None for kind='psd_triangle'")
@@ -143,7 +150,7 @@ class DirectConeSpec(BaseModel):
                 raise ValueError("alphas/dim2 must be None for kind='psd_triangle'")
         elif self.kind == "exp":
             if n != 3:
-                raise ValueError(f"Exp x-cone requires exactly 3 indices, got {n}")
+                raise ValueError(f"Exp direct conic constraint requires exactly 3 indices, got {n}")
             if self.psd_k is not None:
                 raise ValueError("psd_k must be None for kind='exp'")
             if self.alpha is not None:
@@ -152,7 +159,9 @@ class DirectConeSpec(BaseModel):
                 raise ValueError("alphas/dim2 must be None for kind='exp'")
         elif self.kind == "power":
             if n != 3:
-                raise ValueError(f"Power x-cone requires exactly 3 indices, got {n}")
+                raise ValueError(
+                    f"Power direct conic constraint requires exactly 3 indices, got {n}"
+                )
             if self.psd_k is not None:
                 raise ValueError("psd_k must be None for kind='power'")
             if self.alpha is None:
@@ -169,15 +178,17 @@ class DirectConeSpec(BaseModel):
             if self.dim2 is None or self.dim2 < 1:
                 raise ValueError(f"dim2 must be >= 1 for kind='gen_power', got {self.dim2}")
             for i, a in enumerate(self.alphas):
-                if a <= 0.0:
-                    raise ValueError(f"alphas[{i}] must be > 0 for kind='gen_power', got {a}")
+                if not isfinite(a) or a <= 0.0:
+                    raise ValueError(
+                        f"alphas[{i}] must be finite and > 0 for kind='gen_power', got {a}"
+                    )
             asum = sum(self.alphas)
             if abs(asum - 1.0) > 1e-8 * len(self.alphas):
                 raise ValueError(f"alphas must sum to 1 for kind='gen_power', got sum {asum}")
             expected = len(self.alphas) + self.dim2
             if n != expected:
                 raise ValueError(
-                    f"GenPower x-cone requires len(indices) == len(alphas) + dim2 "
+                    f"GenPower direct conic constraint requires len(indices) == len(alphas) + dim2 "
                     f"= {len(self.alphas)} + {self.dim2} = {expected}, got {n}"
                 )
             # Indices are cone-internal: positions [0, dim1) are the
@@ -195,6 +206,8 @@ class DirectConeSpec(BaseModel):
 
 class Cones(BaseModel):
     """Cone specification for conic optimization problems.
+
+    Unknown fields are rejected to prevent silently omitting constraints.
 
     Attributes:
         num_zero_cones: Number of equality constraint dimensions (zero cone)
@@ -221,7 +234,7 @@ class Cones(BaseModel):
         >>> cones = Cones(dir_cones=[DirectConeSpec(kind='nonneg', indices=[3])])
     """
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     num_zero_cones: Annotated[int, Field(ge=0)] = 0
     num_nonneg_cones: Annotated[int, Field(ge=0)] = 0

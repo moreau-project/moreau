@@ -22,7 +22,7 @@ Solver
       subject to  Ax + s = b
                   x in K1,  s in K2
 
-   K2 constrains the slack s; K1 constrains x directly (direct cones).
+   K2 constrains the slack s; K1 constrains x directly (direct conic constraints).
 
    :param P: Quadratic objective matrix (scipy sparse or numpy array). Must be full symmetric (both triangles).
    :param q: Linear objective vector, shape (n,)
@@ -69,7 +69,7 @@ Solver
       :param dx: Gradient w.r.t. primal solution x, shape (n,)
       :param dz: Optional gradient w.r.t. dual variables z, shape (m,)
       :param ds: Optional gradient w.r.t. slack variables s, shape (m,)
-      :param dz_x: Optional gradient w.r.t. direct cone duals z_x, shape (sum \|J\|,)
+      :param dz_x: Optional gradient w.r.t. direct conic constraint duals z_x, shape (sum \|J\|,)
       :returns: Dict of gradients with keys ``dP_values``, ``dq``, ``dA_values``, ``db`` —
           sparse P/A gradients have the same CSR structure as the input matrices.
       :rtype: dict
@@ -175,7 +175,7 @@ CompiledSolver
       :param dx: Gradient w.r.t. primal solutions x, shape (batch, n)
       :param dz: Optional gradient w.r.t. dual variables z, shape (batch, m)
       :param ds: Optional gradient w.r.t. slack variables s, shape (batch, m)
-      :param dz_x: Optional gradient w.r.t. direct cone duals z_x, shape (batch, sum \|J\|)
+      :param dz_x: Optional gradient w.r.t. direct conic constraint duals z_x, shape (batch, sum \|J\|)
       :returns: Dict of gradients with keys ``dP_values``, ``dq``, ``dA_values``, ``db`` —
           sparse P/A gradients have the same CSR structure as the input matrices.
       :rtype: dict
@@ -226,7 +226,8 @@ Cones
 .. py:class:: Cones(num_zero_cones=0, num_nonneg_cones=0, so_cone_dims=None, num_exp_cones=0, power_alphas=None, gen_power_cone_params=None, psd_dims=None, dir_cones=None)
 
    Specification for the cone structure: the slack cones K2 (``s in K2``) and,
-   via ``dir_cones``, the direct cones K1 (``x in K1``).
+   via ``dir_cones``, direct conic constraints (``x in K1``).
+   Unknown fields are rejected to prevent silently omitting constraints.
 
    Constraints must be ordered in A and b to match:
    zero cones, then nonnegative, then second-order, then exponential, then power,
@@ -257,7 +258,7 @@ Cones
        consuming 6 + 10 = 16 constraint rows (svec representation). Supported on both
        CPU and CUDA backends, including backward pass (gradient computation).
        See :doc:`../guide/psd-cones` for details. Defaults to empty list.
-   :param dir_cones: List of ``DirectConeSpec`` direct cone specifications that constrain
+   :param dir_cones: List of ``DirectConeSpec`` direct conic constraint specifications that constrain
        subvectors of the primal variable ``x`` directly, without consuming rows of
        ``A``/``b``. Indices across all entries must be pairwise disjoint.
        See :doc:`../guide/direct-cones` for details. Defaults to empty list.
@@ -424,9 +425,9 @@ Solution
    .. py:attribute:: z_x
       :type: numpy.ndarray or None
 
-      Direct cone duals, flat over the ``Cones.dir_cones`` spec in order.
-      Shape ``(sum |J|,)`` where each ``|J|`` is the size of a direct cone's
-      primal-index set. ``None`` for problems with no direct cones.
+      Direct conic constraint duals, flat over the ``Cones.dir_cones`` spec in order.
+      Shape ``(sum |J|,)`` where each ``|J|`` is the size of a direct conic constraint's
+      primal-index set. ``None`` for problems with no direct conic constraints.
 
    .. py:method:: to_warm_start()
 
@@ -460,8 +461,8 @@ BatchedSolution
    .. py:attribute:: z_x
       :type: numpy.ndarray
 
-      Direct cone duals, shape ``(batch, sum |J|)``. Empty (zero-width second
-      axis) for problems with no direct cones.
+      Direct conic constraint duals, shape ``(batch, sum |J|)``. Empty (zero-width second
+      axis) for problems with no direct conic constraints.
 
    Supports indexing (``solution[i]`` returns a ``Solution``), ``len()``, and iteration.
 

@@ -21,7 +21,7 @@
 namespace moreau {
 
 // Version string
-static constexpr const char* MOREAU_VERSION = "0.3.3";
+static constexpr const char* MOREAU_VERSION = "0.4.0";
 
 // Helper to format scientific notation to match Rust's LowerExp format
 static std::string format_exp(double val) {

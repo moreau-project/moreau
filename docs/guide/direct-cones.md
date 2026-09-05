@@ -1,4 +1,4 @@
-# Direct Cones
+# Direct Conic Constraints
 
 Moreau's base conic form wraps every conic constraint in a slack
 variable `s`:
@@ -13,7 +13,7 @@ $$
 When a cone constrains a sub-vector of `x` directly — e.g. `x[J] ≥ 0`
 or `x[J] ∈ SOC` — adding a slack variable inflates the problem with an
 extra row of `A`, an extra slack, and an extra cone block. The
-**direct cone** API lets you declare such constraints inline:
+**direct conic constraint** API lets you declare such constraints inline:
 
 $$
 \begin{aligned}
@@ -23,13 +23,14 @@ $$
 \end{aligned}
 $$
 
-Slack and direct cones can be mixed freely. Using direct cones typically solves
-faster than the slack equivalent — single-SOC measured ~2.5× on CPU;
-batched-CUDA wins are larger for cones with many active constraints.
+Slack formulations and direct conic constraints can be combined. Using direct
+conic constraints typically solves faster than the slack equivalent — single-SOC
+measured ~2.5× on CPU; batched-CUDA wins are larger for cones with many active
+constraints.
 
 ## Python API
 
-Declare direct cones via `DirectConeSpec` entries on `Cones.dir_cones`:
+Declare direct conic constraints via `DirectConeSpec` entries on `Cones.dir_cones`:
 
 ```python
 import numpy as np
@@ -83,13 +84,12 @@ print(sol.x)
 | `power`           | ✓           | ✓            | ✓            | ✓             | ✓           |
 | `gen_power`       | ✓           | ✓            | ✓            | ✓             | ✓           |
 
-All cone kinds and surfaces above are wired end-to-end. Batched direct cone solving
-(`CompiledSolver` with `batch_size > 1`) works on CPU and CUDA for every
-listed kind.
+Batched problems with direct conic constraints (`CompiledSolver` with
+`batch_size > 1`) are supported on CPU and CUDA for every listed kind.
 
 ## KKT solver compatibility
 
-| Linear solver                        | Direct cone support |
+| Linear solver                        | Direct Conic Constraint support |
 |--------------------------------------|------------------|
 | `auto`, `qdldl`, `faer-1t`, `faer-nt`| ✓                |
 | Pardiso MKL / Panua                  | ✓ (untested)     |
@@ -98,12 +98,12 @@ listed kind.
 | `riccati`                            | ✗ — block-tridiag structure breaks |
 
 `woodbury` exploits diagonal P + nonneg-only cone structure; with nonneg
-direct cones we add their per-iteration diagonal Hs contribution into
+direct conic constraints we add their per-iteration diagonal Hs contribution into
 the same Schur-complement diagonal that the slack nonneg path builds.
 SOC, PSD, exp, power, and gen_power direct are not Woodbury-compatible
 because they introduce non-diagonal terms in the (1,1) block.
 
-`riccati` aren't valid `direct_solve_method` values on CPU; `cudss` and
+`riccati` is not a valid `direct_solve_method` value on CPU; `cudss` and
 `woodbury` are CUDA-only and rejected on CPU at settings validation.
 
 ## Equilibration caveat
@@ -122,11 +122,11 @@ decomposable cones into smaller blocks. **Direct PSD cones are not
 chordally decomposed**: they live in the primal vector rather than in a
 slack-row block, so the sparsity-driven analysis does not apply. If
 your PSD matrix variable has known block-diagonal structure, declare
-the blocks as separate direct cones with disjoint `indices`.
+the blocks as separate direct conic constraints with disjoint `indices`.
 
-## What direct does for you
+## Benefits of direct conic constraints
 
-A direct cone constrains a subvector of `x` in place, without
+A direct conic constraint constrains a subvector of `x` in place, without
 introducing the extra slack variable, `A` row, and `b` entry that the
 equivalent slack constraint would require. The smaller problem is
 typically faster to solve and to differentiate. Direct duals are

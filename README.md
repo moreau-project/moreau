@@ -15,11 +15,11 @@ subject to   A x + s = b
              x ∈ K₁,   s ∈ K₂
 ```
 
-where `K₂` constrains the slack `s` and `K₁` constrains `x` directly (direct-x
-cones). Both are products of nonnegative, second-order, exponential, power,
-generalized-power, and PSD cones; in addition, the slack cone `K₂` admits the
-zero cone (equality constraints), while the direct-x cone `K₁` admits the dual
-of the zero cone (the free cone) in its place. A Rust CPU backend and a C++/CUDA GPU backend
+where `s ∈ K₂` constrains the slack and `x ∈ K₁` is a **Direct Conic
+Constraint**. Both `K₁` and `K₂` are products of nonnegative, second-order,
+exponential, power, generalized-power, and PSD cones. The slack cone `K₂`
+also admits the zero cone (equality constraints); `K₁` admits its dual,
+the free cone, instead. A Rust CPU backend and a C++/CUDA GPU backend
 sit behind one Python API — so you can solve a single problem, a batch of
 thousands on the GPU, or differentiate through the solution for end-to-end
 learning, all with the same code.
@@ -35,8 +35,8 @@ learning, all with the same code.
 - **PyTorch & JAX native.** Drop into autograd (`loss.backward()`) or JAX
   (`jit` / `vmap` / `grad`); also works with CVXPY and cvxpylayers.
 - **Many cones.** Zero, nonnegative, second-order, exponential, power,
-  generalized-power, and PSD — plus *direct-x* cones that constrain `x`
-  directly and skip the slack row.
+  generalized-power, and PSD — plus *direct conic constraints* on `x`
+  that skip the slack row.
 
 ## Installation
 
@@ -187,7 +187,7 @@ Full guides and API reference: **[moreau.so](https://moreau.so)**.
 - [Installation](docs/installation.md) · [Quickstart](docs/quickstart.md)
 - [Basic usage](docs/guide/basic-usage.md) · [Batching](docs/guide/batching.md) · [Solver settings](docs/guide/solver-settings.md)
 - [PyTorch](docs/guide/pytorch-integration.md) · [JAX](docs/guide/jax-integration.md) · [CVXPY](docs/guide/cvxpy-integration.md) · [cvxpylayers](docs/guide/cvxpylayers-integration.md)
-- [Direct-x cones](docs/guide/direct-cones.md) · [PSD cones](docs/guide/psd-cones.md) · [Warm starting](docs/guide/warm-starting.md)
+- [Direct conic constraints](docs/guide/direct-cones.md) · [PSD cones](docs/guide/psd-cones.md) · [Warm starting](docs/guide/warm-starting.md)
 - [Device selection](docs/guide/device-selection.md) · [Julia](docs/guide/julia-integration.md) / [JuMP](docs/guide/jump-integration.md)
 
 ## Citation

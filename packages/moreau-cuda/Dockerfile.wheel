@@ -141,8 +141,8 @@ RUN pip wheel . -w dist_raw/ --no-deps --no-build-isolation
 # We can't use auditwheel because it checks symbol versions of ALL linked
 # libraries (even excluded ones), and NVIDIA libs require newer glibc than
 # the manylinux tag. Since we have no vendored libs, just retag the wheel.
-RUN mkdir -p dist && \
-    ARCH="${ARCH}" python -c "import glob,os,pathlib,re,shutil;arch=os.environ['ARCH'];whl=glob.glob('dist_raw/*.whl')[0];name=pathlib.Path(whl).name;new=re.sub(rf'-linux_{arch}\.whl\$',f'-manylinux_2_28_{arch}.whl',name);shutil.copy2(whl,f'dist/{new}');print(f'Tagged: {new}')"
+RUN python -m wheel tags --platform-tag "manylinux_2_28_${ARCH}" --remove dist_raw/*.whl && \
+    mkdir -p dist && cp dist_raw/*.whl dist/
 
 # Scrub source paths from binaries to prevent build environment leakage
 RUN python scripts/scrub_binary.py dist/*.whl
