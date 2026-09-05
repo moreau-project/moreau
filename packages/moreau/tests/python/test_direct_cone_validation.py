@@ -2,9 +2,9 @@
 
 Covers constructor validation, overlap rejection, OOB index detection,
 and degree accounting. Forward/backward correctness lives in
-test_xcone_forward.py and test_xcone_backward.py; integration features
+test_direct_cone_forward.py and test_direct_cone_backward.py; integration features
 (warm-start, active-set, PSD chordal, Woodbury, asymmetric kinds,
-zerocopy) live in test_xcone_misc.py.
+zerocopy) live in test_direct_cone_misc.py.
 """
 
 import numpy as np
@@ -128,7 +128,9 @@ def test_cones_degree_counts_each_x_cone_kind():
     assert deg(moreau.DirectConeSpec(kind="power", indices=[0, 1, 2], alpha=0.5)) == 3
     # gen_power degree = len(alphas) + 1
     assert (
-        deg(moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2, 3], alphas=[0.5, 0.5], dim2=2))
+        deg(
+            moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2, 3], alphas=[0.5, 0.5], dim2=2)
+        )
         == 3
     )
 

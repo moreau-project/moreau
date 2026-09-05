@@ -2,7 +2,7 @@
 GenPower) on the CUDA backend.
 
 Each test mirrors the corresponding C++ end-to-end test in
-packages/moreau-cuda/tests/cpp/test_xcone_{exp,pow,genpow}_direct_x.cpp
+packages/moreau-cuda/tests/cpp/test_direct_cone_{exp,pow,genpow}.cpp
 and cross-checks cone membership of the solution.
 
 All tests skip cleanly when CUDA is not available.

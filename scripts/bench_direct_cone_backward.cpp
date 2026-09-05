@@ -7,7 +7,7 @@
 // expansion lands on CUDA, this bench is the regression gate.
 //
 // Usage:
-//   ./bench_xcone_backward
+//   ./bench_direct_cone_backward
 //
 // Backward timing methodology:
 //   1. solveAll(d_P, d_A, d_q, d_b)

@@ -9,7 +9,7 @@
 //! Decides whether mirroring asymmetric direct-x onto CUDA is worth it.
 //!
 //! Usage:
-//!   cargo run --release --example bench_xcone_asymmetric
+//!   cargo run --release --example bench_direct_cone_asymmetric
 
 use moreau::algebra::CscMatrix;
 use moreau::solver::{
@@ -66,7 +66,8 @@ fn time_solve_dx(
     let b_dx: Vec<f64> = vec![];
     let cones_dx: Vec<SupportedConeT<f64>> = vec![];
     let mut solver =
-        DefaultSolver::new_with_xcones(P, q, &A_dx, &b_dx, &cones_dx, dir_cones, settings()).unwrap();
+        DefaultSolver::new_with_xcones(P, q, &A_dx, &b_dx, &cones_dx, dir_cones, settings())
+            .unwrap();
     let t = Instant::now();
     solver.solve();
     (

@@ -137,8 +137,7 @@ def _dir_cones_to_cpu(cones) -> List:
             xcone_t = getattr(_cpu_solver, "PSDTriangleXConeT", None)
             if xcone_t is None:
                 raise NotImplementedError(
-                    "PSD direct cones require the CPU backend to be built "
-                    "with the `sdp` feature"
+                    "PSD direct cones require the CPU backend to be built " "with the `sdp` feature"
                 )
             out.append(xcone_t(indices, int(psd_k)))
         else:

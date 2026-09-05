@@ -899,7 +899,8 @@ mod xcone_refresh_tests {
         let P = CscMatrix::<f64>::from(&[[3., 0.], [0., 0.]]);
         let A = CscMatrix::<f64>::from(&[[1., 1.]]);
         let cones = CompositeCone::<f64>::new(&[SupportedConeT::ZeroConeT(1)]);
-        let dir_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![0, 1])]);
+        let dir_cones =
+            CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![0, 1])]);
 
         let settings = DefaultSettings::<f64>::default();
         let mut ldl = DirectLDLKKTSolver::<f64>::new_with_perm_and_xcones(

@@ -15,7 +15,7 @@
 //!
 //! Tightness ∈ {0.5, 0.9, 0.99, 0.999} — closer to 1 = harder.
 //!
-//! Usage: cargo run --release --example bench_xcone_genpow_pd
+//! Usage: cargo run --release --example bench_direct_cone_genpow_pd
 
 use moreau::algebra::CscMatrix;
 use moreau::solver::{

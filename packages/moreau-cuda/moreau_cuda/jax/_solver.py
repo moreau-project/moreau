@@ -204,7 +204,9 @@ class JaxSolverCuda:
                     alphas = list(getattr(spec, "alphas", []) or [])
                     dim2 = getattr(spec, "dim2", None)
                     if not alphas or dim2 is None:
-                        raise ValueError("DirectConeSpec(kind='gen_power') requires alphas and dim2")
+                        raise ValueError(
+                            "DirectConeSpec(kind='gen_power') requires alphas and dim2"
+                        )
                     x_gp_dim1s.append(len(alphas))
                     x_gp_dim2s.append(int(dim2))
                     x_gp_alphas_flat.extend(alphas)

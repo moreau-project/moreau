@@ -245,7 +245,7 @@ def _check_dz_x_finite_difference(device):
 def test_solver_dz_x_finite_difference_cpu():
     """Upstream gradient on z_x must match finite differences of z_x_orig.
 
-    Mirrors the Rust integration test (`xcone_dz_x_backward`) but at the
+    Mirrors the Rust integration test (`direct_cone_dz_x_backward`) but at the
     Python API level.
     """
     _check_dz_x_finite_difference("cpu")

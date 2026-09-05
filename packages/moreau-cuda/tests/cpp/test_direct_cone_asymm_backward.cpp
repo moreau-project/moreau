@@ -1,9 +1,10 @@
-// test_xcone_backward.cpp
+// test_direct_cone_asymm_backward.cpp
 //
-// Native CUDA direct-x backward (IFT-direct path). Mirrors the CPU
-// xcone_nonneg_equivalence::test_backward_direct_x_matches_slack: solve
-// the same QP via slack form vs. direct-x form on CUDA, run backward
-// with the same upstream `dx`, and assert dP/dq agree.
+// CUDA backward parity for asymmetric direct-x cones (Exp, Power) vs
+// the slack-form backward on the same problem. The asymmetric primal/
+// dual swap matters only for the FORWARD scaling; the backward
+// projection Jacobian is the same function as for the slack form, so
+// the gradient outputs (dq, dP) must match.
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
 #include <cmath>
@@ -42,21 +43,20 @@ std::vector<double> cuda_get(const BatchedVector& v) {
 }
 }  // namespace
 
-// Small QP: min 0.5 x'Px + q'x  s.t. x >= 0 (direct-x or slack).
-// P = 2I, q = (-1, 2, -0.5). Slack-form unconstrained opt is (0.5, -1, 0.25),
-// clipped to (0.5, 0, 0.25) by the nonneg cone.
-TEST(XConeBackwardCuda, NonnegDirectXMatchesSlack) {
+// min 0.5 ||x - target||^2 with target = (0, 1, 5), x ∈ ExpCone (slack
+// or direct-x). The cone is active at the optimum, so the backward
+// projection Jacobian is in the boundary regime (Newton + 4×4 invert
+// path), exercising the new compute_xcone_asymm_H kernel.
+TEST(XConeAsymmBackwardCuda, ExpDirectXMatchesSlack) {
     constexpr int batchSize = 1;
     constexpr int n = 3;
 
-    // P = 2I (diagonal).
     std::vector<int64_t> P_ro = {0, 1, 2, 3};
     std::vector<int64_t> P_ci = {0, 1, 2};
-    std::vector<double>  P_val = {2.0, 2.0, 2.0};
-    std::vector<double>  q     = {-1.0, 2.0, -0.5};
+    std::vector<double>  P_val = {1.0, 1.0, 1.0};
+    std::vector<double>  q     = {0.0, -1.0, -5.0};
     std::vector<double>  dx    = {1.0, 1.0, 1.0};
 
-    // ----- Slack form: A = -I, b = 0, single nonneg cone of dim n -----
     std::vector<double> dq_slack, dP_slack;
     {
         constexpr int m = n;
@@ -66,11 +66,12 @@ TEST(XConeBackwardCuda, NonnegDirectXMatchesSlack) {
         std::vector<double>  b     = {0.0, 0.0, 0.0};
 
         Cones cones{};
-        cones.numNonnegCones = n;
+        cones.numExpCones = 1;
 
         Settings settings;
         settings.verbose = false;
         settings.enableGrad = true;
+        settings.ipm.equilibrationSettings.enable = false;
 
         CompiledSolver solver(n, m, batchSize,
                               P_ro.data(), P_ci.data(), P_val.size(),
@@ -99,21 +100,19 @@ TEST(XConeBackwardCuda, NonnegDirectXMatchesSlack) {
         cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
     }
 
-    // ----- Direct-x form: empty A, single nonneg direct-x on all of x -----
     std::vector<double> dq_direct, dP_direct;
     {
         constexpr int m = 0;
         std::vector<int64_t> A_ro = {0};
         std::vector<int64_t> A_ci = {};
-        std::vector<double>  A_val;  // empty
-        std::vector<double>  b;      // empty
 
         Cones cones{};
-        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Exp, {0, 1, 2}});
 
         Settings settings;
         settings.verbose = false;
         settings.enableGrad = true;
+        settings.ipm.equilibrationSettings.enable = false;
 
         CompiledSolver solver(n, m, batchSize,
                               P_ro.data(), P_ci.data(), P_val.size(),
@@ -128,7 +127,7 @@ TEST(XConeBackwardCuda, NonnegDirectXMatchesSlack) {
         cudaDeviceSynchronize();
 
         BatchedVector dx_bar(n, batchSize);
-        BatchedVector dz_bar(1, batchSize);  // m=0 → placeholder
+        BatchedVector dz_bar(1, batchSize);
         BatchedVector ds_bar(1, batchSize);
         cuda_set(dx_bar, dx, n);
         std::vector<double> zero1 = {0.0};
@@ -144,38 +143,36 @@ TEST(XConeBackwardCuda, NonnegDirectXMatchesSlack) {
         cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
     }
 
-    // dq must match (same n components).
     ASSERT_EQ(dq_slack.size(), dq_direct.size());
     for (size_t i = 0; i < dq_slack.size(); ++i) {
-        EXPECT_NEAR(dq_slack[i], dq_direct[i], 1e-4)
+        EXPECT_NEAR(dq_slack[i], dq_direct[i], 1e-3)
             << "dq[" << i << "] disagree";
     }
 
-    // dP must match.
     ASSERT_EQ(dP_slack.size(), dP_direct.size());
     for (size_t k = 0; k < dP_slack.size(); ++k) {
-        EXPECT_NEAR(dP_slack[k], dP_direct[k], 1e-4)
+        EXPECT_NEAR(dP_slack[k], dP_direct[k], 1e-3)
             << "dP[" << k << "] disagree";
     }
 }
 
-// SOC direct-x backward parity: solve the same SOC-constrained QP via
-// slack form vs direct-x form on CUDA, run backward with the same
-// upstream `dx`, and assert dP/dq agree. Constraint is active on the
-// SOC boundary so the cone-projection Jacobian is the boundary case
-// (not pure identity / zero). Equilibration is disabled to keep the
-// reference math straightforward; the IFT-direct path is invariant
-// under uniform per-cone equilibration anyway.
-TEST(XConeBackwardCuda, SOCDirectXMatchesSlack) {
+// min 0.5 ||x - target||^2 with target = (2, 2, 0.5), x ∈ PowerCone(α=0.4).
+// PowerCone is {(x_0, x_1, x_2) : x_0^α x_1^(1−α) ≥ |x_2|, x_0,x_1 ≥ 0}.
+// target lies strictly in the cone interior, so the projection Jacobian
+// is in the easy interior regime (block = I, dual H = 0). This isolates
+// the direct-x dispatch + storage from boundary-Newton numerical noise.
+TEST(XConeAsymmBackwardCuda, PowerDirectXMatchesSlack) {
     constexpr int batchSize = 1;
     constexpr int n = 3;
+    const double alpha = 0.4;
+
     std::vector<int64_t> P_ro = {0, 1, 2, 3};
     std::vector<int64_t> P_ci = {0, 1, 2};
     std::vector<double>  P_val = {1.0, 1.0, 1.0};
-    std::vector<double>  q     = {1.0, 2.0, 0.0};      // pushes x[0] negative
+    // 2^0.4 * 2^0.6 = 2 ≥ 0.5 → target is interior; constraint inactive.
+    std::vector<double>  q     = {-2.0, -2.0, -0.5};
     std::vector<double>  dx    = {1.0, 1.0, 1.0};
 
-    // ----- Slack form: A = -I, b = 0, single SOC of dim 3 -----
     std::vector<double> dq_slack, dP_slack;
     {
         constexpr int m = n;
@@ -183,10 +180,132 @@ TEST(XConeBackwardCuda, SOCDirectXMatchesSlack) {
         std::vector<int64_t> A_ci = {0, 1, 2};
         std::vector<double>  A_val = {-1.0, -1.0, -1.0};
         std::vector<double>  b     = {0.0, 0.0, 0.0};
+
+        Cones cones{};
+        cones.numPowerCones = 1;
+        cones.powerAlphas = {alpha};
+
+        Settings settings;
+        settings.verbose = false;
+        settings.enableGrad = true;
+        settings.ipm.equilibrationSettings.enable = false;
+
+        CompiledSolver solver(n, m, batchSize,
+                              P_ro.data(), P_ci.data(), P_val.size(),
+                              A_ro.data(), A_ci.data(), A_val.size(),
+                              cones, settings);
+
+        double* d_P = cuda_upload(P_val);
+        double* d_A = cuda_upload(A_val);
+        double* d_q = cuda_upload(q);
+        double* d_b = cuda_upload(b);
+        solver.solveAll(d_P, d_A, d_q, d_b);
+        cudaDeviceSynchronize();
+
+        BatchedVector dx_bar(n, batchSize), dz_bar(m, batchSize), ds_bar(m, batchSize);
+        cuda_set(dx_bar, dx, n);
+        std::vector<double> zeros_m(m, 0.0);
+        cuda_set(dz_bar, zeros_m, m);
+        cuda_set(ds_bar, zeros_m, m);
+
+        backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, 0);
+        cudaDeviceSynchronize();
+
+        dq_slack = cuda_get(solver.diff_state()->dq);
+        dP_slack = cuda_get(solver.diff_state()->dP_values);
+
+        cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
+    }
+
+    std::vector<double> dq_direct, dP_direct;
+    {
+        constexpr int m = 0;
+        std::vector<int64_t> A_ro = {0};
+        std::vector<int64_t> A_ci = {};
+
+        Cones cones{};
+        SupportedXConeT pow_xc{};
+        pow_xc.kind = XConeKind::Power;
+        pow_xc.indices = {0, 1, 2};
+        pow_xc.power_alpha = alpha;
+        cones.dir_cones.push_back(std::move(pow_xc));
+
+        Settings settings;
+        settings.verbose = false;
+        settings.enableGrad = true;
+        settings.ipm.equilibrationSettings.enable = false;
+
+        CompiledSolver solver(n, m, batchSize,
+                              P_ro.data(), P_ci.data(), P_val.size(),
+                              A_ro.data(), A_ci.data(), 0,
+                              cones, settings);
+
+        double* d_P = cuda_upload(P_val);
+        double* d_A = nullptr; cudaMalloc(&d_A, sizeof(double));
+        double* d_q = cuda_upload(q);
+        double* d_b = nullptr; cudaMalloc(&d_b, sizeof(double));
+        solver.solveAll(d_P, d_A, d_q, d_b);
+        cudaDeviceSynchronize();
+
+        BatchedVector dx_bar(n, batchSize);
+        BatchedVector dz_bar(1, batchSize);
+        BatchedVector ds_bar(1, batchSize);
+        cuda_set(dx_bar, dx, n);
+        std::vector<double> zero1 = {0.0};
+        cuda_set(dz_bar, zero1, 1);
+        cuda_set(ds_bar, zero1, 1);
+
+        backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, 0);
+        cudaDeviceSynchronize();
+
+        dq_direct = cuda_get(solver.diff_state()->dq);
+        dP_direct = cuda_get(solver.diff_state()->dP_values);
+
+        cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
+    }
+
+    ASSERT_EQ(dq_slack.size(), dq_direct.size());
+    for (size_t i = 0; i < dq_slack.size(); ++i) {
+        EXPECT_NEAR(dq_slack[i], dq_direct[i], 1e-3)
+            << "dq[" << i << "] disagree";
+    }
+
+    ASSERT_EQ(dP_slack.size(), dP_direct.size());
+    for (size_t k = 0; k < dP_slack.size(); ++k) {
+        EXPECT_NEAR(dP_slack[k], dP_direct[k], 1e-3)
+            << "dP[" << k << "] disagree";
+    }
+}
+
+// High-dim SOC direct-x backward parity (dim=20) — exercises the
+// rank-2 sparse expansion path on CUDA. Mirrors the CPU
+// `test_backward_direct_x_soc_high_dim_matches_slack` regression.
+TEST(XConeAsymmBackwardCuda, SOCDirectXMatchesSlackHighDim) {
+    constexpr int batchSize = 1;
+    constexpr int n = 20;
+
+    std::vector<int64_t> P_ro(n + 1);
+    for (int i = 0; i <= n; ++i) P_ro[i] = i;
+    std::vector<int64_t> P_ci(n);
+    for (int i = 0; i < n; ++i) P_ci[i] = i;
+    std::vector<double> P_val(n, 1.0);
+    std::vector<double> q(n, 0.0);
+    q[0] = -2.0;  // pull x[0] toward -2 → SOC binding.
+    std::vector<double> dx(n, 1.0);
+
+    std::vector<double> dq_slack, dP_slack;
+    {
+        constexpr int m = n;
+        std::vector<int64_t> A_ro(n + 1);
+        for (int i = 0; i <= n; ++i) A_ro[i] = i;
+        std::vector<int64_t> A_ci(n);
+        for (int i = 0; i < n; ++i) A_ci[i] = i;
+        std::vector<double> A_val(n, -1.0);
+        std::vector<double> b(n, 0.0);
 
         Cones cones{};
         cones.numSocCones = 1;
-        cones.socConeDims = {3};
+        cones.socConeDims = {static_cast<int64_t>(n)};
 
         Settings settings;
         settings.verbose = false;
@@ -209,17 +328,13 @@ TEST(XConeBackwardCuda, SOCDirectXMatchesSlack) {
         std::vector<double> zeros_m(m, 0.0);
         cuda_set(dz_bar, zeros_m, m);
         cuda_set(ds_bar, zeros_m, m);
-
         backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, 0);
         cudaDeviceSynchronize();
-
         dq_slack = cuda_get(solver.diff_state()->dq);
         dP_slack = cuda_get(solver.diff_state()->dP_values);
-
         cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
     }
 
-    // ----- Direct-x form: empty A, single SOC direct-x on all of x -----
     std::vector<double> dq_direct, dP_direct;
     {
         constexpr int m = 0;
@@ -227,7 +342,11 @@ TEST(XConeBackwardCuda, SOCDirectXMatchesSlack) {
         std::vector<int64_t> A_ci = {};
 
         Cones cones{};
-        cones.dir_cones.push_back(SupportedXConeT{XConeKind::SOC, {0, 1, 2}});
+        SupportedXConeT xc;
+        xc.kind = XConeKind::SOC;
+        xc.indices.assign(n, 0);
+        for (int i = 0; i < n; ++i) xc.indices[i] = i;
+        cones.dir_cones.push_back(std::move(xc));
 
         Settings settings;
         settings.verbose = false;
@@ -252,43 +371,41 @@ TEST(XConeBackwardCuda, SOCDirectXMatchesSlack) {
         std::vector<double> zero1 = {0.0};
         cuda_set(dz_bar, zero1, 1);
         cuda_set(ds_bar, zero1, 1);
-
         backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, 0);
         cudaDeviceSynchronize();
-
         dq_direct = cuda_get(solver.diff_state()->dq);
         dP_direct = cuda_get(solver.diff_state()->dP_values);
-
         cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
     }
 
     ASSERT_EQ(dq_slack.size(), dq_direct.size());
     for (size_t i = 0; i < dq_slack.size(); ++i) {
-        EXPECT_NEAR(dq_slack[i], dq_direct[i], 1e-4)
+        EXPECT_NEAR(dq_slack[i], dq_direct[i], 1e-3)
             << "dq[" << i << "] disagree";
     }
     ASSERT_EQ(dP_slack.size(), dP_direct.size());
     for (size_t k = 0; k < dP_slack.size(); ++k) {
-        EXPECT_NEAR(dP_slack[k], dP_direct[k], 1e-4)
+        EXPECT_NEAR(dP_slack[k], dP_direct[k], 1e-3)
             << "dP[" << k << "] disagree";
     }
 }
 
-// PSD direct-x backward parity: 2x2 PSD cone constraint via slack form
-// vs direct-x form on CUDA. Equilibration disabled. n=3 primal vars
-// correspond to svec(X) = (X[0,0], √2·X[0,1], X[1,1]). Solution lies on
-// the PSD boundary when q points outside the cone.
-TEST(XConeBackwardCuda, PSDDirectXMatchesSlack) {
+// GenPowerCone direct-x backward parity vs slack form, dim2=1 case
+// (c3 term folded into the diagonal). The 3D GenPow with α=(0.5, 0.5)
+// reduces to the standard SOC pattern but via the GenPower codepath.
+// Target lies on the boundary so the Newton solve runs.
+TEST(XConeAsymmBackwardCuda, GenPowerDirectXMatchesSlack3D) {
     constexpr int batchSize = 1;
     constexpr int n = 3;
+
     std::vector<int64_t> P_ro = {0, 1, 2, 3};
     std::vector<int64_t> P_ci = {0, 1, 2};
     std::vector<double>  P_val = {1.0, 1.0, 1.0};
-    // q pulls X off the PSD cone interior so the constraint binds.
-    std::vector<double>  q     = {-0.5, 1.0, -0.5};
+    // Target (1, 1, 2): geometric mean of (1,1) is 1; |w| = 2 > 1
+    // → cone violated; constraint binding.
+    std::vector<double>  q     = {-1.0, -1.0, -2.0};
     std::vector<double>  dx    = {1.0, 1.0, 1.0};
 
-    // ----- Slack form: A = -I, b = 0, single PSD cone (psd_k=2) -----
     std::vector<double> dq_slack, dP_slack;
     {
         constexpr int m = n;
@@ -298,10 +415,10 @@ TEST(XConeBackwardCuda, PSDDirectXMatchesSlack) {
         std::vector<double>  b     = {0.0, 0.0, 0.0};
 
         Cones cones{};
-        cones.numPsdCones = 1;
-        cones.psdConeDims = {2};
-        cones.psdConeDimsOriginal = {2};
-        cones.psdSortPerm = {0};
+        cones.numGenPowerCones = 1;
+        cones.genPowerAlphas = {0.5, 0.5};
+        cones.genPowerDim1s = {2};
+        cones.genPowerDim2s = {1};
 
         Settings settings;
         settings.verbose = false;
@@ -312,6 +429,7 @@ TEST(XConeBackwardCuda, PSDDirectXMatchesSlack) {
                               P_ro.data(), P_ci.data(), P_val.size(),
                               A_ro.data(), A_ci.data(), A_val.size(),
                               cones, settings);
+
         double* d_P = cuda_upload(P_val);
         double* d_A = cuda_upload(A_val);
         double* d_q = cuda_upload(q);
@@ -334,7 +452,6 @@ TEST(XConeBackwardCuda, PSDDirectXMatchesSlack) {
         cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
     }
 
-    // ----- Direct-x form: empty A, single PSD direct-x on all of x -----
     std::vector<double> dq_direct, dP_direct;
     {
         constexpr int m = 0;
@@ -342,9 +459,12 @@ TEST(XConeBackwardCuda, PSDDirectXMatchesSlack) {
         std::vector<int64_t> A_ci = {};
 
         Cones cones{};
-        SupportedXConeT xc{XConeKind::PSD, {0, 1, 2}};
-        xc.psd_k = 2;
-        cones.dir_cones.push_back(xc);
+        SupportedXConeT gp_xc{};
+        gp_xc.kind = XConeKind::GenPower;
+        gp_xc.indices = {0, 1, 2};
+        gp_xc.gen_power_alphas = {0.5, 0.5};
+        gp_xc.gen_power_dim2 = 1;
+        cones.dir_cones.push_back(std::move(gp_xc));
 
         Settings settings;
         settings.verbose = false;
@@ -355,6 +475,7 @@ TEST(XConeBackwardCuda, PSDDirectXMatchesSlack) {
                               P_ro.data(), P_ci.data(), P_val.size(),
                               A_ro.data(), A_ci.data(), 0,
                               cones, settings);
+
         double* d_P = cuda_upload(P_val);
         double* d_A = nullptr; cudaMalloc(&d_A, sizeof(double));
         double* d_q = cuda_upload(q);
@@ -381,263 +502,54 @@ TEST(XConeBackwardCuda, PSDDirectXMatchesSlack) {
 
     ASSERT_EQ(dq_slack.size(), dq_direct.size());
     for (size_t i = 0; i < dq_slack.size(); ++i) {
-        EXPECT_NEAR(dq_slack[i], dq_direct[i], 1e-4)
+        EXPECT_NEAR(dq_slack[i], dq_direct[i], 1e-2)
             << "dq[" << i << "] disagree";
     }
+
     ASSERT_EQ(dP_slack.size(), dP_direct.size());
     for (size_t k = 0; k < dP_slack.size(); ++k) {
-        EXPECT_NEAR(dP_slack[k], dP_direct[k], 1e-4)
+        EXPECT_NEAR(dP_slack[k], dP_direct[k], 1e-2)
             << "dP[" << k << "] disagree";
     }
 }
 
-// Batched direct-x backward: solve two distinct nonneg-direct-x QPs in a
-// single batched CompiledSolver call, then run backward and assert each
-// per-batch gradient matches its corresponding single-problem reference.
-TEST(XConeBackwardCuda, NonnegDirectXBatchedMatchesSingle) {
-    constexpr int batchSize = 2;
-    constexpr int n = 3;
-    constexpr int m = 0;
-
-    std::vector<int64_t> P_ro = {0, 1, 2, 3};
-    std::vector<int64_t> P_ci = {0, 1, 2};
-    std::vector<int64_t> A_ro = {0};
-    // Two distinct problems sharing P structure but with different q values.
-    // q1 leaves the cone interior; q2 pushes one component negative so the
-    // cone binds asymmetrically — exercises the per-batch H_x dependence.
-    std::vector<double> P_val_b = {2.0, 2.0, 2.0,  2.0, 2.0, 2.0};
-    std::vector<double> q_b     = {-1.0, -1.0, -1.0,  -0.5, -0.5,  1.0};
-    std::vector<double> dx_b    = {1.0, 1.0, 1.0,  1.0, 1.0, 1.0};
-
-    auto run_direct_x = [&](int batch_dim, const std::vector<double>& P_val,
-                            const std::vector<double>& q,
-                            const std::vector<double>& dx)
-        -> std::pair<std::vector<double>, std::vector<double>>
-    {
-        Cones cones{};
-        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
-
-        Settings settings;
-        settings.verbose = false;
-        settings.enableGrad = true;
-        settings.ipm.equilibrationSettings.enable = false;
-
-        CompiledSolver solver(n, m, batch_dim,
-                              P_ro.data(), P_ci.data(), 3,
-                              A_ro.data(), nullptr, 0,
-                              cones, settings);
-
-        double* d_P = cuda_upload(P_val);
-        double* d_A = nullptr; cudaMalloc(&d_A, sizeof(double));
-        double* d_q = cuda_upload(q);
-        double* d_b = nullptr; cudaMalloc(&d_b, sizeof(double));
-        solver.solveAll(d_P, d_A, d_q, d_b);
-        cudaDeviceSynchronize();
-
-        BatchedVector dx_bar(n, batch_dim);
-        BatchedVector dz_bar(1, batch_dim);
-        BatchedVector ds_bar(1, batch_dim);
-        cuda_set(dx_bar, dx, n * batch_dim);
-        std::vector<double> zeros(batch_dim, 0.0);
-        cuda_set(dz_bar, zeros, batch_dim);
-        cuda_set(ds_bar, zeros, batch_dim);
-
-        backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, 0);
-        cudaDeviceSynchronize();
-
-        auto dq = cuda_get(solver.diff_state()->dq);
-        auto dP = cuda_get(solver.diff_state()->dP_values);
-
-        cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
-        return {dq, dP};
-    };
-
-    auto batched = run_direct_x(batchSize, P_val_b, q_b, dx_b);
-    auto& dq_batched = batched.first;
-    auto& dP_batched = batched.second;
-
-    for (int b = 0; b < batchSize; ++b) {
-        std::vector<double> P1(P_val_b.begin() + b * 3, P_val_b.begin() + (b + 1) * 3);
-        std::vector<double> q1(q_b.begin() + b * n, q_b.begin() + (b + 1) * n);
-        std::vector<double> dx1(dx_b.begin() + b * n, dx_b.begin() + (b + 1) * n);
-        auto single = run_direct_x(1, P1, q1, dx1);
-        const auto& dq1 = single.first;
-        const auto& dP1 = single.second;
-
-        for (int i = 0; i < n; ++i) {
-            EXPECT_NEAR(dq_batched[b * n + i], dq1[i], 1e-4)
-                << "batch " << b << " dq[" << i << "] disagree";
-        }
-        for (size_t k = 0; k < dP1.size(); ++k) {
-            EXPECT_NEAR(dP_batched[b * 3 + k], dP1[k], 1e-4)
-                << "batch " << b << " dP[" << k << "] disagree";
-        }
-    }
-}
-
-// dz_x backward: upstream gradient on the direct-x dual must produce
-// gradients on (q) that match finite differences of `z_x_orig`. The
-// boundary-active nonneg case has H_x = I, so d(z_x_internal)/d(q) = 1
-// and we expect d(z_x_orig[k]) / d(q[k]) = 1 along the active dimension.
-TEST(XConeBackwardCuda, NonnegDirectXDzXMatchesFiniteDifference) {
+// GenPowerCone direct-x backward parity vs slack form, 4D interior case
+// (cone constraint inactive). Exercises the rank-3 c3 term since dim2=2.
+TEST(XConeAsymmBackwardCuda, GenPowerDirectXMatchesSlack) {
     constexpr int batchSize = 1;
-    constexpr int n = 3;
-    constexpr int m = 0;
-    std::vector<int64_t> P_ro = {0, 1, 2, 3};
-    std::vector<int64_t> P_ci = {0, 1, 2};
-    std::vector<int64_t> A_ro = {0};
-    std::vector<double>  P_val = {1.0, 1.0, 1.0};
-    // Active boundary on x[2] (z_x[2] > 0 at convergence).
-    std::vector<double>  q     = {-0.5, -0.5, 1.0};
+    constexpr int n = 4;  // dim1=2, dim2=2
 
-    auto solve_zx = [&](const std::vector<double>& qv)
-        -> std::vector<double>
+    std::vector<int64_t> P_ro = {0, 1, 2, 3, 4};
+    std::vector<int64_t> P_ci = {0, 1, 2, 3};
+    std::vector<double>  P_val = {1.0, 1.0, 1.0, 1.0};
+    // Target (2, 2, 0.5, 0.5): for α=(0.5,0.5), p=(2,2) gives geometric
+    // mean = 2; ||w||=√(0.25+0.25)≈0.707 < 2 → cone interior.
+    std::vector<double>  q     = {-2.0, -2.0, -0.5, -0.5};
+    std::vector<double>  dx    = {1.0, 1.0, 1.0, 1.0};
+
+    std::vector<double> dq_slack, dP_slack;
     {
+        constexpr int m = n;
+        std::vector<int64_t> A_ro = {0, 1, 2, 3, 4};
+        std::vector<int64_t> A_ci = {0, 1, 2, 3};
+        std::vector<double>  A_val = {-1.0, -1.0, -1.0, -1.0};
+        std::vector<double>  b     = {0.0, 0.0, 0.0, 0.0};
+
         Cones cones{};
-        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+        cones.numGenPowerCones = 1;
+        cones.genPowerAlphas = {0.5, 0.5};
+        cones.genPowerDim1s = {2};
+        cones.genPowerDim2s = {2};
 
         Settings settings;
         settings.verbose = false;
         settings.enableGrad = true;
         settings.ipm.equilibrationSettings.enable = false;
-
-        CompiledSolver solver(n, m, batchSize,
-                              P_ro.data(), P_ci.data(), 3,
-                              A_ro.data(), nullptr, 0,
-                              cones, settings);
-
-        double* d_P = cuda_upload(P_val);
-        double* d_A = nullptr; cudaMalloc(&d_A, sizeof(double));
-        double* d_q = cuda_upload(qv);
-        double* d_b = nullptr; cudaMalloc(&d_b, sizeof(double));
-        solver.solveAll(d_P, d_A, d_q, d_b);
-        cudaDeviceSynchronize();
-
-        // Read z_x out of variables (post τ-divide is in cache_solution_for_backward)
-        // — easier path: re-pull from solver.diff_state()->z_x after a no-op backward.
-        BatchedVector dx_bar(n, batchSize), dz_bar(1, batchSize), ds_bar(1, batchSize);
-        std::vector<double> zero_n(n, 0.0);
-        cuda_set(dx_bar, zero_n, n);
-        std::vector<double> zero1 = {0.0};
-        cuda_set(dz_bar, zero1, 1);
-        cuda_set(ds_bar, zero1, 1);
-        backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, 0);
-        cudaDeviceSynchronize();
-
-        // z_x snapshotted in equilibrated frame (τ=1, no equilibration).
-        // cuda_get on diff_state.z_x gives the equilibrated values.
-        auto z_x = cuda_get(solver.diff_state()->z_x);
-
-        cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
-        return z_x;
-    };
-
-    auto solve_with_dz_x = [&](int j_dz_x) -> std::vector<double>
-    {
-        Cones cones{};
-        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
-
-        Settings settings;
-        settings.verbose = false;
-        settings.enableGrad = true;
-        settings.ipm.equilibrationSettings.enable = false;
-
-        CompiledSolver solver(n, m, batchSize,
-                              P_ro.data(), P_ci.data(), 3,
-                              A_ro.data(), nullptr, 0,
-                              cones, settings);
-        double* d_P = cuda_upload(P_val);
-        double* d_A = nullptr; cudaMalloc(&d_A, sizeof(double));
-        double* d_q = cuda_upload(q);
-        double* d_b = nullptr; cudaMalloc(&d_b, sizeof(double));
-        solver.solveAll(d_P, d_A, d_q, d_b);
-        cudaDeviceSynchronize();
-
-        BatchedVector dx_bar(n, batchSize);
-        BatchedVector dz_bar(1, batchSize);
-        BatchedVector ds_bar(1, batchSize);
-        BatchedVector dz_x_bar(n, batchSize);
-        std::vector<double> zero_n(n, 0.0);
-        cuda_set(dx_bar, zero_n, n);
-        std::vector<double> zero1 = {0.0};
-        cuda_set(dz_bar, zero1, 1);
-        cuda_set(ds_bar, zero1, 1);
-        std::vector<double> ej(n, 0.0);
-        ej[j_dz_x] = 1.0;
-        cuda_set(dz_x_bar, ej, n);
-
-        backward_with_dz_x(*solver.diff_state(),
-                           dx_bar, dz_bar, ds_bar, &dz_x_bar, solver, 0);
-        cudaDeviceSynchronize();
-
-        auto dq = cuda_get(solver.diff_state()->dq);
-        cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
-        return dq;
-    };
-
-    int j = 2;
-    auto analytic = solve_with_dz_x(j);
-
-    double eps = 1e-6;
-    std::vector<double> fd(n, 0.0);
-    for (int k = 0; k < n; ++k) {
-        std::vector<double> qp = q; qp[k] += eps;
-        std::vector<double> qm = q; qm[k] -= eps;
-        auto z_p = solve_zx(qp);
-        auto z_m = solve_zx(qm);
-        fd[k] = (z_p[j] - z_m[j]) / (2.0 * eps);
-    }
-
-    for (int k = 0; k < n; ++k) {
-        EXPECT_NEAR(analytic[k], fd[k], 1e-3)
-            << "dz_x dq[" << k << "] analytic=" << analytic[k]
-            << " fd=" << fd[k];
-    }
-}
-
-// Woodbury forward + direct-x backward. The Woodbury KKT solver is opt-in
-// (kktSolverType=Woodbury) and accepts direct-x nonneg cones in the forward
-// solve, but DiffWoodbury has no x-cone adjoint path. The backward must
-// therefore route through the general DiffKKT/cuDSS adjoint while the
-// forward still uses Woodbury. This test pins that composition: the
-// Woodbury-forward gradient must match the all-cuDSS gradient.
-//
-// Problem (Woodbury-compatible: diagonal P, one zero cone, k_total<n):
-//   n=3, m=1.  P = I.  A = [1 0 0], b = 0.5  →  x[0] = 0.5.
-//   direct-x nonneg on {1, 2}.  q = (0, -1, -2)  →  x ≈ (0.5, 1, 2),
-//   cone inactive.
-TEST(XConeBackwardCuda, WoodburyForwardDirectXBackwardMatchesCuDSS) {
-    constexpr int batchSize = 1;
-    constexpr int n = 3, m = 1;
-
-    std::vector<int64_t> P_ro = {0, 1, 2, 3};
-    std::vector<int64_t> P_ci = {0, 1, 2};
-    std::vector<double>  P_val = {1.0, 1.0, 1.0};
-    std::vector<int64_t> A_ro = {0, 1};
-    std::vector<int64_t> A_ci = {0};
-    std::vector<double>  A_val = {1.0};
-    std::vector<double>  b   = {0.5};
-    std::vector<double>  q   = {0.0, -1.0, -2.0};
-    std::vector<double>  dx  = {1.0, 1.0, 1.0};
-
-    auto solve_and_backward = [&](KKTSolverType kkt_type,
-                                  std::vector<double>& dq_out,
-                                  std::vector<double>& dP_out,
-                                  bool& is_woodbury) {
-        Cones cones{};
-        cones.numZeroCones = 1;
-        cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {1, 2}});
-
-        Settings settings;
-        settings.verbose = false;
-        settings.enableGrad = true;
-        settings.ipm.kktSolverType = kkt_type;
 
         CompiledSolver solver(n, m, batchSize,
                               P_ro.data(), P_ci.data(), P_val.size(),
                               A_ro.data(), A_ci.data(), A_val.size(),
                               cones, settings);
-        is_woodbury = solver.kkt->isWoodbury();
 
         double* d_P = cuda_upload(P_val);
         double* d_A = cuda_upload(A_val);
@@ -655,28 +567,69 @@ TEST(XConeBackwardCuda, WoodburyForwardDirectXBackwardMatchesCuDSS) {
         backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, 0);
         cudaDeviceSynchronize();
 
-        dq_out = cuda_get(solver.diff_state()->dq);
-        dP_out = cuda_get(solver.diff_state()->dP_values);
+        dq_slack = cuda_get(solver.diff_state()->dq);
+        dP_slack = cuda_get(solver.diff_state()->dP_values);
 
         cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
-    };
-
-    std::vector<double> dq_wb, dP_wb, dq_cudss, dP_cudss;
-    bool wb_selected = false, cudss_selected = false;
-    solve_and_backward(KKTSolverType::Woodbury, dq_wb, dP_wb, wb_selected);
-    solve_and_backward(KKTSolverType::CuDSS, dq_cudss, dP_cudss, cudss_selected);
-
-    // The Woodbury request must actually have produced a Woodbury forward
-    // solver — otherwise the test isn't exercising the composition.
-    EXPECT_TRUE(wb_selected) << "kktSolverType=Woodbury did not select Woodbury";
-    EXPECT_FALSE(cudss_selected) << "kktSolverType=CuDSS selected Woodbury";
-
-    ASSERT_EQ(dq_wb.size(), dq_cudss.size());
-    for (size_t i = 0; i < dq_wb.size(); ++i) {
-        EXPECT_NEAR(dq_wb[i], dq_cudss[i], 1e-4) << "dq[" << i << "] disagree";
     }
-    ASSERT_EQ(dP_wb.size(), dP_cudss.size());
-    for (size_t k = 0; k < dP_wb.size(); ++k) {
-        EXPECT_NEAR(dP_wb[k], dP_cudss[k], 1e-4) << "dP[" << k << "] disagree";
+
+    std::vector<double> dq_direct, dP_direct;
+    {
+        constexpr int m = 0;
+        std::vector<int64_t> A_ro = {0};
+        std::vector<int64_t> A_ci = {};
+
+        Cones cones{};
+        SupportedXConeT gp_xc{};
+        gp_xc.kind = XConeKind::GenPower;
+        gp_xc.indices = {0, 1, 2, 3};
+        gp_xc.gen_power_alphas = {0.5, 0.5};
+        gp_xc.gen_power_dim2 = 2;
+        cones.dir_cones.push_back(std::move(gp_xc));
+
+        Settings settings;
+        settings.verbose = false;
+        settings.enableGrad = true;
+        settings.ipm.equilibrationSettings.enable = false;
+
+        CompiledSolver solver(n, m, batchSize,
+                              P_ro.data(), P_ci.data(), P_val.size(),
+                              A_ro.data(), A_ci.data(), 0,
+                              cones, settings);
+
+        double* d_P = cuda_upload(P_val);
+        double* d_A = nullptr; cudaMalloc(&d_A, sizeof(double));
+        double* d_q = cuda_upload(q);
+        double* d_b = nullptr; cudaMalloc(&d_b, sizeof(double));
+        solver.solveAll(d_P, d_A, d_q, d_b);
+        cudaDeviceSynchronize();
+
+        BatchedVector dx_bar(n, batchSize);
+        BatchedVector dz_bar(1, batchSize);
+        BatchedVector ds_bar(1, batchSize);
+        cuda_set(dx_bar, dx, n);
+        std::vector<double> zero1 = {0.0};
+        cuda_set(dz_bar, zero1, 1);
+        cuda_set(ds_bar, zero1, 1);
+
+        backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, 0);
+        cudaDeviceSynchronize();
+
+        dq_direct = cuda_get(solver.diff_state()->dq);
+        dP_direct = cuda_get(solver.diff_state()->dP_values);
+
+        cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
+    }
+
+    ASSERT_EQ(dq_slack.size(), dq_direct.size());
+    for (size_t i = 0; i < dq_slack.size(); ++i) {
+        EXPECT_NEAR(dq_slack[i], dq_direct[i], 1e-3)
+            << "dq[" << i << "] disagree";
+    }
+
+    ASSERT_EQ(dP_slack.size(), dP_direct.size());
+    for (size_t k = 0; k < dP_slack.size(); ++k) {
+        EXPECT_NEAR(dP_slack[k], dP_direct[k], 1e-3)
+            << "dP[" << k << "] disagree";
     }
 }

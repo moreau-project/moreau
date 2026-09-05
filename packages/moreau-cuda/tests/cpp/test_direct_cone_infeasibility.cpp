@@ -1,8 +1,8 @@
-// test_xcone_infeasibility.cpp
+// test_direct_cone_infeasibility.cpp
 //
 // HSDE infeasibility / unboundedness detection on the CUDA path with
 // direct-x (xcone) constraints. Mirrors packages/moreau-cpu tests
-// xcone_infeasibility.rs. The bug being pinned is that the
+// direct_cone_infeasibility.rs. The bug being pinned is that the
 // primal-infeasibility certificate `‖A^T z − Σ_J E_J^T z_x‖ → 0` was
 // missing the direct-x term, so direct-x infeasible problems used to fall
 // through to NumericalError or MaxIterations.

@@ -1,7 +1,7 @@
 """4-way direct-x vs slack SOC benchmark: {CPU, CUDA} × {slack, direct}.
 
 Run:
-    uv run python packages/moreau/tests/python/bench/bench_xcone_cuda.py
+    uv run python packages/moreau/tests/python/bench/bench_direct_cone_cuda.py
 
 Same problem instance runs through all four paths via `moreau.Solver`
 with `device='cpu'` vs `device='cuda'` and Cones configured for slack

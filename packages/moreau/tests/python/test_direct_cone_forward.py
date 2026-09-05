@@ -4,7 +4,7 @@ Compares moreau.Solver with `dir_cones=...` against the equivalent slack
 form across CPU + CUDA backends, and covers the `enable_grad=True`
 construction flag for each supported direct-x kind. Backward parity
 (slack reference + finite differences + torch/jax autograd) lives in
-test_xcone_backward.py.
+test_direct_cone_backward.py.
 """
 
 import numpy as np

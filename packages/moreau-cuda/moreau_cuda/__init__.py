@@ -186,7 +186,9 @@ def _cones_to_cuda(cones: Cones) -> _CudaCones:
                 raise ValueError("DirectConeSpec(kind='power') requires alpha")
             alpha = float(alpha)
             if not (0.0 < alpha < 1.0):
-                raise ValueError(f"DirectConeSpec(kind='power') alpha must be in (0, 1), got {alpha}")
+                raise ValueError(
+                    f"DirectConeSpec(kind='power') alpha must be in (0, 1), got {alpha}"
+                )
             if len(indices) != 3:
                 raise ValueError(
                     f"DirectConeSpec(kind='power') requires exactly 3 indices, got {len(indices)}"

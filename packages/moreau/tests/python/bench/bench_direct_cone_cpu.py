@@ -1,7 +1,7 @@
 """Decision-gate benchmark: direct-x cones vs slack cones on CPU.
 
 Run:
-    uv run python packages/moreau/tests/python/bench/bench_xcone_cpu.py
+    uv run python packages/moreau/tests/python/bench/bench_direct_cone_cpu.py
 
 Both paths run through the same underlying Rust machinery
 (`moreau_cpu._cpu_solver.DefaultSolver` — `new` for slack, `new_with_xcones`

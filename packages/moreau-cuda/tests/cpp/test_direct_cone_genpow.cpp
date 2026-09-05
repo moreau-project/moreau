@@ -1,4 +1,4 @@
-// test_xcone_genpow_direct_x.cpp
+// test_direct_cone_genpow.cpp
 //
 // End-to-end direct-x GenPowerCone solves on CUDA.
 // GenPowerCone(α, dim2) = {(p,w) : ∏ p_i^αi ≥ ||w||₂, p_i ≥ 0}

@@ -19,10 +19,10 @@ direct-x and embeds the remaining blocks as slacks. All forms solve
 mathematically equivalent problems and converge to the same optimum
 (up to IPM tolerance).
 
-Outputs JSON of all trials; render with `summarize_xcone_showcase.py`.
+Outputs JSON of all trials; render with `summarize_direct_cone_showcase.py`.
 
 Usage:
-    uv run python scripts/bench_xcone_showcase.py [--out PATH] \\
+    uv run python scripts/bench_direct_cone_showcase.py [--out PATH] \\
         [--seeds 7,41,137] [--kinds soc,exp,...] [--devices cpu,cuda]
 """
 
@@ -403,7 +403,9 @@ def make_gen_power(
     n = dim1 + dim2
     alphas = [1.0 / dim1] * dim1  # uniform
     slack_cones = moreau.Cones(num_zero_cones=n_eq, gen_power_cone_params=[(alphas, dim2)])
-    dirx_xc = [moreau.DirectConeSpec(kind="gen_power", indices=list(range(n)), alphas=alphas, dim2=dim2)]
+    dirx_xc = [
+        moreau.DirectConeSpec(kind="gen_power", indices=list(range(n)), alphas=alphas, dim2=dim2)
+    ]
 
     def target_fn(rng):
         return rng.standard_normal(n) * 0.5
@@ -545,7 +547,9 @@ def make_mixed(label: str, parts, regime: str, seed_offset: int) -> Tuple[ConePr
                 out.append(moreau.DirectConeSpec(**kw))
         return out
 
-    dirdir_cones = moreau.Cones(num_zero_cones=n_eq_total, dir_cones=_shift_xcones(range(len(sub_p))))
+    dirdir_cones = moreau.Cones(
+        num_zero_cones=n_eq_total, dir_cones=_shift_xcones(range(len(sub_p)))
+    )
 
     # Hybrid form: block 0 declared direct-x, blocks 1.. embedded as slacks.
     # A_hybrid = [B_total; −I over the slack blocks' columns only].

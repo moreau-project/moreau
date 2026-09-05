@@ -1,7 +1,7 @@
-// test_xcone_endtoend.cpp
+// test_direct_cone_endtoend.cpp
 //
 // End-to-end direct-x nonneg QP solves on CUDA, cross-checked against the
-// CPU reference (packages/moreau-cpu tests xcone_nonneg_equivalence).
+// CPU reference (packages/moreau-cpu tests direct_cone_nonneg_equivalence).
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
 #include <cmath>
@@ -76,7 +76,7 @@ TEST(XConeEndToEndTest, SOCDirectXInteriorOptimum) {
 
 // ----------------------------------------------------------------------
 // Direct-x SOC with cone strictly active on the boundary: mirrors CPU
-// test xcone_soc_equivalence::test_soc_constraint_active_boundary.
+// test direct_cone_soc_equivalence::test_soc_constraint_active_boundary.
 // min 0.5 x'x + q'x with q = (1, 2, 0) pushes x[0] negative; KKT gives
 // μ=1.5, optimum x* = (0.5, -0.5, 0) on the SOC boundary.
 // ----------------------------------------------------------------------
@@ -235,7 +235,7 @@ TEST(XConeEndToEndTest, SOCDirectXNonUniformP) {
 
 // ----------------------------------------------------------------------
 // Dim-4 direct-x SOC, boundary active. Mirror of CPU test
-// xcone_soc_equivalence::test_soc_dim_4_active. With P=I and
+// direct_cone_soc_equivalence::test_soc_dim_4_active. With P=I and
 // q=(2, -1, 1.5, -0.5), solution lies on SOC boundary.
 // ----------------------------------------------------------------------
 // ----------------------------------------------------------------------

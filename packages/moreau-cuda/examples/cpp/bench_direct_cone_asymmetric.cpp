@@ -6,7 +6,7 @@
  *   direct-x: dir_cones with Exp/Power/GenPower  (cone augmentation in (1,1) block)
  *
  * Usage:
- *   ./bench_xcone_asymmetric
+ *   ./bench_direct_cone_asymmetric
  *
  * Output: timing table comparing slack vs direct-x for K=1,10,100,1000 stacked cones.
  */

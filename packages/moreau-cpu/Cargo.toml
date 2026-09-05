@@ -214,12 +214,12 @@ name = "bench_genpow_corrector"
 path = "examples/rust/bench_genpow_corrector.rs"
 
 [[example]]
-name = "bench_xcone_asymmetric"
-path = "examples/rust/bench_xcone_asymmetric.rs"
+name = "bench_direct_cone_asymmetric"
+path = "examples/rust/bench_direct_cone_asymmetric.rs"
 
 [[example]]
-name = "bench_xcone_genpow_pd"
-path = "examples/rust/bench_xcone_genpow_pd.rs"
+name = "bench_direct_cone_genpow_pd"
+path = "examples/rust/bench_direct_cone_genpow_pd.rs"
 
 # -------------------------------
 # integration tests

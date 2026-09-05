@@ -481,8 +481,9 @@ mod xcone_equilibration_tests {
         let dir_cones = vec![SupportedXConeT::SecondOrderXConeT(vec![0, 1, 2])];
 
         let settings = DefaultSettings::default();
-        let mut data =
-            DefaultProblemData::<f64>::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, &settings);
+        let mut data = DefaultProblemData::<f64>::new_with_xcones(
+            &P, &q, &A, &b, &cones, &dir_cones, &settings,
+        );
         let composite = CompositeCone::<f64>::new(&data.cones);
         data.equilibrate(&composite, &settings);
 
@@ -513,8 +514,9 @@ mod xcone_equilibration_tests {
         let dir_cones = vec![SupportedXConeT::NonnegativeXConeT(vec![0, 1, 2])];
 
         let settings = DefaultSettings::default();
-        let mut data =
-            DefaultProblemData::<f64>::new_with_xcones(&P, &q, &A, &b, &cones, &dir_cones, &settings);
+        let mut data = DefaultProblemData::<f64>::new_with_xcones(
+            &P, &q, &A, &b, &cones, &dir_cones, &settings,
+        );
         let composite = CompositeCone::<f64>::new(&data.cones);
         data.equilibrate(&composite, &settings);
 

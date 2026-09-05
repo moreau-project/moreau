@@ -1,6 +1,6 @@
 """Render showcase speedup tables from one or more bench JSON files.
 
-    uv run python summarize_xcone_showcase.py bench1.json [bench2.json ...] [--cv 0.20]
+    uv run python summarize_direct_cone_showcase.py bench1.json [bench2.json ...] [--cv 0.20]
 
 Speedup = geomean over seeds of (slack_ms / other_ms); >1x = `other` faster.
 All trials with ms>0 count — a slack run that stalls at MaxIterations still

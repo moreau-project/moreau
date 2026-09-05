@@ -104,7 +104,9 @@ def test_direct_x_warm_start_reduces_iters(device):
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        dir_cones=[moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1)]
+        dir_cones=[
+            moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1)
+        ]
     )
 
     settings = moreau.Settings(
@@ -156,7 +158,9 @@ def test_direct_x_warm_start_without_z_x_uses_default_init(device):
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
-        dir_cones=[moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1)]
+        dir_cones=[
+            moreau.DirectConeSpec(kind="gen_power", indices=[0, 1, 2], alphas=[0.3, 0.7], dim2=1)
+        ]
     )
     settings = moreau.Settings(
         device=device,

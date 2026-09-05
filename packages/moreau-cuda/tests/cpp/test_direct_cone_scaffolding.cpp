@@ -1,4 +1,4 @@
-// test_xcone_scaffolding.cpp
+// test_direct_cone_scaffolding.cpp
 //
 // Tests for the direct-x cone metadata scaffolding on CUDA:
 // - `Cones.dir_cones` stores user-supplied direct-x specs.
@@ -6,7 +6,7 @@
 // - `Cones::initialize()` populates the direct-x metadata layout.
 //
 // These tests are the CUDA counterpart of the Rust-side
-// `compositexcone::tests` module, adapted to the C++ API shape.
+// `compositedirectcone::tests` module, adapted to the C++ API shape.
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
 #include "moreau/cones/cones.hpp"
@@ -645,7 +645,7 @@ TEST(XConeScaffoldingTest, KKTIndexMapForDenseSOCXCone) {
     // (The earlier sorted-position expectation predated the interleaved-
     // index KKT-layout fix and silently mis-scattered Hs for unsorted
     // cones; `KKTIndexMapInterleavedSOCXCone` end-to-end in
-    // test_xcone_endtoend pins the numerical consequence.)
+    // test_direct_cone_endtoend pins the numerical consequence.)
     //
     // P has just the diagonal so the x-cone footprint contributes all
     // off-diagonal upper-tri positions — a good structural stress test.

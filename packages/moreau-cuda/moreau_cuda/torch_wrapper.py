@@ -428,7 +428,9 @@ class TorchSolver:
         # on `getattr(self._cuda_cones, 'dir_cones', [])` calls inside
         # `_CudaSolveFunction.forward`. Pre-summing here keeps the hot
         # path numerical-only.
-        self._total_x_dim = sum(len(xc.indices) for xc in getattr(self._cuda_cones, "dir_cones", []))
+        self._total_x_dim = sum(
+            len(xc.indices) for xc in getattr(self._cuda_cones, "dir_cones", [])
+        )
 
         # Extract CSR structure and convert to GPU tensors
         self._P_row_offsets = np.asarray(P_csr.indptr, dtype=np.int64)
@@ -585,7 +587,9 @@ class TorchCompiledSolver:
         self._cuda_settings = _settings_to_cuda(settings)
         # See `_CudaSolveFunction.forward` — cache total direct dim so
         # dynamo doesn't trace into nanobind property accessors.
-        self._total_x_dim = sum(len(xc.indices) for xc in getattr(self._cuda_cones, "dir_cones", []))
+        self._total_x_dim = sum(
+            len(xc.indices) for xc in getattr(self._cuda_cones, "dir_cones", [])
+        )
 
         # Stored matrix values (set via setup)
         self._P_values: Optional[torch.Tensor] = None

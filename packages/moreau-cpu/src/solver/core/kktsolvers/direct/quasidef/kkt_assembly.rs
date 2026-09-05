@@ -852,7 +852,8 @@ mod xcone_assembly_tests {
         let A = CscMatrix::from(&[[1., 1., 1.]]);
         let cones = CompositeCone::new(&[SupportedConeT::<f64>::ZeroConeT(1)]);
         // Direct-x nonneg on x[1] and x[2]
-        let dir_cones = CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![1, 2])]);
+        let dir_cones =
+            CompositeXCone::<f64>::new(&[SupportedXConeT::NonnegativeXConeT(vec![1, 2])]);
 
         let (mut K, map) =
             assemble_kkt_matrix_with_xcones(&P, &A, &cones, &dir_cones, MatrixTriangle::Triu);

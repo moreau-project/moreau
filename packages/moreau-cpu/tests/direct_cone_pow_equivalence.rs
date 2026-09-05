@@ -6,7 +6,7 @@
 //! on are wrong here. The cone overrides `direct_x_*` to use the
 //! primal-barrier Hessian `μ·∇²F_primal(x)` directly in the augmented
 //! (1,1) KKT block (same pattern as ExpCone direct-x — see
-//! `xcone_exp_equivalence.rs`).
+//! `direct_cone_exp_equivalence.rs`).
 
 use moreau::{algebra::*, solver::*};
 

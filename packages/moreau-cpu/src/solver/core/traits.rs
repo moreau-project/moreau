@@ -44,7 +44,8 @@ pub trait Variables<T: FloatT>: std::fmt::Debug {
     type SE: Settings<T>;
 
     /// Compute the scaled duality gap.
-    fn calc_mu(&mut self, residuals: &Self::R, cones: &Self::C, dir_cones: &CompositeXCone<T>) -> T;
+    fn calc_mu(&mut self, residuals: &Self::R, cones: &Self::C, dir_cones: &CompositeXCone<T>)
+        -> T;
 
     /// Compute the KKT RHS for a pure Newton step.
     fn affine_step_rhs(
@@ -103,7 +104,11 @@ pub trait Variables<T: FloatT>: std::fmt::Debug {
 
     /// Compute the barrier function
     fn barrier(
-        &self, step: &Self, α: T, cones: &mut Self::C, dir_cones: &mut CompositeXCone<T>
+        &self,
+        step: &Self,
+        α: T,
+        cones: &mut Self::C,
+        dir_cones: &mut CompositeXCone<T>,
     ) -> T;
 
     /// Rescale variables, e.g. to renormalize iterates
