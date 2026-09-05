@@ -117,8 +117,9 @@ _from_device_like(device_ptr::Ptr{Float64}, len::Int, ::AbstractVector) = _from_
 """
     cuda_available() -> Bool
 
-Return `true` if the CUDA backend is available (CUDA JLL loaded successfully).
+Return `true` if the CUDA backend can be loaded. The CUDA artifact is installed
+on demand only when a compatible driver or `MOREAU_CUDA_VERSION` is detected.
 """
 function cuda_available()
-    return Moreau_CUDA_jll.is_available()
+    return _load_cuda_library()
 end

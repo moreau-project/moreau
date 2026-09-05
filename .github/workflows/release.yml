@@ -3,11 +3,11 @@
 # This is stage 1 of a 3-stage release pipeline:
 #   1. release.yml    — build wheels, create GitHub Release (this workflow)
 #   2. test-release.yml — test wheels from a GitHub Release (re-triggerable)
-#   3. publish.yml    — push to PyPI + update Julia packages
+#   3. publish.yml    — push Python wheels to PyPI
 #
 # Usage:
 #   gh workflow run release.yml
-#   gh workflow run release.yml -f version=0.2.0 -f release_name=v0.2.0
+#   gh workflow run release.yml -f version=0.4.0 -f release_name=v0.4.0
 
 name: Release
 
@@ -15,11 +15,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Exact version (e.g., 0.2.0). Leave empty for dev version with timestamp.'
+        description: 'Exact package version (e.g., 0.4.0). Leave empty for a timestamped dev version.'
         required: false
         type: string
       release_name:
-        description: 'GitHub release name (e.g., v0.2.0). Leave empty for dev-YYYYMMDD-HHMMSS.'
+        description: 'GitHub release/tag (e.g., v0.4.0). Leave empty for dev-YYYYMMDD-HHMMSS.'
         required: false
         type: string
 
@@ -47,6 +47,7 @@ jobs:
             BASE=$(grep '^version = ' packages/moreau/pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
             VERSION="${BASE}.dev$(date -u +%Y%m%d%H%M%S)"
           fi
+          python3 scripts/bump_version.py "$VERSION" --pin-dependencies
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Resolved version: $VERSION"
 
@@ -71,20 +72,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Patch version in Cargo.toml and pyproject.toml
+      - name: Set release version
         env:
           VERSION: ${{ needs.resolve-version.outputs.version }}
-        run: |
-          # Patch pyproject.toml (PEP 440 version)
-          echo "Patching moreau-cpu pyproject.toml version to: $VERSION"
-          sed -i 's/^version = ".*"/version = "'"$VERSION"'"/' packages/moreau-cpu/pyproject.toml
-          grep "^version" packages/moreau-cpu/pyproject.toml
-
-          # Patch Cargo.toml (SemVer - convert .dev to -dev)
-          CARGO_VERSION="${VERSION/.dev/-dev}"
-          echo "Patching moreau-cpu Cargo.toml version to: $CARGO_VERSION"
-          sed -i '0,/^version = ".*"/{s/^version = ".*"/version = "'"$CARGO_VERSION"'"/}' packages/moreau-cpu/Cargo.toml
-          grep "^version" packages/moreau-cpu/Cargo.toml | head -1
+        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
 
       - name: Build CPU wheel in manylinux container
         env:
@@ -134,20 +125,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Patch version in Cargo.toml and pyproject.toml
+      - name: Set release version
         env:
           VERSION: ${{ needs.resolve-version.outputs.version }}
-        run: |
-          # Patch pyproject.toml (PEP 440 version)
-          echo "Patching moreau-cpu pyproject.toml version to: $VERSION"
-          sed -i '' 's/^version = ".*"/version = "'"$VERSION"'"/' packages/moreau-cpu/pyproject.toml
-          grep "^version" packages/moreau-cpu/pyproject.toml
-
-          # Patch Cargo.toml (SemVer - convert .dev to -dev)
-          CARGO_VERSION="${VERSION/.dev/-dev}"
-          echo "Patching moreau-cpu Cargo.toml version to: $CARGO_VERSION"
-          sed -i '' '1,/^version = ".*"/{s/^version = ".*"/version = "'"$CARGO_VERSION"'"/;}' packages/moreau-cpu/Cargo.toml
-          grep "^version" packages/moreau-cpu/Cargo.toml | head -1
+        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -171,7 +152,7 @@ jobs:
   # GPU wheels: CUDA 12.2 and 13.0 × {x86_64, aarch64} (Docker, nanobind abi3-py312).
   # aarch64 uses PyTorch cu128 (first index with aarch64 CUDA wheels; cu121 is
   # x86_64-only). CUDA_ARCHITECTURES drops sm_75 on aarch64 (no Turing on ARM
-  # server SoCs) and adds sm_87 for Jetson/Thor/Orin.
+  # server SoCs) and adds sm_87 for Jetson Orin.
   build-gpu-wheel:
     needs: [resolve-version]
     runs-on: ${{ matrix.runner }}
@@ -240,9 +221,9 @@ jobs:
           PACKAGE: ${{ matrix.package_name }}
           CUDA_MAJOR: ${{ matrix.cuda_major }}
         run: |
+          python3 scripts/bump_version.py "$VERSION" --pin-dependencies
           echo "Patching package to: $PACKAGE version: $VERSION cuda_major: $CUDA_MAJOR"
           sed -i "s/^name = \"moreau-cuda\"/name = \"$PACKAGE\"/" packages/moreau-cuda/pyproject.toml
-          sed -i 's/^version = ".*"/version = "'"$VERSION"'"/' packages/moreau-cuda/pyproject.toml
           sed -i "s/nvidia-cudss-cu12/nvidia-cudss-cu${CUDA_MAJOR}/g" packages/moreau-cuda/pyproject.toml
           sed -i "s/==12\.\*/==${CUDA_MAJOR}.\*/g" packages/moreau-cuda/pyproject.toml
           cat packages/moreau-cuda/pyproject.toml
@@ -288,20 +269,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Patch versions
+      - name: Set release version
         env:
           VERSION: ${{ needs.resolve-version.outputs.version }}
-        run: |
-          echo "Patching moreau wrapper version to: $VERSION"
-
-          sed -i 's/^version = ".*"/version = "'"$VERSION"'"/' packages/moreau/pyproject.toml
-          grep "^version" packages/moreau/pyproject.toml
-
-          sed -i 's/__version__ = ".*"/__version__ = "'"$VERSION"'"/' packages/moreau/python/moreau/__init__.py
-          grep "__version__" packages/moreau/python/moreau/__init__.py
-
-          sed -i 's/moreau-cpu>=[0-9][0-9.]*/moreau-cpu>='"$VERSION"'/' packages/moreau/pyproject.toml
-          grep "moreau-cpu" packages/moreau/pyproject.toml
+        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
 
       - name: Build wheel
         run: |
@@ -336,6 +307,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set release version
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
+
       - name: Build CPU C API in manylinux container
         env:
           VERSION: ${{ needs.resolve-version.outputs.version }}
@@ -358,7 +334,7 @@ jobs:
           python3 packages/moreau-cpu/scripts/scrub_binary.py dist/c-api/lib/libmoreau_cpu.so
 
           # Package as tarball (Julia Artifacts expects lib/ inside)
-          tar czf "moreau-cpu-linux-${ARCH}.tar.gz" -C dist/c-api lib/libmoreau_cpu.so
+          tar czf "moreau-cpu-linux-${ARCH}.tar.gz" -C dist/c-api lib/libmoreau_cpu.so include LICENSE NOTICE
 
       - uses: actions/upload-artifact@v4
         with:
@@ -374,13 +350,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Set release version
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
+
       - name: Build CPU C API
         run: packages/moreau-c/build.sh cpu
 
       - name: Scrub and package
         run: |
           python3 packages/moreau-cpu/scripts/scrub_binary.py dist/c-api/lib/libmoreau_cpu.dylib
-          tar czf moreau-cpu-macos-arm64.tar.gz -C dist/c-api lib/libmoreau_cpu.dylib
+          tar czf moreau-cpu-macos-arm64.tar.gz -C dist/c-api lib/libmoreau_cpu.dylib include LICENSE NOTICE
 
       - uses: actions/upload-artifact@v4
         with:
@@ -389,7 +370,7 @@ jobs:
           retention-days: 7
 
   # CUDA C libraries: Linux x86_64 + aarch64 (Docker, per CUDA version).
-  # aarch64 CUDA_ARCHITECTURES targets ARM server/embedded GPUs: sm_87 (Orin/Thor),
+  # aarch64 CUDA_ARCHITECTURES targets ARM server/embedded GPUs: sm_87 (Orin),
   # sm_90 (Grace Hopper), sm_120 (Blackwell, CUDA 13+). sm_75/80/86/89 are Turing/
   # Ampere/Ada desktop-x86 parts with no ARM-host equivalent.
   build-c-lib-cuda:
@@ -450,6 +431,11 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Set release version
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
+
       - name: Build CUDA C API in Docker
         env:
           CUDSS_VER: ${{ env.CUDSS_VERSION }}
@@ -482,7 +468,7 @@ jobs:
 
           # Package entire lib/ dir so the real .so.X.Y.Z file and soname
           # symlinks (libmoreau_cuda.so -> .so.0 -> .so.X.Y.Z) are all included.
-          tar czf "moreau-${CUDA_LABEL}-linux-${ARCH}.tar.gz" -C staging lib/
+          tar czf "moreau-${CUDA_LABEL}-linux-${ARCH}.tar.gz" -C staging lib/ include/ LICENSE NOTICE
 
       - uses: actions/upload-artifact@v4
         with:
@@ -532,11 +518,11 @@ jobs:
         run: |
           for whl in dist-wheels/*.whl; do
             echo "Validating: $whl"
-            python3 -c "import zipfile; zipfile.ZipFile('$whl').testzip() or print('ZIP OK')"
+            python3 -c "import zipfile; assert zipfile.ZipFile('$whl').testzip() is None; print('ZIP OK')"
             python3 -c "import zipfile, sys; z=zipfile.ZipFile('$whl'); m=[n for n in z.namelist() if n.endswith('/METADATA')]; sys.exit(1) if not m else print('METADATA OK:', m[0])"
             sha256sum "$whl"
           done
-          python3 scripts/validate_release_wheels.py dist-wheels
+          python3 scripts/validate_release_wheels.py dist-wheels --require-complete --c-library-dir dist-clibs
 
           echo "=== C library tarballs ==="
           for tb in dist-clibs/*.tar.gz; do
@@ -557,12 +543,26 @@ jobs:
           fi
           echo "Release name: $(grep name= $GITHUB_OUTPUT | cut -d= -f2)"
 
+      - name: Set up Julia for artifact manifest
+        uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.12'
+
+      - name: Generate Julia artifact manifest
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.name }}
+        run: |
+          julia packages/moreau-julia/Moreau.jl/scripts/generate_artifacts.jl \
+            "$RELEASE_TAG" dist-clibs
+          cp packages/moreau-julia/Moreau.jl/Artifacts.toml \
+            moreau-julia-Artifacts.toml
+
       - name: Package Julia source tarball
         run: |
           tar czf moreau-julia-src.tar.gz \
             --exclude='Moreau.jl/Manifest.toml' \
             -C packages/moreau-julia \
-            Moreau.jl Moreau_CPU_jll.jl Moreau_CUDA_jll.jl
+            Moreau.jl
           echo "Julia source tarball:"
           tar tzf moreau-julia-src.tar.gz | head -20
           du -h moreau-julia-src.tar.gz
@@ -572,18 +572,22 @@ jobs:
           mkdir -p dist-release
           cp dist-wheels/*.whl dist-release/
           cp dist-clibs/*.tar.gz dist-release/
+          cp moreau-julia-Artifacts.toml dist-release/
           cp moreau-julia-src.tar.gz dist-release/
           echo "=== Release assets ==="
           ls -la dist-release/
           du -h dist-release/*
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.name }}
           name: ${{ steps.release.outputs.name }}
+          target_commitish: ${{ github.sha }}
           files: dist-release/*
           body: |
+            ChatGPT generated:
+
             ## Release from commit ${{ github.sha }}
 
             ### Python Wheels
@@ -607,7 +611,7 @@ jobs:
             pip install moreau-*.whl moreau_cpu-*.whl moreau_cuda12-*.whl
             ```
 
-            Linux aarch64 CUDA wheels target Grace Hopper (sm_90), Orin/Thor
+            Linux aarch64 CUDA wheels target Grace Hopper (sm_90), Orin
             (sm_87), and Blackwell sm_120 on CUDA 13. They are build-validated
             only; run `python -m moreau check` after install to verify.
 
@@ -623,10 +627,12 @@ jobs:
             | `moreau-cuda13-linux-x86_64.tar.gz` | Linux x86_64 | CUDA 13 |
             | `moreau-cuda13-linux-aarch64.tar.gz` | Linux aarch64 | CUDA 13 |
 
-            Each tarball contains `lib/libmoreau_cpu.{so,dylib}` or `lib/libmoreau_cuda.so`.
+            Each tarball contains the shared library, `include/moreau.h`, `LICENSE`, and `NOTICE`.
 
-            ---
-            Generated with [Claude Code](https://claude.com/claude-code)
+            CUDA artifacts are built and validated on CPU runners. CUDA runtime
+            testing is opt-in while GPU runners are unavailable; the release QA
+            summary records whether it ran.
+
           prerelease: true
           generate_release_notes: false
         env:
@@ -636,6 +642,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.release.outputs.name }}
+          RUN_GPU_TESTS: ${{ vars.MOREAU_GPU_RUNNERS_ENABLED == 'true' }}
         run: |
           echo "Triggering test-release for tag: $RELEASE_TAG"
-          gh workflow run test-release.yml -f "release_tag=$RELEASE_TAG"
+          gh workflow run test-release.yml --ref "$RELEASE_TAG" \
+            -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"

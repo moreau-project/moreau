@@ -146,7 +146,7 @@ typeof(sol.x)  # CuVector{Float64}
 Check availability:
 
 ```julia
-Moreau.cuda_available()  # true if CUDA backend is loaded
+Moreau.cuda_available()  # lazily installs a compatible artifact when CUDA is present
 ```
 
 For CUDA version selection (CUDA 12 vs 13), see the [installation section](jump-integration.md#cuda-version-selection).

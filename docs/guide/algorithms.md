@@ -12,7 +12,7 @@ $$
 
 with $\mathcal{K}_1, \mathcal{K}_2$ products of convex cones: $\mathcal{K}_2$
 constrains the slack $s = b - Ax$ (the usual conic form), while $\mathcal{K}_1$
-constrains $x$ directly ("direct" cones). It then differentiates through the
+constrains $x$ through direct conic constraints. It then differentiates through the
 solution map. Most pieces below come from published papers (cited); the parts
 original to Moreau — the **direct extension**, a primal–dual scaling and
 higher-order corrector for the **generalized power cone**, and the
@@ -22,7 +22,7 @@ structure-exploiting GPU KKT backends — each get their own section.
 
 - **Interior-point method (IPM).** Default solver: a primal-dual IPM on the
   homogeneous embedding, based on **Clarabel** [1] (GPU port **CuClarabel** [2])
-  and extended for direct cones. The embedding and the Newton iteration are
+  and extended for direct conic constraints. The embedding and the Newton iteration are
   spelled out in the next two sections.
 - **Active-set.** Handles only the zero+nonneg special case (CPU) — i.e. a
   dense, two-sided-inequality QP, no general cones. The vendored solver is
@@ -57,7 +57,7 @@ $$
 \qquad \tau, \kappa \ge 0, \;\; \tau\kappa = 0,
 $$
 
-where $x_J = E_J x$ is the sub-vector of $x$ that direct cone $J$ constrains,
+where $x_J = E_J x$ is the sub-vector of $x$ that direct conic constraint $J$ constrains,
 $z_x$ its dual, and $E_J$ the selection of that cone's coordinates.
 
 The two cone families enter the embedding differently, and that difference is
@@ -118,14 +118,14 @@ Each iteration is a **damped Newton step** on this relaxed system $F_\mu$:
 Iterate until the relative residuals $r_x, r_z, r_\tau$ and the gap fall below
 tolerance, then recover $(x, s, z)/\tau$.
 
-## The direct extension (new in Moreau)
+## Direct conic constraints (new in Moreau)
 
-The slack/direct split in the embedding shows up again in the linearized
-Newton step — and this is where direct earns its keep. A slack cone's scaling
+Direct conic constraints also change the linearized Newton system. A slack
+cone's scaling
 reaches the $x$-block of the KKT system only through $A$ (as $A^\top H_s^{-1} A$);
-a direct cone's lands in it directly:
+the scaling for a direct conic constraint enters that block directly:
 
-- **Linearizing its complementarity.** Each direct cone carries the (relaxed)
+- **Linearizing its complementarity.** Each direct conic constraint carries the (relaxed)
   complementarity $x_J \circ z_x = \mu e$, where $x_J = E_J x$ is the constrained
   slice and $z_x$ its dual. This is linearized *exactly* like a slack cone's
   $s \circ z$: NT scaling for symmetric cones, the barrier Hessian for
@@ -223,8 +223,8 @@ this term; Moreau matches them and extends it to the $N$-dimensional cone.
 ### A primal-direct corrector for the direct asymmetric cones
 
 The exponential and power cones in **direct** mode have no upstream analog —
-Clarabel has no direct cones at all. With $F \ne F^*$ the primal↔dual
-self-duality the symmetric direct cones exploit is unavailable, so Moreau
+Clarabel has no direct conic constraints at all. With $F \ne F^*$ the primal↔dual
+self-duality used for symmetric cones is unavailable, so Moreau
 scales these with the **dual-only primal barrier**
 $H_{s,x} = \mu\,\nabla^2 F_\text{primal}(x)$ and supplies a **primal-direct**
 third-order corrector
@@ -324,7 +324,7 @@ inherits Clarabel's [1] conditioning stack:
   rescaled by diagonals $d, e$ — up to 10 Ruiz sweeps equalizing the row/column
   $\infty$-norms, with the cumulative scaling clipped to $[10^{-4}, 10^{4}]$ —
   which sharply cuts the condition number. The rescaling is **cone-aware**: a cone
-  that needs one shared scale across a slice (SOC, PSD, the direct cones) gets
+  that needs one shared scale across a slice (such as SOC or PSD) gets
   the geometric mean of $d$ over that slice, so the scaling commutes with cone
   membership and the unscaled iterate stays feasible.
 - **Static regularization + quasidefiniteness.** The reduced KKT is symmetric

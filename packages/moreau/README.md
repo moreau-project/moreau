@@ -11,9 +11,10 @@ subject to  Ax + s = b
             x ∈ K₁,  s ∈ K₂
 ```
 
-where `K₂` constrains the slack `s` and `K₁` constrains `x` directly (direct-x
-cones); each is a product of convex cones (zero, nonnegative, second-order,
-exponential, power, generalized power, PSD).
+where `s ∈ K₂` constrains the slack and `x ∈ K₁` is a **Direct Conic
+Constraint**. Both cones are products of nonnegative, second-order, exponential,
+power, generalized power, and PSD cones. `K₂` also admits the zero cone;
+`K₁` admits the free cone instead.
 
 ```bash
 pip install moreau            # CPU only

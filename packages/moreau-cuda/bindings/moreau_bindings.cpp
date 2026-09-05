@@ -2294,5 +2294,5 @@ NB_MODULE(_moreau_cuda, m) {
             "Set equilibration factors from device pointers (for restoring state)");
 
     // Version info
-    m.attr("__version__") = "0.3.3";
+    m.attr("__version__") = "0.4.0";
 }

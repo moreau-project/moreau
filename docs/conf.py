@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath("../packages/moreau/python"))
 project = "Moreau"
 copyright = "2026, The Moreau Project"
 author = "The Moreau Project"
-release = "0.3.3"
+release = "0.4.0"
 
 # -- General configuration ---------------------------------------------------
 extensions = [
@@ -72,10 +72,10 @@ autosummary_generate = True
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    "torch": ("https://pytorch.org/docs/stable/", None),
-    "jax": ("https://jax.readthedocs.io/en/latest/", None),
-    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "torch": ("https://docs.pytorch.org/docs/stable/", None),
+    "jax": ("https://docs.jax.dev/en/latest/", None),
 }
+intersphinx_timeout = 15
 
 # Source file settings
 templates_path = ["_templates"]
@@ -125,6 +125,3 @@ pygments_dark_style = "monokai"
 
 # Custom CSS
 html_css_files = ["custom.css"]
-
-# Suppress specific warnings
-suppress_warnings = ["autodoc.import_object"]
