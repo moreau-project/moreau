@@ -32,7 +32,7 @@ dependencies = [
     # Bounds must match the cuDSS the wheel was built against
     # (Dockerfile.wheel): cudssConfigParam_t enum values shift between
     # minor versions, so a mismatched runtime is silently misconfigured.
-    "nvidia-cudss-cu12>=0.7.1,<0.8",
+    "nvidia-cudss-cu12>=0.8.0,<0.9",
     "cuda-toolkit[cusolver,cusparse,cudart,nvjitlink] ==12.*",
 ]
 

@@ -29,7 +29,7 @@ FROM quay.io/pypa/manylinux_2_28_${ARCH} AS builder
 
 ARG ARCH
 ARG CUDA_ARCH_LABEL
-ARG CUDSS_VERSION=0.7.1.4
+ARG CUDSS_VERSION=0.8.0.10
 ARG CUDA_VERSION=12.2
 ARG CUDA_MAJOR=12
 ARG CUDSS_SUFFIX=cuda12
@@ -66,10 +66,10 @@ ENV CUDA_HOME="/usr/local/cuda"
 WORKDIR /opt
 RUN CUDSS_TARBALL="libcudss-linux-${CUDA_ARCH_LABEL}-${CUDSS_VERSION}_${CUDSS_SUFFIX}-archive.tar.xz" \
     && case "${CUDSS_VERSION}-${CUDA_ARCH_LABEL}-${CUDSS_SUFFIX}" in \
-        0.7.1.4-x86_64-cuda12) CUDSS_SHA256="946571d9ea164f948e402dd97a14541cb90fbec800336cfa7ae644af5937632f" ;; \
-        0.7.1.4-x86_64-cuda13) CUDSS_SHA256="84b34ebe7fad40ec10f2aab2957a63b6070bd8ce16e3ada3e6bcac7317256347" ;; \
-        0.7.1.4-sbsa-cuda12)   CUDSS_SHA256="a4ddd47ad711243bbea0da2d6520799595cc8d79aa740927e0855c0b8cb69cf8" ;; \
-        0.7.1.4-sbsa-cuda13)   CUDSS_SHA256="de8295cb6773992bd1ca7e2ad93caae1fd18eba39175f0101b85d53abd3e0179" ;; \
+        0.8.0.10-x86_64-cuda12) CUDSS_SHA256="29716a05c64b28531309afcb7a9dd5044081a43197e72bdd0fbf29e9b4ee4707" ;; \
+        0.8.0.10-x86_64-cuda13) CUDSS_SHA256="ba18f5fd80dcbbe905d158caac5b3061d848442bb5abd477b5f296b4257a4937" ;; \
+        0.8.0.10-sbsa-cuda12)   CUDSS_SHA256="949426015c986897df7677435b450d2740e8849d16b07cdc13db27ea32ebb18b" ;; \
+        0.8.0.10-sbsa-cuda13)   CUDSS_SHA256="c5fe7e5796792e10c3c5971bbb169ab3040ba61fe6fc99bdcbc02cf0f1ed9409" ;; \
         *) echo "No pinned cuDSS sha256 for ${CUDSS_VERSION} ${CUDA_ARCH_LABEL}/${CUDSS_SUFFIX}; update the checksum table." >&2; exit 1 ;; \
     esac \
     && curl -sL -o "${CUDSS_TARBALL}" "https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-${CUDA_ARCH_LABEL}/${CUDSS_TARBALL}" \
