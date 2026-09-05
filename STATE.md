@@ -59,7 +59,7 @@ src/
 ```
 
 Cone modules: zero, nonneg, soc, exp, pow, genpow, psd-triangle, composite,
-composite-x (direct-x cones). Symmetric and nonsymmetric helpers live in
+composite direct conic constraints. Symmetric and nonsymmetric helpers live in
 `symmetric_common.rs` / `nonsymmetric_common.rs`.
 
 Tests in `tests/` (top-level integration tests).
@@ -83,10 +83,13 @@ src/
 Headers in `include/moreau/**` mirror the `src/` tree. Tests in
 `tests/cpp/` (gtest binaries built with the main CMake config).
 
-### Direct-x vs slack cones
+### Direct conic constraints and slack cones
 
-Direct-x cones constrain a sub-vector of x directly (`x[J] ∈ K`) instead
-of introducing a slack `s = b - A·x`. Symmetric direct-x cones (nonneg,
+Python specifies these with `DirectConeSpec` and `Cones.dir_cones`. Unknown
+cone fields are rejected; generalized-power weights must be finite and positive.
+
+Direct conic constraints constrain a sub-vector of x directly (`x[J] ∈ K`) instead
+of introducing a slack `s = b - A·x`. Constraints on symmetric cones (nonneg,
 SOC, PSD) use the slack-NT machinery with a primal↔dual swap; asymmetric
 (exp, power, genpower) use explicit primal-barrier formulas. See the
 block comment at the top of the direct-x section in

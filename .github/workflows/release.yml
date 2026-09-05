@@ -152,7 +152,7 @@ jobs:
   # GPU wheels: CUDA 12.2 and 13.0 × {x86_64, aarch64} (Docker, nanobind abi3-py312).
   # aarch64 uses PyTorch cu128 (first index with aarch64 CUDA wheels; cu121 is
   # x86_64-only). CUDA_ARCHITECTURES drops sm_75 on aarch64 (no Turing on ARM
-  # server SoCs) and adds sm_87 for Jetson/Thor/Orin.
+  # server SoCs) and adds sm_87 for Jetson Orin.
   build-gpu-wheel:
     needs: [resolve-version]
     runs-on: ${{ matrix.runner }}
@@ -370,7 +370,7 @@ jobs:
           retention-days: 7
 
   # CUDA C libraries: Linux x86_64 + aarch64 (Docker, per CUDA version).
-  # aarch64 CUDA_ARCHITECTURES targets ARM server/embedded GPUs: sm_87 (Orin/Thor),
+  # aarch64 CUDA_ARCHITECTURES targets ARM server/embedded GPUs: sm_87 (Orin),
   # sm_90 (Grace Hopper), sm_120 (Blackwell, CUDA 13+). sm_75/80/86/89 are Turing/
   # Ampere/Ada desktop-x86 parts with no ARM-host equivalent.
   build-c-lib-cuda:
@@ -522,10 +522,9 @@ jobs:
             python3 -c "import zipfile, sys; z=zipfile.ZipFile('$whl'); m=[n for n in z.namelist() if n.endswith('/METADATA')]; sys.exit(1) if not m else print('METADATA OK:', m[0])"
             sha256sum "$whl"
           done
-          python3 scripts/validate_release_wheels.py dist-wheels --require-complete
+          python3 scripts/validate_release_wheels.py dist-wheels --require-complete --c-library-dir dist-clibs
 
           echo "=== C library tarballs ==="
-          test "$(find dist-clibs -name '*.tar.gz' | wc -l)" -eq 7
           for tb in dist-clibs/*.tar.gz; do
             echo "Validating: $tb"
             tar tzf "$tb"
@@ -610,7 +609,7 @@ jobs:
             pip install moreau-*.whl moreau_cpu-*.whl moreau_cuda12-*.whl
             ```
 
-            Linux aarch64 CUDA wheels target Grace Hopper (sm_90), Orin/Thor
+            Linux aarch64 CUDA wheels target Grace Hopper (sm_90), Orin
             (sm_87), and Blackwell sm_120 on CUDA 13. They are build-validated
             only; run `python -m moreau check` after install to verify.
 

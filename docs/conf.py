@@ -72,10 +72,11 @@ autosummary_generate = True
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    "torch": ("https://pytorch.org/docs/stable/", None),
-    "jax": ("https://jax.readthedocs.io/en/latest/", None),
+    "torch": ("https://docs.pytorch.org/docs/stable/", None),
+    "jax": ("https://docs.jax.dev/en/latest/", None),
     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
 }
+intersphinx_timeout = 15
 
 # Source file settings
 templates_path = ["_templates"]

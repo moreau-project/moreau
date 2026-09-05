@@ -38,7 +38,7 @@ $$
 $$
 
 Where $\mathcal{K}_2$ constrains the slack $s$ and $\mathcal{K}_1$ constrains $x$
-directly (direct cones); each is a Cartesian product of convex cones.
+directly (direct conic constraints); each is a Cartesian product of convex cones.
 
 ## Key Concepts
 

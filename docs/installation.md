@@ -82,9 +82,11 @@ Provides `moreau.jax.Solver` compatible with `jax.grad`, `jax.vmap`, and `jax.ji
 | macOS | ARM64 | ✓ | — | — |
 
 Linux wheels target `manylinux_2_28` (glibc ≥ 2.28). aarch64 CUDA wheels cover
-Grace Hopper (sm_90) and Orin/Thor (sm_87); CUDA 13 aarch64 additionally covers
+Grace Hopper (sm_90) and Orin (sm_87); CUDA 13 aarch64 additionally covers
 Blackwell (sm_120). If your device's compute capability is not listed, build
 from source with `MOREAU_CUDA_ARCH=<capability>`.
+Jetson Thor uses compute capability 11.0 and is not included in these wheel
+architecture lists; see [NVIDIA's compute capability table](https://developer.nvidia.com/cuda/gpus).
 
 ---
 

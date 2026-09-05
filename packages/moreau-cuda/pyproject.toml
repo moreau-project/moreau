@@ -42,7 +42,7 @@ torch = ["torch>=2.4.0"]
 [project.urls]
 Homepage = "https://github.com/moreau-project/moreau"
 Repository = "https://github.com/moreau-project/moreau"
-Documentation = "https://github.com/moreau-project/moreau"
+Documentation = "https://moreau.so"
 
 [tool.scikit-build]
 wheel.py-api = "cp312"

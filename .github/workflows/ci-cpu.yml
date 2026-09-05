@@ -91,7 +91,7 @@ jobs:
 
     - name: Run moreau tests
       id: moreau_tests
-      run: pytest packages/moreau/tests/python/ -v --tb=short -k "not Torch and not cuda"
+      run: pytest packages/moreau/tests/python/ -v --tb=short --device=cpu -rs
 
     - name: Run moreau-cpu tests
       if: always()

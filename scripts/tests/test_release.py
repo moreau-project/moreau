@@ -15,8 +15,10 @@ limitations under the License.
 Regression tests for release versioning and wheel metadata validation."""
 
 import importlib.util
+import io
 import pathlib
 import shutil
+import tarfile
 import zipfile
 
 import pytest
@@ -99,12 +101,29 @@ def test_invalid_version_does_not_modify_files(release_tree):
     assert snapshot(release_tree) == before
 
 
-def wheel(tmp_path, name, version, platform="any"):
-    path = tmp_path / f"{name}-{version}-py3-none-{platform}.whl"
+def wheel(tmp_path, name, version, platform="any", *, abi=None, pinned=True):
+    interpreter, abi_tag = abi or (
+        ("py3", "none")
+        if name == "moreau"
+        else ("cp39", "abi3") if name == "moreau_cpu" else ("cp312", "abi3")
+    )
+    path = tmp_path / f"{name}-{version}-{interpreter}-{abi_tag}-{platform}.whl"
+    backends = (
+        ("moreau-cpu", "moreau-cuda12", "moreau-cuda13")
+        if name == "moreau"
+        else ("moreau",) if name.startswith("moreau_cuda") else ()
+    )
+    requirements = "".join(
+        f"Requires-Dist: {backend}{'==' if pinned else '>='}{version}\n" for backend in backends
+    )
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(
             f"{name}-{version}.dist-info/METADATA",
-            f"Name: {name.replace('_', '-')}\nVersion: {version}\n",
+            f"Name: {name.replace('_', '-')}\nVersion: {version}\n{requirements}",
+        )
+        zf.writestr(
+            f"{name}-{version}.dist-info/WHEEL",
+            f"Wheel-Version: 1.0\nTag: {interpreter}-{abi_tag}-{platform}\n",
         )
     return path
 
@@ -125,14 +144,18 @@ def test_incomplete_release_matrix_is_rejected(tmp_path):
         validate.release_version([wheel(tmp_path, "moreau", "0.4.0")], require_complete=True)
 
 
-def test_complete_release_matrix_is_accepted(tmp_path):
+def complete_matrix(tmp_path):
     wheels = [wheel(tmp_path, "moreau", "0.4.0")]
     for platform in ["manylinux_2_28_x86_64", "manylinux_2_28_aarch64", "macosx_11_0_arm64"]:
         wheels.append(wheel(tmp_path, "moreau_cpu", "0.4.0", platform))
         if platform.startswith("manylinux"):
             for name in ["moreau_cuda12", "moreau_cuda13"]:
                 wheels.append(wheel(tmp_path, name, "0.4.0", platform))
-    assert validate.release_version(wheels, require_complete=True) == "0.4.0"
+    return wheels
+
+
+def test_complete_release_matrix_is_accepted(tmp_path):
+    assert validate.release_version(complete_matrix(tmp_path), require_complete=True) == "0.4.0"
 
 
 def test_wheel_filename_metadata_mismatch_is_rejected(tmp_path):
@@ -140,3 +163,72 @@ def test_wheel_filename_metadata_mismatch_is_rejected(tmp_path):
     renamed = path.rename(tmp_path / "moreau-0.4.1-py3-none-any.whl")
     with pytest.raises(ValueError, match="disagree"):
         validate.release_version([renamed])
+
+
+@pytest.mark.parametrize("abi", [("cp312", "cp312"), ("cp310", "abi3")])
+def test_incorrect_cpu_abi_is_rejected(tmp_path, abi):
+    wheels = complete_matrix(tmp_path)
+    wheels[1].unlink()
+    wheels[1] = wheel(tmp_path, "moreau_cpu", "0.4.0", "manylinux_2_28_x86_64", abi=abi)
+    with pytest.raises(ValueError, match="platform/ABI"):
+        validate.release_version(wheels, require_complete=True)
+
+
+def test_duplicate_architecture_cannot_mask_missing_wheel(tmp_path):
+    wheels = complete_matrix(tmp_path)
+    # Keep eight wheels, but replace the macOS CPU wheel with another Linux wheel.
+    wheels[-1] = wheels[1]
+    with pytest.raises(ValueError, match="platform/ABI"):
+        validate.release_version(wheels, require_complete=True)
+
+
+def test_release_backend_dependencies_must_be_exact(tmp_path):
+    wheels = complete_matrix(tmp_path)
+    wheels[0] = wheel(tmp_path, "moreau", "0.4.0", pinned=False)
+    with pytest.raises(ValueError, match="must be pinned"):
+        validate.release_version(wheels, require_complete=True)
+
+
+def test_wheel_licenses_are_required(tmp_path):
+    path = wheel(tmp_path, "moreau", "0.4.0")
+    assert validate.has_wheel_errors(path)
+    with zipfile.ZipFile(path, "a") as archive:
+        for name in ("LICENSE", "NOTICE"):
+            archive.writestr(f"moreau-0.4.0.dist-info/licenses/{name}", "license text")
+    assert not validate.has_wheel_errors(path)
+
+
+@pytest.fixture
+def c_archives(tmp_path):
+    for filename, library in validate.C_LIBRARY_ARCHIVES.items():
+        with tarfile.open(tmp_path / filename, "w:gz") as archive:
+            for name in ("include/moreau.h", "LICENSE", "NOTICE", f"lib/{library}"):
+                member = tarfile.TarInfo(name)
+                member.size = 4
+                archive.addfile(member, io.BytesIO(b"data"))
+    return tmp_path
+
+
+def test_complete_c_archives_are_accepted(c_archives):
+    validate.validate_c_libraries(c_archives)
+
+
+def test_c_archive_count_cannot_mask_missing_platform(c_archives):
+    (c_archives / "moreau-cpu-macos-arm64.tar.gz").rename(c_archives / "wrong-platform.tar.gz")
+    with pytest.raises(ValueError, match="Incomplete C library matrix"):
+        validate.validate_c_libraries(c_archives)
+
+
+def test_c_archive_requires_header(c_archives):
+    path = c_archives / "moreau-cpu-linux-x86_64.tar.gz"
+    with tarfile.open(path, "w:gz"):
+        pass
+    with pytest.raises(ValueError, match="include/moreau.h"):
+        validate.validate_c_libraries(c_archives)
+
+
+def test_wheel_tag_metadata_must_match_filename(tmp_path):
+    wheels = complete_matrix(tmp_path)
+    wheels[1] = wheels[1].rename(tmp_path / "moreau_cpu-0.4.0-cp310-abi3-manylinux_2_28_x86_64.whl")
+    with pytest.raises(ValueError, match="WHEEL tags disagree"):
+        validate.release_version(wheels, require_complete=True)

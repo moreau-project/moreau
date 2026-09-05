@@ -10,7 +10,7 @@ on:
     paths:
       - 'packages/moreau-cuda/**'
       - 'packages/moreau-cpu/**'
-      - 'packages/moreau/python/moreau/**'
+      - 'packages/moreau/**'
       - 'packages/moreau-cpu/tests/python/**'
       - 'packages/moreau-cuda/tests/**'
       - '.github/workflows/ci-cuda.yml'
@@ -18,11 +18,15 @@ on:
     paths:
       - 'packages/moreau-cuda/**'
       - 'packages/moreau-cpu/**'
-      - 'packages/moreau/python/moreau/**'
+      - 'packages/moreau/**'
       - 'packages/moreau-cpu/tests/python/**'
       - 'packages/moreau-cuda/tests/**'
       - '.github/workflows/ci-cuda.yml'
   workflow_dispatch:  # Manual trigger from GitHub UI
+
+concurrency:
+  group: cuda-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Build on GitHub-hosted CPU runner using Docker (CUDA cross-compilation - no GPU needed).
@@ -113,7 +117,7 @@ jobs:
           packages/moreau-cuda/build/libmoreau*
           packages/moreau-cuda/build/CTestTestfile.cmake
           packages/moreau-cuda/dist/*.whl
-        retention-days: 1
+        retention-days: 7
 
   # Test on self-hosted GPU runner (download pre-built artifacts).
   # Uses the same trusted-branch gate as the build job because downloaded
@@ -189,7 +193,7 @@ jobs:
             pip install packages/moreau-cuda/dist/*.whl
 
             # Verify imports
-            python3 -c "import moreau; print(f\"devices: {moreau.available_devices()}\")"
+            python3 -c "import moreau; print(f\"devices: {moreau.available_devices()}\"); assert moreau.device_available(\"cuda\"), moreau.device_error(\"cuda\")"
 
             # Install test dependencies and run Python tests (CUDA-enabled)
             pip install hypothesis

@@ -245,10 +245,7 @@ class Solver:
             if dev in (None, "auto", "cpu"):
                 self._init_with_dir_cones(P, q, A, b, cones, settings)
                 return
-            # CUDA + nonneg x-cones: fall through to the standard device
-            # init below. SOC x-cones on CUDA are blocked at
-            # _require_cpu_device_for_dir_cones (and at Cones::initialize
-            # on the C++ side).
+            # CUDA direct conic constraints use the standard device initialization.
 
         # Validate smoothed diff is only used with LP cones (zero + nonneg)
         _validate_smoothed_diff_cones(settings, cones)

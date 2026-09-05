@@ -140,6 +140,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
 
     steps:
       - uses: actions/checkout@v4
@@ -155,3 +156,8 @@ jobs:
           echo "Fast-forwarding release -> ${RELEASE_TAG} (${TAG_COMMIT})"
           # Plain push (no --force): GitHub will reject a non-fast-forward.
           git push origin "${TAG_COMMIT}:refs/heads/release"
+
+      - name: Build and deploy published documentation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run docs.yml --ref release

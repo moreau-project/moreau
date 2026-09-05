@@ -62,9 +62,7 @@ jobs:
           # Sort wheels by type. GPU test runners are x86_64, so filter CPU
           # and CUDA wheels to x86_64 to avoid picking up the aarch64 wheel
           # (which pip would reject with "not supported on this platform").
-          CUDA_MAJOR="${{ matrix.cuda_short }}"
-          CUDA_MAJOR="${CUDA_MAJOR#cu}"
-          CUDA_MAJOR="${CUDA_MAJOR:0:2}"
+          CUDA_MAJOR="${{ matrix.cuda_major }}"
 
           for whl in dist-all/*.whl; do
             name="$(basename "$whl")"
@@ -145,11 +143,11 @@ jobs:
 
               # Install torch and verify torch bindings
               pip install torch --index-url https://download.pytorch.org/whl/${{ matrix.pytorch_index }}
-              python -c "from moreau.torch import Solver; print('"'"'Torch bindings OK'"'"')"
+              python -c "import torch; assert torch.cuda.is_available(); from moreau.torch import Solver; print('"'"'Torch bindings OK'"'"')"
 
               # Install JAX with CUDA support
               pip install jax[${{ matrix.jax_cuda }}]
-              python -c "import jax; print('"'"'JAX backend:'"'"', jax.default_backend())"
+              python -c "import jax; print('"'"'JAX backend:'"'"', jax.default_backend()); assert jax.default_backend() == '"'"'gpu'"'"'"
 
               # Run tests — each file in its own process to prevent GPU OOM on T4 (16GB)
               pip install pytest numpy scipy hypothesis cvxpy clarabel
@@ -208,17 +206,18 @@ jobs:
           echo "=== CPU wheels ===" && ls -la dist-cpu/
           echo "=== Wrapper wheels ===" && ls -la dist-wrapper/
 
-      - name: Set up Python 3.13 and 3.14 for abi3 tests
+      - name: Set up Python 3.9, 3.13, and 3.14 for abi3 tests
         uses: actions/setup-python@v5
         with:
           python-version: |
+            3.9
             3.13
             3.14
 
-      - name: Test abi3 wheel import on Python 3.13 and 3.14
+      - name: Test abi3 wheel import on Python 3.9, 3.13, and 3.14
         run: |
-          echo "=== Testing abi3 wheel import on Python 3.13 and 3.14 ==="
-          for PYVER in 3.13 3.14; do
+          echo "=== Testing abi3 wheel import on Python 3.9, 3.13, and 3.14 ==="
+          for PYVER in 3.9 3.13 3.14; do
             echo "--- Python ${PYVER} ---"
             "python${PYVER}" -m venv /tmp/test_env_${PYVER}
             /tmp/test_env_${PYVER}/bin/pip install --upgrade pip -q
@@ -247,8 +246,16 @@ jobs:
         include:
           - arch: x86_64
             runner: ubuntu-latest
+            python: '3.9'
+          - arch: x86_64
+            runner: ubuntu-latest
+            python: '3.12'
+          - arch: x86_64
+            runner: ubuntu-latest
+            python: '3.14'
           - arch: aarch64
             runner: ubuntu-24.04-arm
+            python: '3.12'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -256,7 +263,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python }}
 
       - name: Download CPU release wheels
         env:
@@ -268,9 +275,17 @@ jobs:
             --pattern "moreau_cpu-*manylinux*${ARCH}.whl" \
             --pattern 'moreau-*-py3-none-any.whl'
 
-      - name: Install and test release wheels
+      - name: Install and smoke-test release wheels
         run: |
-          pip install dist/*.whl
+          pip install dist/*.whl pytest
+          pytest packages/moreau/tests/python/test_direct_cone_forward.py \
+            packages/moreau/tests/python/test_direct_cone_validation.py \
+            packages/moreau-cpu/tests/python/test_direct_cone_python_binding.py \
+            --device=cpu -v --tb=short -rs
+
+      - name: Run full CPU suite
+        if: matrix.python == '3.12'
+        run: |
           pip install pytest numpy scipy hypothesis cvxpy clarabel
           pytest packages/moreau/tests/python/ packages/moreau-cpu/tests/python/ \
             --device=cpu -v --tb=short -rs

@@ -148,7 +148,7 @@ Native forward and backward (adjoint) passes for both LPs and QPs. Backpropagate
 :::{grid-item-card} Many cones
 :class-card: sd-card-feature
 
-Zero, nonnegative, second-order, exponential, power, generalized-power, and PSD cones — plus direct cones that skip the slack row.
+Zero, nonnegative, second-order, exponential, power, generalized-power, and PSD cones — plus direct conic constraints that skip the slack row.
 :::
 
 ::::
@@ -213,7 +213,7 @@ $$
 $$
 
 Where $\mathcal{K}_2$ constrains the slack $s$ and $\mathcal{K}_1$ constrains $x$
-directly (direct cones). The slack cone $\mathcal{K}_2$ is a product of:
+directly (direct conic constraints). The slack cone $\mathcal{K}_2$ is a product of:
 - **Zero cone**: Equality constraints ($s = 0$)
 - **Nonnegative cone**: Inequality constraints ($s \ge 0$)
 - **Second-order cone**: Norm constraints ($\|s_{1:}\|_2 \le s_0$, arbitrary dimension $\ge 2$)
@@ -222,7 +222,7 @@ directly (direct cones). The slack cone $\mathcal{K}_2$ is a product of:
 - **Generalized power cone**: Geometric mean constraints ($\prod p_i^{\alpha_i} \ge \|w\|_2$, variable dimension)
 - **PSD cone**: Positive semidefinite matrix constraints ($\text{mat}(s) \succeq 0$) — see [PSD Cones guide](guide/psd-cones.md)
 
-The direct cone $\mathcal{K}_1$ admits the same building blocks, except it
+The cone $\mathcal{K}_1$ used in direct conic constraints admits the same building blocks, except it
 takes the dual of the zero cone (the free cone) in place of the zero cone.
 
 ## Citing Moreau

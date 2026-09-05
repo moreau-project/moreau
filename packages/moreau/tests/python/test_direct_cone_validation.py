@@ -51,7 +51,7 @@ def test_xconespec_rejects_negative_indices():
 
 
 def test_xconespec_soc_rejects_size_one():
-    with pytest.raises(ValueError, match="SOC x-cone requires >= 2"):
+    with pytest.raises(ValueError, match="SOC direct conic constraint requires >= 2"):
         moreau.DirectConeSpec(kind="soc", indices=[0])
 
 
@@ -147,3 +147,20 @@ def test_solver_out_of_bounds_index_raises_before_backend():
     )
     with pytest.raises(ValueError, match=r"contains 5 which is >= n=2"):
         moreau.Solver(P, q, A, b, cones=cones)
+
+
+@pytest.mark.parametrize("field", ["x_cones", "dir_cone", "num_nonnegative_cones"])
+def test_cones_reject_unknown_fields(field):
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        moreau.Cones(**{field: [moreau.DirectConeSpec(kind="nonneg", indices=[0])]})
+
+
+def test_direct_cone_rejects_unknown_fields():
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        moreau.DirectConeSpec(kind="nonneg", indices=[0], index=[1])
+
+
+@pytest.mark.parametrize("weight", [float("nan"), float("inf"), -float("inf")])
+def test_direct_generalized_power_rejects_nonfinite_weights(weight):
+    with pytest.raises(ValueError, match="finite and > 0"):
+        moreau.DirectConeSpec(kind="gen_power", indices=[0, 1], alphas=[weight], dim2=1)
