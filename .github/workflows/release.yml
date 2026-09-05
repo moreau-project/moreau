@@ -629,6 +629,10 @@ jobs:
 
             Each tarball contains the shared library, `include/moreau.h`, `LICENSE`, and `NOTICE`.
 
+            CUDA artifacts are built and validated on CPU runners. CUDA runtime
+            testing is opt-in while GPU runners are unavailable; the release QA
+            summary records whether it ran.
+
           prerelease: true
           generate_release_notes: false
         env:
@@ -638,6 +642,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.release.outputs.name }}
+          RUN_GPU_TESTS: ${{ vars.MOREAU_GPU_RUNNERS_ENABLED == 'true' }}
         run: |
           echo "Triggering test-release for tag: $RELEASE_TAG"
-          gh workflow run test-release.yml --ref "$RELEASE_TAG" -f "release_tag=$RELEASE_TAG"
+          gh workflow run test-release.yml --ref "$RELEASE_TAG" \
+            -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"

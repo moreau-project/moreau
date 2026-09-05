@@ -1,6 +1,8 @@
 # Publish Python artifacts from a GitHub Release to PyPI.
 #
 # Run this AFTER creating a GitHub Release (via release.yml) and completing QA.
+# CPU/Julia QA and artifact validation are required. CUDA runtime QA is opt-in;
+# its coverage is recorded by test-release.yml, including when it was not run.
 #
 # Usage:
 #   gh workflow run publish.yml -f release_tag=v0.4.0

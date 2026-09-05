@@ -6,6 +6,7 @@
 # Usage:
 #   gh workflow run test-release.yml --ref v0.4.0 -f release_tag=v0.4.0
 #   gh workflow run test-release.yml -f release_tag=dev-20260313-120000
+# Add -f run_gpu_tests=true when GPU runners are available.
 
 name: Test Release
 run-name: Test Release ${{ inputs.release_tag }}
@@ -17,10 +18,15 @@ on:
         description: 'GitHub Release tag to test (e.g., v0.4.0 or dev-20260313-120000)'
         required: true
         type: string
+      run_gpu_tests:
+        description: 'Run CUDA 12/13 runtime tests (requires GPU runners)'
+        type: boolean
+        default: false
 
 jobs:
   # GPU tests: install wheels in Docker with CUDA runtime, run full test suite
   test-gpu:
+    if: inputs.run_gpu_tests
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -174,6 +180,32 @@ jobs:
             '
 
           echo "All tests passed for ${{ matrix.cuda_short }}!"
+
+  qa-coverage:
+    name: QA coverage
+    if: always()
+    needs: [test-gpu, test-cpu-macos, test-cpu-linux, test-julia]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record tested platforms
+        env:
+          GPU_REQUESTED: ${{ inputs.run_gpu_tests }}
+          GPU_RESULT: ${{ needs.test-gpu.result }}
+          MACOS_RESULT: ${{ needs.test-cpu-macos.result }}
+          LINUX_RESULT: ${{ needs.test-cpu-linux.result }}
+          JULIA_RESULT: ${{ needs.test-julia.result }}
+        run: |
+          echo "ChatGPT generated:" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Validation | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Linux CPU wheels | $LINUX_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| macOS CPU wheels | $MACOS_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Julia CPU artifacts | $JULIA_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$GPU_REQUESTED" = "true" ]; then
+            echo "| CUDA 12/13 runtime | $GPU_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| CUDA 12/13 runtime | Not run (GPU testing not requested) |" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # macOS CPU tests
   test-cpu-macos:

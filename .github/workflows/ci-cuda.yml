@@ -119,11 +119,20 @@ jobs:
           packages/moreau-cuda/dist/*.whl
         retention-days: 7
 
+    - name: Record CUDA runtime coverage
+      if: vars.MOREAU_GPU_RUNNERS_ENABLED != 'true'
+      run: |
+        echo "ChatGPT generated:" >> "$GITHUB_STEP_SUMMARY"
+        echo "CUDA compilation and wheel build passed. CUDA runtime tests were not run: GPU runners are disabled." >> "$GITHUB_STEP_SUMMARY"
+        echo "Set the repository variable MOREAU_GPU_RUNNERS_ENABLED=true when GPU runners are available." >> "$GITHUB_STEP_SUMMARY"
+
   # Test on self-hosted GPU runner (download pre-built artifacts).
+  # Opt in with MOREAU_GPU_RUNNERS_ENABLED=true after provisioning runners.
   # Uses the same trusted-branch gate as the build job because downloaded
   # artifacts are executed on a self-hosted GPU runner.
   test:
     if: >-
+      vars.MOREAU_GPU_RUNNERS_ENABLED == 'true' &&
       github.repository == 'moreau-project/moreau' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
