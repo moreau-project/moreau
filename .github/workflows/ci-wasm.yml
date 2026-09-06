@@ -17,7 +17,9 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: browser-actions/setup-firefox@v1
-      - uses: browser-actions/setup-geckodriver@v1
+      - uses: browser-actions/setup-geckodriver@fac5b0424c584257f32cf12c5eb4ba86014c34f8 # latest
+        with:
+          token: ${{ github.token }}
       - name: Install matching WASM test runner
         run: |
           version=$(python3 -c 'import tomllib; p=tomllib.load(open("packages/moreau-cpu/Cargo.lock", "rb"))["package"]; print(next(x["version"] for x in p if x["name"] == "wasm-bindgen"))')
