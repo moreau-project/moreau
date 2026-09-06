@@ -1,0 +1,30 @@
+name: CI (WebAssembly)
+on:
+  pull_request:
+    paths: ['packages/moreau-cpu/**', '.github/workflows/ci-wasm.yml']
+  push:
+    branches: [main]
+    paths: ['packages/moreau-cpu/**', '.github/workflows/ci-wasm.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: browser-actions/setup-firefox@v1
+      - uses: browser-actions/setup-geckodriver@v1
+      - name: Install matching WASM test runner
+        run: |
+          version=$(python3 -c 'import tomllib; p=tomllib.load(open("packages/moreau-cpu/Cargo.lock", "rb"))["package"]; print(next(x["version"] for x in p if x["name"] == "wasm-bindgen"))')
+          cargo install wasm-bindgen-cli --version "$version" --locked
+      - name: Native portability regressions
+        run: cargo test --manifest-path packages/moreau-cpu/Cargo.toml --no-default-features --lib --test browser --test shared_setup_repeated_solve --test backward_with_data --locked
+      - name: Execute browser regressions
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: cargo test --manifest-path packages/moreau-cpu/Cargo.toml --target wasm32-unknown-unknown --no-default-features --test browser --locked

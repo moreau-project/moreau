@@ -4,10 +4,10 @@ use std::ops::{Deref, DerefMut};
 
 cfg_if::cfg_if! {
     if #[cfg(target_family = "wasm")] {
-        use web_time::{Duration, Instant};
+        pub(crate) use web_time::{Duration, Instant};
     }
     else {
-        use std::time::{Duration, Instant};
+        pub(crate) use std::time::{Duration, Instant};
     }
 }
 
