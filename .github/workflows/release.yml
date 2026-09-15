@@ -543,19 +543,10 @@ jobs:
           fi
           echo "Release name: $(grep name= $GITHUB_OUTPUT | cut -d= -f2)"
 
-      - name: Set up Julia for artifact manifest
-        uses: julia-actions/setup-julia@v3
-        with:
-          version: '1.12'
-
-      - name: Generate Julia artifact manifest
+      - name: Set Julia source release version
         env:
-          RELEASE_TAG: ${{ steps.release.outputs.name }}
-        run: |
-          julia packages/moreau-julia/Moreau.jl/scripts/generate_artifacts.jl \
-            "$RELEASE_TAG" dist-clibs
-          cp packages/moreau-julia/Moreau.jl/Artifacts.toml \
-            moreau-julia-Artifacts.toml
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
 
       - name: Package Julia source tarball
         run: |
@@ -572,7 +563,6 @@ jobs:
           mkdir -p dist-release
           cp dist-wheels/*.whl dist-release/
           cp dist-clibs/*.tar.gz dist-release/
-          cp moreau-julia-Artifacts.toml dist-release/
           cp moreau-julia-src.tar.gz dist-release/
           echo "=== Release assets ==="
           ls -la dist-release/

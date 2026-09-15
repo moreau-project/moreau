@@ -357,7 +357,8 @@ jobs:
       - name: Run Julia tests
         run: |
           # Run Moreau.jl tests using its own Project.toml as the environment
-          # and let Artifacts.toml resolve the released CPU binary.
+          # and resolve the matching Yggdrasil-built CPU JLL. That JLL must
+          # be registered before this release QA can pass.
           julia --project=julia-src/Moreau.jl -e '
             using Pkg
             Pkg.Registry.add("General")

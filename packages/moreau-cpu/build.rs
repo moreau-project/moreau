@@ -24,9 +24,14 @@ fn build_active_set() {
     println!("cargo:rustc-link-lib=static=moreau_active_set");
 
     // Link C++ standard library (platform-specific)
-    if cfg!(target_os = "macos") {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap();
+    if target_os == "macos" {
         println!("cargo:rustc-link-lib=dylib=c++");
-    } else if cfg!(target_os = "linux") || cfg!(target_os = "freebsd") {
+    } else if target_os == "linux"
+        || target_os == "freebsd"
+        || (target_os == "windows" && target_env == "gnu")
+    {
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
     // Windows/MSVC: no explicit C++ runtime link needed (handled by cmake)

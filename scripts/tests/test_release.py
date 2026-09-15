@@ -40,6 +40,9 @@ validate = load_script("validate_release_wheels")
 @pytest.fixture
 def release_tree(tmp_path):
     paths = [
+        "packages/moreau-julia/Moreau.jl/Project.toml",
+        "packages/moreau-julia/Moreau.jl/test/cuda/Project.toml",
+        "packages/moreau-julia/MoreauTests.jl/Project.toml",
         "pyproject.toml",
         "uv.lock",
         "packages/moreau-cpu/Cargo.toml",
@@ -75,6 +78,8 @@ def test_beta_to_stable_and_idempotence(release_tree):
     bump.bump_version(release_tree, "0.4.0")
     stable = snapshot(release_tree)
     assert all("0.4.0-beta.1" not in text and "0.4.0b1" not in text for text in stable.values())
+    for package in ("Moreau.jl", "MoreauTests.jl"):
+        assert 'version = "0.4.0"' in stable[f"packages/moreau-julia/{package}/Project.toml"]
     assert 'content: "v0.4.0"' in stable["docs/_static/custom.css"]
     assert 'moreau-cpu>=0.4.0"' in stable["packages/moreau/pyproject.toml"]
     bump.bump_version(release_tree, "0.4.0")
@@ -88,6 +93,11 @@ def test_dev_versions_and_exact_dependencies(release_tree, version):
     assert (
         f'version = "{version.replace(".dev", "-dev")}"' in files["packages/moreau-cpu/Cargo.toml"]
     )
+    for package in ("Moreau.jl", "MoreauTests.jl"):
+        assert (
+            f'version = "{version.replace(".dev", "-dev")}"'
+            in files[f"packages/moreau-julia/{package}/Project.toml"]
+        )
     assert f'moreau-cpu=={version}"' in files["packages/moreau/pyproject.toml"]
     assert f'moreau=={version}"' in files["packages/moreau-cuda/pyproject.toml"]
     assert f'__version__ = "{version}"' in files["packages/moreau-cuda/moreau_cuda/__init__.py"]
@@ -232,3 +242,15 @@ def test_wheel_tag_metadata_must_match_filename(tmp_path):
     wheels[1] = wheels[1].rename(tmp_path / "moreau_cpu-0.4.0-cp310-abi3-manylinux_2_28_x86_64.whl")
     with pytest.raises(ValueError, match="WHEEL tags disagree"):
         validate.release_version(wheels, require_complete=True)
+
+
+def test_julia_and_jll_versions_follow_native_release(release_tree):
+    bump.bump_version(release_tree, "1.2.3-beta.4")
+    project = (release_tree / "packages/moreau-julia/Moreau.jl/Project.toml").read_text()
+    assert 'version = "1.2.3-beta.4"' in project
+    assert 'Moreau_CPU_jll = "=1.2.3"' in project
+    assert 'Moreau_CUDA_jll = "=1.2.3"' in project
+    cuda_tests = (
+        release_tree / "packages/moreau-julia/Moreau.jl/test/cuda/Project.toml"
+    ).read_text()
+    assert 'Moreau_CUDA_jll = "=1.2.3"' in cuda_tests

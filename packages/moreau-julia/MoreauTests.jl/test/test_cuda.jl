@@ -1,4 +1,5 @@
 using Moreau
+using Moreau_CUDA_jll
 using Test
 using SparseArrays
 import MathOptInterface as MOI
@@ -7,7 +8,7 @@ using JuMP
 @testset "CUDA backend" begin
 
 if !Moreau.cuda_available()
-    @info "Moreau CUDA library not available — skipping CUDA tests"
+    error("MOREAU_TEST_CUDA=1 requires an available Moreau CUDA library")
 else
 
 @testset "Basic QP (CUDA)" begin

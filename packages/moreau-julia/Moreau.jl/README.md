@@ -7,20 +7,35 @@ Moreau.jl is a Julia interface to the
 
 ```julia
 import Pkg
-Pkg.add(url="https://github.com/moreau-project/Moreau.jl")
+Pkg.add("Moreau")
 ```
 
-The CPU library is installed automatically. CUDA 12 and CUDA 13 binaries are
-lazy artifacts: they are downloaded only when a CUDA solve is requested, not
-when Moreau.jl is installed or imported.
+The CPU library is provided by `Moreau_CPU_jll`, built from source through
+Yggdrasil. Its build matrix includes 64-bit glibc and musl Linux (x86-64 and
+ARM64), macOS (Intel and Apple Silicon), and x86-64 Windows.
 
-Moreau.jl releases are maintained independently from the native solver. After
-a new native release, download its C-library archives and regenerate the
-manifest before bumping the Julia package version:
+Moreau.jl and the native solver use the same release version. Moreau.jl 0.4.0
+requires native Moreau 0.4.0. The JLL compatibility bounds pin that version;
+JLL build-number suffixes such as `+0` distinguish rebuilds of the same source.
+The package name is `Moreau`.
 
-```bash
-julia scripts/generate_artifacts.jl v0.4.0 /path/to/release-assets
+### CUDA
+
+Install and load the optional native CUDA package to enable the GPU backend:
+
+```julia
+Pkg.add("Moreau_CUDA_jll")
+using Moreau, Moreau_CUDA_jll
 ```
+
+Also load `CUDA` when passing `CuArray` inputs. The CUDA JLL selects a compatible
+CUDA runtime through Julia's platform augmentation and CUDA.jl preferences. CPU
+users do not depend on the CUDA JLL. The CUDA recipe targets Linux x86-64 and
+ARM64 with CUDA 12 and 13, and pins cuDSS 0.7.1.
+
+For development, `MOREAU_CPU_LIB` and `MOREAU_CUDA_LIB` can select local builds
+of the same version. An explicit CUDA library override also requires its
+matching CUDA runtime on the library search path.
 
 ## Quick Start
 
@@ -39,8 +54,8 @@ value(y)  # ≈ 0.5
 
 ## Documentation
 
-- [JuMP integration](https://moreau.so/guide/jump-integration.html) — MOI wrapper, supported cones, solver options, examples
-- [Julia API](https://moreau.so/guide/julia-integration.html) — `CompiledSolver`, batching, CUDA, gradients, ChainRules
+- [JuMP integration](https://docs.moreau.so/guide/jump-integration.html) — MOI wrapper, supported cones, solver options, examples
+- [Julia API](https://docs.moreau.so/guide/julia-integration.html) — `CompiledSolver`, batching, CUDA, gradients, ChainRules
 
 ## License
 
