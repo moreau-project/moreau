@@ -1841,6 +1841,33 @@ impl<T: FloatT> CompiledSolver<T> {
                             solver.variables.s[j] = solver.variables.z[j] - work[j];
                         }
 
+                        // Direct cone warm points can lie exactly on a face.
+                        // Move both members of each pair into the interior;
+                        // otherwise barrier scaling may be undefined
+                        // before the first Newton step. The common unit point
+                        // preserves z_x - x[J], just as slack smoothing does.
+                        let solver_ref = &mut *solver;
+                        let mut off = 0;
+                        for entry in solver_ref.kktsystem.dir_cones_ref().iter() {
+                            let k = entry.indices.len();
+                            // An exact optimum with only equality slack rows
+                            // needs no smoothing and can terminate at iter 0.
+                            if solver_ref.cones.degree() == 0 && mu_warm <= (1e-6).as_T() {
+                                off += k;
+                                continue;
+                            }
+                            let mut primal = vec![T::zero(); k];
+                            let mut dual = vec![T::zero(); k];
+                            entry
+                                .cone
+                                .direct_x_unit_initialization(&mut primal, &mut dual);
+                            for (j, &idx) in entry.indices.iter().enumerate() {
+                                solver_ref.variables.x[idx] += mu_warm * primal[j];
+                                solver_ref.variables.z_x[off + j] += mu_warm * dual[j];
+                            }
+                            off += k;
+                        }
+
                         // Skip default_start in inner solver
                         solver.skip_default_start = true;
                     }

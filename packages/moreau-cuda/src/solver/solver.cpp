@@ -405,15 +405,18 @@ void CompiledSolver::warmStart(
     data.cones.smoothing(variables.z, warm_work, mu, stream);
     waxpby(variables.s, 1.0, variables.z, -1.0, warm_work, stream);
 
-    // Direct-x dual: we use the user-supplied `warm_z_x` as-is (after the
-    // equilibration scaling at step 1). A naïve central-path projection
-    // `z_x = -μ·∇F(x)` would move *away* from the user's z_x for warm
-    // points near optimal — there ∇F(x) blows up at the boundary while
-    // the user's z_x is small, so the projection produces a much worse
-    // initial dual than the user supplied. The slack smoothing avoids
-    // this trap because it preserves the (z − s) gap; the direct-x form
-    // has no analogous preservation invariant, so the safest default is
-    // to trust the user's z_x and let the IPM correct it on iter 0.
+    // Asymmetric direct barriers are undefined on the cone boundary. Add
+    // the same small interior unit point to x[J] and z_x, preserving their
+    // difference and retaining the supplied dual rather than reinitializing it.
+    interiorize_direct_warm_start(
+        variables.x.data(), variables.z_x.data(), mu.data(),
+        data.cones.d_xcone_kinds, data.cones.d_xcone_dims,
+        data.cones.d_xcone_numel_offsets, data.cones.d_xcone_indices,
+        data.cones.d_xcone_pow_idx, data.cones.d_xcone_pow_alpha,
+        data.cones.d_xcone_genpow_idx, data.cones.d_xcone_genpow_dim1s,
+        data.cones.d_xcone_genpow_alpha_offsets, data.cones.d_xcone_genpow_alphas,
+        n, total_xn, data.cones.numXCones, batchSize,
+        m > data.cones.numZeroCones, stream);
 }
 
 void CompiledSolver::init_xcone_start_point(cudaStream_t stream) {

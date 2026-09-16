@@ -715,8 +715,18 @@ void compute_warmness_mu(
     cudaStream_t stream = 0
 );
 
+// Move direct warm pairs off the boundary before barrier scaling.
 void copy_direct_duals_masked(double* dst, const double* src, const int32_t* mask,
                              int64_t xn, int64_t batch_size, cudaStream_t stream);
+
+void interiorize_direct_warm_start(
+    double* x, double* z_x, const double* mu,
+    const int64_t* kinds, const int64_t* dims, const int64_t* offsets,
+    const int64_t* indices, const int64_t* pow_idx, const double* pow_alpha,
+    const int64_t* gp_idx, const int64_t* gp_dim1,
+    const int64_t* gp_alpha_offsets, const double* gp_alphas,
+    int64_t n, int64_t xn, int64_t num_cones, int64_t batch_size, bool has_slack_cones,
+    cudaStream_t stream);
 
 /**
  * @brief Fused tau numerator base: ξ=x/τ, tau_num = (rτ - rκ/τ) + q'x1 + b'z1 (3 → 1 kernel)

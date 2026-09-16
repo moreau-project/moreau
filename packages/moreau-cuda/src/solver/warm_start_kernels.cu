@@ -28,6 +28,61 @@ void copy_direct_duals_masked(double* dst, const double* src, const int32_t* mas
                         dst, src, mask, xn, batch_size);
 }
 
+__global__ void interiorize_direct_warm_start_kernel(
+    double* x, double* z_x, const double* mu,
+    const int64_t* kinds, const int64_t* dims, const int64_t* offsets,
+    const int64_t* indices, const int64_t* pow_idx, const double* pow_alpha,
+    const int64_t* gp_idx, const int64_t* gp_dim1,
+    const int64_t* gp_alpha_offsets, const double* gp_alphas,
+    int64_t n, int64_t xn, bool has_slack_cones
+) {
+    const int64_t batch = blockIdx.x;
+    const int64_t cone = blockIdx.y;
+    const int64_t kind = kinds[cone];
+    if (!has_slack_cones && mu[batch] <= 1e-6) return;
+    const int64_t offset = offsets[cone];
+    for (int64_t j = threadIdx.x; j < dims[cone]; j += blockDim.x) {
+        double unit = 0.0;
+        if (kind == 0) {
+            unit = 1.0;
+        } else if (kind == 1) {
+            unit = j == 0 ? 1.0 : 0.0;
+        } else if (kind == 2) {
+            for (int64_t col = 0, diag = 0; diag < dims[cone]; ++col, diag += col + 1)
+                if (j == diag) unit = 1.0;
+        } else if (kind == 3) {
+            unit = j == 0 ? -1.051383945322714
+                 : j == 1 ? 0.556409619469370 : 1.258967884768947;
+        } else if (kind == 4 && j < 2) {
+            const double alpha = pow_alpha[pow_idx[cone]];
+            unit = sqrt(j == 0 ? 1.0 + alpha : 2.0 - alpha);
+        } else if (kind == 5) {
+            const int64_t gp = gp_idx[cone];
+            if (j < gp_dim1[gp])
+                unit = sqrt(1.0 + gp_alphas[gp_alpha_offsets[gp] + j]);
+        }
+        const double shift = mu[batch] * unit;
+        x[batch * n + indices[offset + j]] += shift;
+        z_x[batch * xn + offset + j] += shift;
+    }
+}
+
+void interiorize_direct_warm_start(
+    double* x, double* z_x, const double* mu,
+    const int64_t* kinds, const int64_t* dims, const int64_t* offsets,
+    const int64_t* indices, const int64_t* pow_idx, const double* pow_alpha,
+    const int64_t* gp_idx, const int64_t* gp_dim1,
+    const int64_t* gp_alpha_offsets, const double* gp_alphas,
+    int64_t n, int64_t xn, int64_t num_cones, int64_t batch_size, bool has_slack_cones,
+    cudaStream_t stream
+) {
+    if (num_cones == 0 || batch_size == 0) return;
+    const dim3 grid(batch_size, num_cones);
+    MOREAU_KERNEL_LAUNCH(interiorize_direct_warm_start_kernel, grid, 128, 0, stream,
+        x, z_x, mu, kinds, dims, offsets, indices, pow_idx, pow_alpha,
+        gp_idx, gp_dim1, gp_alpha_offsets, gp_alphas, n, xn, has_slack_cones);
+}
+
 // ============================================================================
 // Warmness mu computation kernel
 // ============================================================================

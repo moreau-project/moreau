@@ -14,12 +14,37 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import warnings
+from types import SimpleNamespace
+
 import moreau
 import numpy as np
 import pytest
 from scipy import sparse
 
-from .cone_test_utils import planted_problem, slack_cones
+from .cone_test_utils import CONE_CASES, planted_problem, slack_cones
+
+
+@pytest.mark.parametrize(
+    "cases", [(c,) for c in CONE_CASES] + [CONE_CASES], ids=[*CONE_CASES, "all"]
+)
+@pytest.mark.parametrize("equilibrate", [False, True])
+def test_known_kkt_and_external_warm_start(device, cases, equilibrate):
+    problem = planted_problem(cases)
+    solver = problem.solver(device, equilibrate)
+    sol = solver.solve()
+    assert solver.info.status.name == "Solved"
+    problem.check(sol)
+
+    # A short budget rules out silently ignoring the supplied state.
+    # Warnings fail here because Solver otherwise retries failed warm starts cold.
+    warm_solver = problem.solver(device, equilibrate, max_iter=5)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        warm = warm_solver.solve(warm_start=problem.optimum)
+    assert warm_solver.info.status.name in ("Solved", "AlmostSolved")
+    assert warm_solver.info.iterations < solver.info.iterations
+    problem.check(warm)
 
 
 @pytest.mark.parametrize("equilibrate", [False, True])
@@ -59,3 +84,50 @@ def test_all_cones_match_slack_representation(device, equilibrate):
     assert slack_solver.info.status.name == "Solved"
     np.testing.assert_allclose(reference.x, sol.x, atol=3e-4, rtol=3e-4)
     np.testing.assert_allclose(reference.z, np.concatenate(expected_z), atol=3e-4, rtol=3e-4)
+
+
+def test_all_cones_batched_setup_and_warm_reuse(device):
+    problem = planted_problem()
+    solver = moreau.CompiledSolver(
+        n=len(problem.q),
+        m=len(problem.b),
+        P_row_offsets=problem.P.indptr,
+        P_col_indices=problem.P.indices,
+        A_row_offsets=problem.A.indptr,
+        A_col_indices=problem.A.indices,
+        cones=problem.cones,
+        settings=moreau.Settings(
+            device=device,
+            solver="ipm",
+            batch_size=2,
+            verbose=False,
+            ipm_settings=moreau.IPMSettings(chordal_decomposition_enable=False),
+        ),
+    )
+    previous = None
+    for factors in ((0.7, 1.4), (1.8, 0.4)):
+        problems = [planted_problem() for _ in factors]
+        for p, factor in zip(problems, factors):
+            p.P *= factor
+            p.A /= factor
+            p.q = -p.P @ p.optimum.x - p.A.T @ p.optimum.z
+            indices = np.concatenate([c.indices for c in p.cones.dir_cones])
+            p.q[indices] += p.optimum.z_x
+            p.b = p.A @ p.optimum.x + p.optimum.s
+        solver.setup(
+            np.stack([p.P.data for p in problems]),
+            np.stack([p.A.data for p in problems]),
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            sol = solver.solve(
+                np.stack([p.q for p in problems]),
+                np.stack([p.b for p in problems]),
+                warm_start=previous,
+            )
+        for i, p in enumerate(problems):
+            assert solver.info.status[i].name in ("Solved", "AlmostSolved")
+            p.check(
+                SimpleNamespace(**{name: getattr(sol, name)[i] for name in ("x", "s", "z", "z_x")})
+            )
+        previous = sol.to_warm_start()
