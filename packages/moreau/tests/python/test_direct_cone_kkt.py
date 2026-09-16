@@ -142,8 +142,30 @@ def test_all_cones_match_slack_representation(device, equilibrate):
 
 
 @pytest.mark.parametrize("output", ["x", "s", "z", "z_x"])
-def test_all_cones_directional_derivatives(device, output):
-    problem = planted_problem()
+@pytest.mark.parametrize(
+    "cases",
+    [
+        CONE_CASES,
+        (
+            "nonneg",
+            "soc7",
+            "soc3",
+            "soc5",
+            "soc4",
+            "psd3",
+            "psd2",
+            "exp",
+            "power",
+            "gen_power",
+            "gen_power",
+        ),
+    ],
+    ids=["all", "multiple_reordered_cones"],
+)
+def test_all_cones_directional_derivatives(device, output, cases):
+    # Multiple dense/sparse blocks and unsorted cone sizes exercise cached
+    # derivative source/owner maps on both the slack and direct-cone paths.
+    problem = planted_problem(cases)
     ipm = {"diff_method": "exact", "tol_gap_abs": 1e-11, "tol_gap_rel": 1e-11, "tol_feas": 1e-11}
     solver = problem.solver(device, enable_grad=True, ipm_options=ipm)
     sol = solver.solve()

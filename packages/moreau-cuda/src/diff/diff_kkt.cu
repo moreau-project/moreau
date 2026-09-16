@@ -16,6 +16,39 @@ namespace moreau {
 
 static constexpr double REG_DIFF = 1e-8;  // Regularization for diff KKT
 
+// Symbolic maps shared across batches and backward calls. Empty intervals are
+// skipped (e.g. dense SOC cones within the sparse-only offset array).
+static std::vector<int64_t> cone_entry_owners(const std::vector<int64_t>& offsets) {
+    std::vector<int64_t> owners(offsets.back());
+    for (size_t k = 0; k + 1 < offsets.size(); ++k) {
+        std::fill(owners.begin() + offsets[k], owners.begin() + offsets[k + 1], k);
+    }
+    return owners;
+}
+
+// Map full dense blocks to packed derivative values. SOC uses row-major upper
+// triangles; PSD uses column-major upper triangles. Offsets are in sorted order.
+static std::vector<int64_t> symmetric_block_sources(
+    const std::vector<int64_t>& dims,
+    const std::vector<int64_t>& packed_offsets,
+    const std::vector<int64_t>& full_offsets,
+    bool column_major) {
+    std::vector<int64_t> sources(full_offsets.back());
+    for (size_t k = 0; k < dims.size(); ++k) {
+        const int64_t dim = dims[k];
+        if (full_offsets[k] == full_offsets[k + 1]) continue;
+        for (int64_t r = 0; r < dim; ++r) {
+            for (int64_t c = 0; c < dim; ++c) {
+                const int64_t lo = std::min(r, c), hi = std::max(r, c);
+                const int64_t packed = column_major ? hi * (hi + 1) / 2 + lo
+                    : lo * (2 * dim - lo + 1) / 2 + hi - lo;
+                sources[full_offsets[k] + r * dim + c] = packed_offsets[k] + packed;
+            }
+        }
+    }
+    return sources;
+}
+
 /// Convert cuDSS status code to a human-readable string
 static const char* cudss_status_string(cudssStatus_t status) {
     switch (status) {
@@ -1226,12 +1259,13 @@ DiffKKT::DiffKKT(
     // Now only dense cones (dim<=4) use the dense Hs/KKT arrays
     numSocCones_ = cones.numSocCones;
     if (cones.numSocCones > 0) {
-        upload_indices(cones.socConeDims, d_soc_dims_);
-        upload_indices(soc_Hs_offsets, d_soc_Hs_offsets_);
-        upload_indices(soc_kkt_offsets, d_soc_kkt_offsets_);
+        const auto soc_sources = symmetric_block_sources(
+            cones.socConeDims, soc_Hs_offsets, soc_kkt_offsets, false);
+        upload_indices(soc_sources, H_soc_val_idx_);
         if (numSparseSoc_ > 0) {
-            upload_indices(soc_sparse_offsets_host, d_soc_sparse_offsets_);
-            upload_indices(soc_sparse_indices_host, d_soc_sparse_indices_);
+            auto sparse_owners = cone_entry_owners(soc_sparse_offsets_host);
+            for (auto& owner : sparse_owners) owner = soc_sparse_indices_host[owner];
+            upload_indices(sparse_owners, d_soc_sparse_owners_);
             upload_indices(H_soc_sparse_diag_idx_host, H_soc_sparse_diag_idx_);
             upload_indices(H_soc_v1_col_idx_host, H_soc_v1_col_idx_);
             upload_indices(H_soc_v2_col_idx_host, H_soc_v2_col_idx_);
@@ -1299,29 +1333,27 @@ DiffKKT::DiffKKT(
         }
 
         upload_indices(H_psd_idx_host, H_psd_idx_);
-        upload_indices(psd_Hs_offsets, d_psd_Hs_offsets_);
-        upload_indices(psd_kkt_offsets, d_psd_kkt_offsets_);
-        upload_indices(psd_svec_dims, d_psd_svec_dims_);
+        const auto psd_sources = symmetric_block_sources(
+            psd_svec_dims, psd_Hs_offsets, psd_kkt_offsets, true);
+        upload_indices(psd_sources, H_psd_val_idx_);
     }
 
     // Store GenPowerCone variable-dim info for populate_H_blocks_kernel (sparse)
     numGenPowerCones_ = cones.numGenPowerCones;
     if (cones.numGenPowerCones > 0) {
-        // Build dims array and sparse offsets (prefix sum of dim per cone)
-        std::vector<int64_t> genpow_dims(cones.numGenPowerCones);
+        // Build sparse offsets, then cache each entry's cone index.
         std::vector<int64_t> genpow_sparse_offsets(cones.numGenPowerCones + 1, 0);
         int64_t dim_acc = 0;
         for (int64_t k = 0; k < cones.numGenPowerCones; ++k) {
             int64_t d = cones.genPowerDim1s[k] + cones.genPowerDim2s[k];
-            genpow_dims[k] = d;
             genpow_sparse_offsets[k] = dim_acc;
             dim_acc += d;
         }
         genpow_sparse_offsets[cones.numGenPowerCones] = dim_acc;
         totalGenpowDim_ = dim_acc;
 
-        upload_indices(genpow_dims, d_genpow_dims_);
-        upload_indices(genpow_sparse_offsets, d_genpow_sparse_offsets_);
+        const auto genpow_owners = cone_entry_owners(genpow_sparse_offsets);
+        upload_indices(genpow_owners, d_genpow_sparse_owners_);
 
         // Upload sparse GenPowerCone index arrays
         upload_indices(H_genpow_sparse_diag_idx_host, H_genpow_sparse_diag_idx_);
@@ -1355,6 +1387,8 @@ DiffKKT::DiffKKT(
             dim_offsets[s + 1] = dim_offsets[s] + info.soc_dim;
         }
         upload_indices(dim_offsets, d_xcone_soc_sparse_dim_offsets_);
+        const auto sparse_owners = cone_entry_owners(dim_offsets);
+        upload_indices(sparse_owners, d_xcone_soc_sparse_owners_);
         upload_indices(sparse_to_xc, d_xcone_soc_sparse_to_xc_);
         upload_indices(sparse_dims, d_xcone_soc_sparse_dims_);
     }
@@ -1378,7 +1412,8 @@ DiffKKT::DiffKKT(
         for (int64_t k = 0; k < cones.numXGenPowerCones; ++k) {
             dim_offsets[k + 1] = dim_offsets[k] + xgenpow_expansion_info[k].genpow_dim;
         }
-        upload_indices(dim_offsets, d_xcone_genpow_dim_offsets_);
+        const auto genpow_owners = cone_entry_owners(dim_offsets);
+        upload_indices(genpow_owners, d_xcone_genpow_owners_);
     }
 
     // Store c3 index (single value)
@@ -1666,10 +1701,7 @@ __global__ void populate_H_blocks_kernel(
     // Dense SOC (dim<=4)
     const int64_t* __restrict__ H_soc_idx,
     const double* __restrict__ soc_H,
-    const int64_t* __restrict__ d_soc_dims,
-    const int64_t* __restrict__ d_soc_Hs_offsets,
-    const int64_t* __restrict__ d_soc_kkt_offsets,
-    int64_t numSocCones,
+    const int64_t* __restrict__ H_soc_val_idx,
     int64_t totalSocHsEntries,
     int64_t totalSocKktEntries,
     // Sparse SOC (dim>4)
@@ -1684,8 +1716,7 @@ __global__ void populate_H_blocks_kernel(
     const double* __restrict__ soc_sparse_v2,
     const double* __restrict__ soc_sparse_c1,
     const double* __restrict__ soc_sparse_c2,
-    const int64_t* __restrict__ d_soc_sparse_offsets,
-    const int64_t* __restrict__ d_soc_sparse_indices,
+    const int64_t* __restrict__ d_soc_sparse_owners,
     int64_t totalSparseSocDim,
     int64_t numSparseSoc,
     // Exp/Power
@@ -1696,9 +1727,7 @@ __global__ void populate_H_blocks_kernel(
     // PSD cones (dense svec_dim x svec_dim, symmetric)
     const int64_t* __restrict__ H_psd_idx,
     const double* __restrict__ psd_H,
-    const int64_t* __restrict__ d_psd_Hs_offsets,
-    const int64_t* __restrict__ d_psd_kkt_offsets,
-    const int64_t* __restrict__ d_psd_svec_dims,
+    const int64_t* __restrict__ H_psd_val_idx,
     int64_t numPsdCones,
     int64_t totalPsdHsEntries,
     int64_t totalPsdKktEntries,
@@ -1718,7 +1747,7 @@ __global__ void populate_H_blocks_kernel(
     const double* __restrict__ genpow_sparse_right2,
     const double* __restrict__ genpow_sparse_left3,
     const double* __restrict__ genpow_sparse_c3,
-    const int64_t* __restrict__ d_genpow_sparse_offsets,
+    const int64_t* __restrict__ d_genpow_sparse_owners,
     int64_t numGenPowerCones,
     int64_t totalGenpowDim,
     int64_t numZeroCones,
@@ -1747,30 +1776,9 @@ __global__ void populate_H_blocks_kernel(
     h_idx += numNonnegCones;
 
     // Dense SOC cones (dim<=4): variable-dim dense blocks, symmetric (self-dual cone)
-    // Uses dense-only offsets — sparse cones have offset 0 and are skipped by totalSocKktEntries
+    // The cached source map contains only dense cones.
     for (int64_t tid = threadIdx.x; tid < totalSocKktEntries; tid += blockDim.x) {
-        int64_t lo_k = 0, hi_k = numSocCones;
-        while (lo_k < hi_k) {
-            int64_t mid = (lo_k + hi_k) / 2;
-            if (d_soc_kkt_offsets[mid + 1] <= tid) {
-                lo_k = mid + 1;
-            } else {
-                hi_k = mid;
-            }
-        }
-        int64_t k = lo_k;
-        int64_t dim = d_soc_dims[k];
-        int64_t local_idx = tid - d_soc_kkt_offsets[k];
-        int64_t r = local_idx / dim;
-        int64_t c = local_idx % dim;
-
-        int64_t lo_rc = (r <= c) ? r : c;
-        int64_t hi_rc = (r <= c) ? c : r;
-        int64_t tri_idx = lo_rc * (2 * dim - lo_rc + 1) / 2 + (hi_rc - lo_rc);
-
-        int64_t hs_off = d_soc_Hs_offsets[k];
-        int64_t soc_h_base = batch * totalSocHsEntries + hs_off;
-        vals[H_soc_idx[tid]] = -soc_H[soc_h_base + tri_idx];
+        vals[H_soc_idx[tid]] = -soc_H[batch * totalSocHsEntries + H_soc_val_idx[tid]];
     }
 
     // Sparse SOC cones (dim>4): populate using rank-2 decomposition
@@ -1784,33 +1792,14 @@ __global__ void populate_H_blocks_kernel(
 
         // 2. v1 expansion column entries in H-block rows: -c1 * v1[i]
         for (int64_t tid = threadIdx.x; tid < totalSparseSocDim; tid += blockDim.x) {
-            // Find which sparse cone this entry belongs to (binary search in sparse_offsets)
-            int64_t lo_k = 0, hi_k = numSocCones;
-            while (lo_k < hi_k) {
-                int64_t mid = (lo_k + hi_k) / 2;
-                if (d_soc_sparse_offsets[mid + 1] <= tid) {
-                    lo_k = mid + 1;
-                } else {
-                    hi_k = mid;
-                }
-            }
-            int64_t sparse_cone = d_soc_sparse_indices[lo_k];
+            const int64_t sparse_cone = d_soc_sparse_owners[tid];
             double c1_val = soc_sparse_c1[batch * numSparseSoc + sparse_cone];
             vals[H_soc_v1_col_idx[tid]] = -c1_val * soc_sparse_v1[batch * totalSparseSocDim + tid];
         }
 
         // 3. v2 expansion column entries in H-block rows: -c2 * v2[i]
         for (int64_t tid = threadIdx.x; tid < totalSparseSocDim; tid += blockDim.x) {
-            int64_t lo_k = 0, hi_k = numSocCones;
-            while (lo_k < hi_k) {
-                int64_t mid = (lo_k + hi_k) / 2;
-                if (d_soc_sparse_offsets[mid + 1] <= tid) {
-                    lo_k = mid + 1;
-                } else {
-                    hi_k = mid;
-                }
-            }
-            int64_t sparse_cone = d_soc_sparse_indices[lo_k];
+            const int64_t sparse_cone = d_soc_sparse_owners[tid];
             double c2_val = soc_sparse_c2[batch * numSparseSoc + sparse_cone];
             vals[H_soc_v2_col_idx[tid]] = -c2_val * soc_sparse_v2[batch * totalSparseSocDim + tid];
         }
@@ -1841,34 +1830,10 @@ __global__ void populate_H_blocks_kernel(
 
     // PSD cones: dense svec_dim x svec_dim blocks, symmetric (self-dual cone)
     // psd_H stores upper triangle in svec order; KKT needs full matrix.
-    // Map full (r,c) to upper-tri index for reading (same approach as dense SOC).
+    // The cached source map expands the packed triangle to the full block.
     if (numPsdCones > 0 && totalPsdKktEntries > 0) {
         for (int64_t tid = threadIdx.x; tid < totalPsdKktEntries; tid += blockDim.x) {
-            // Binary search for which PSD cone this tid belongs to
-            int64_t lo_k = 0, hi_k = numPsdCones;
-            while (lo_k < hi_k) {
-                int64_t mid = (lo_k + hi_k) / 2;
-                if (d_psd_kkt_offsets[mid + 1] <= tid) {
-                    lo_k = mid + 1;
-                } else {
-                    hi_k = mid;
-                }
-            }
-            int64_t k = lo_k;
-            int64_t svec_dim = d_psd_svec_dims[k];
-            int64_t local_idx = tid - d_psd_kkt_offsets[k];
-            int64_t r = local_idx / svec_dim;
-            int64_t c = local_idx % svec_dim;
-
-            // Map (r,c) to column-major upper-tri index: col*(col+1)/2 + row
-            // (scatter_jacobian_col_kernel stores H[k*(k+1)/2 + i] for col k, row i)
-            int64_t lo_rc = (r <= c) ? r : c;
-            int64_t hi_rc = (r <= c) ? c : r;
-            int64_t tri_idx = hi_rc * (hi_rc + 1) / 2 + lo_rc;
-
-            int64_t hs_off = d_psd_Hs_offsets[k];
-            int64_t psd_h_base = batch * totalPsdHsEntries + hs_off;
-            vals[H_psd_idx[tid]] = -psd_H[psd_h_base + tri_idx];
+            vals[H_psd_idx[tid]] = -psd_H[batch * totalPsdHsEntries + H_psd_val_idx[tid]];
         }
     }
 
@@ -1892,17 +1857,8 @@ __global__ void populate_H_blocks_kernel(
 
         // 4. v3 expansion column entries in H-block rows: -c3*left3[i]
         for (int64_t tid = threadIdx.x; tid < totalGenpowDim; tid += blockDim.x) {
-            // Find which cone this entry belongs to (binary search in sparse offsets)
-            int64_t lo_k = 0, hi_k = numGenPowerCones;
-            while (lo_k < hi_k) {
-                int64_t mid = (lo_k + hi_k) / 2;
-                if (d_genpow_sparse_offsets[mid + 1] <= tid) {
-                    lo_k = mid + 1;
-                } else {
-                    hi_k = mid;
-                }
-            }
-            double c3_val = genpow_sparse_c3[batch * numGenPowerCones + lo_k];
+            const int64_t cone = d_genpow_sparse_owners[tid];
+            double c3_val = genpow_sparse_c3[batch * numGenPowerCones + cone];
             vals[H_genpow_v3_col_idx[tid]] = -c3_val * genpow_sparse_left3[batch * totalGenpowDim + tid];
         }
 
@@ -1942,7 +1898,7 @@ __global__ void populate_H_blocks_kernel(
 //
 // One block per batch; threads stride over totalXGenPowDim entries +
 // 3*numXGenPowerCones expansion-diag entries. The c3 lookup needs the
-// cone index for entry i, found via binary search on d_dim_offsets.
+// precomputed cone index for entry i.
 __global__ void populate_xcone_genpow_rank3_kernel(
     double* __restrict__ kkt_values,
     const int64_t* __restrict__ H_xcone_genpow_du_stat_diag_idx,
@@ -1957,7 +1913,7 @@ __global__ void populate_xcone_genpow_rank3_kernel(
     const int64_t* __restrict__ H_xcone_genpow_exp_v2_du_idx,
     const int64_t* __restrict__ H_xcone_genpow_exp_v3_du_idx,
     const int64_t* __restrict__ H_xcone_genpow_exp_diag_idx,
-    const int64_t* __restrict__ d_xcone_genpow_dim_offsets,   // [numXGenPowerCones+1]
+    const int64_t* __restrict__ d_xcone_genpow_owners,   // [totalXGenPowDim]
     const double* __restrict__ rank3_diag,
     const double* __restrict__ rank3_left1,
     const double* __restrict__ rank3_right1,
@@ -1983,13 +1939,7 @@ __global__ void populate_xcone_genpow_rank3_kernel(
     const double* c3_b     = rank3_c3     + batch * numXGenPowerCones;
 
     for (int64_t i = threadIdx.x; i < totalXGenPowDim; i += blockDim.x) {
-        // Find cone index via binary search on dim_offsets.
-        int64_t lo = 0, hi = numXGenPowerCones;
-        while (lo < hi) {
-            int64_t mid = (lo + hi) / 2;
-            if (d_xcone_genpow_dim_offsets[mid + 1] <= i) lo = mid + 1; else hi = mid;
-        }
-        int64_t cone = lo;
+        const int64_t cone = d_xcone_genpow_owners[i];
         double c3v = c3_b[cone];
 
         double d  = diag_b[i];
@@ -2030,7 +1980,7 @@ __global__ void populate_xcone_soc_rank2_kernel(
     const int64_t* __restrict__ H_exp_v1_du_idx,
     const int64_t* __restrict__ H_exp_v2_du_idx,
     const int64_t* __restrict__ H_exp_diag_idx,
-    const int64_t* __restrict__ d_dim_offsets,        // [numSparseXSoc+1]
+    const int64_t* __restrict__ d_sparse_owners,      // [totalSparseXSocDim]
     const double* __restrict__ sparse_diag,
     const double* __restrict__ sparse_v1,
     const double* __restrict__ sparse_v2,
@@ -2051,12 +2001,7 @@ __global__ void populate_xcone_soc_rank2_kernel(
     const double* c2_b   = sparse_c2   + batch * numSparseXSoc;
 
     for (int64_t i = threadIdx.x; i < totalSparseXSocDim; i += blockDim.x) {
-        int64_t lo = 0, hi = numSparseXSoc;
-        while (lo < hi) {
-            int64_t mid = (lo + hi) / 2;
-            if (d_dim_offsets[mid + 1] <= i) lo = mid + 1; else hi = mid;
-        }
-        int64_t cone = lo;
+        const int64_t cone = d_sparse_owners[i];
         double c1v = c1_b[cone];
         double c2v = c2_b[cone];
         double d  = diag_b[i];
@@ -2283,10 +2228,7 @@ void DiffKKT::updateJ(
         // Dense SOC
         H_soc_idx_.get(),
         soc_H,
-        d_soc_dims_.get(),
-        d_soc_Hs_offsets_.get(),
-        d_soc_kkt_offsets_.get(),
-        numSocCones_,
+        H_soc_val_idx_.get(),
         totalSocHsEntries_,
         totalSocKktEntries_,
         // Sparse SOC
@@ -2301,8 +2243,7 @@ void DiffKKT::updateJ(
         soc_sparse_v2,
         soc_sparse_c1,
         soc_sparse_c2,
-        d_soc_sparse_offsets_.get(),
-        d_soc_sparse_indices_.get(),
+        d_soc_sparse_owners_.get(),
         totalSparseSocDim_,
         numSparseSoc_,
         // Exp/Power
@@ -2313,9 +2254,7 @@ void DiffKKT::updateJ(
         // PSD cones
         H_psd_idx_.get(),
         psd_H,
-        d_psd_Hs_offsets_.get(),
-        d_psd_kkt_offsets_.get(),
-        d_psd_svec_dims_.get(),
+        H_psd_val_idx_.get(),
         numPsdCones_,
         totalPsdHsEntries_,
         totalPsdKktEntries_,
@@ -2335,7 +2274,7 @@ void DiffKKT::updateJ(
         genpow_sparse_right2,
         genpow_sparse_left3,
         genpow_sparse_c3,
-        d_genpow_sparse_offsets_.get(),
+        d_genpow_sparse_owners_.get(),
         numGenPowerCones_,
         totalGenpowDim_,
         cones.numZeroCones,
@@ -2405,7 +2344,7 @@ void DiffKKT::updateJ(
             H_xcone_soc_exp_v1_du_idx_.get(),
             H_xcone_soc_exp_v2_du_idx_.get(),
             H_xcone_soc_exp_diag_idx_.get(),
-            d_xcone_soc_sparse_dim_offsets_.get(),
+            d_xcone_soc_sparse_owners_.get(),
             xcone_soc_rank2_diag,
             xcone_soc_rank2_v1,
             xcone_soc_rank2_v2,
@@ -2437,7 +2376,7 @@ void DiffKKT::updateJ(
             H_xcone_genpow_exp_v2_du_idx_.get(),
             H_xcone_genpow_exp_v3_du_idx_.get(),
             H_xcone_genpow_exp_diag_idx_.get(),
-            d_xcone_genpow_dim_offsets_.get(),
+            d_xcone_genpow_owners_.get(),
             xcone_genpow_rank3_diag,
             xcone_genpow_rank3_left1,
             xcone_genpow_rank3_right1,
