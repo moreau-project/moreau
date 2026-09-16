@@ -236,6 +236,9 @@ pub struct CompiledSolver<T: FloatT> {
     /// Chordal decomposition info (Some iff PSD cones were decomposed at construction)
     #[cfg(feature = "sdp")]
     chordal_info: Option<ChordalInfo<T>>,
+    /// Original-cone adjoint for external states, which omit clique overlap variables.
+    #[cfg(feature = "sdp")]
+    external_state_adjoint: Mutex<Option<Box<CompiledSolver<T>>>>,
     /// Precomputed augmented problem structure (Some iff chordal_info is Some)
     #[cfg(feature = "sdp")]
     augmented_problem: Option<CompactAugmentedProblem<T>>,
@@ -692,6 +695,8 @@ impl<T: FloatT> CompiledSolver<T> {
             matrices_equilibrated: AtomicBool::new(false),
             #[cfg(feature = "sdp")]
             chordal_info,
+            #[cfg(feature = "sdp")]
+            external_state_adjoint: Mutex::new(None),
             #[cfg(feature = "sdp")]
             augmented_problem,
             P_nnz_orig,
@@ -2581,6 +2586,44 @@ impl<T: FloatT> CompiledSolver<T> {
             return Err(SolverError::BadInputData(
                 "backward_with_data() requires z_x_batch when the solver has direct-x cones",
             ));
+        }
+
+        // External autograd states contain only the original x/z/s. Chordal
+        // reversal loses the clique slack split and overlap variables, so this
+        // state cannot be copied into the augmented solver. Differentiate the
+        // original cone system instead, retaining its symbolic factorization
+        // across calls. Cached backward() still uses the augmented state.
+        #[cfg(feature = "sdp")]
+        if let Some(ref chordal_info) = self.chordal_info {
+            let mut adjoint = self.external_state_adjoint.lock().unwrap();
+            if adjoint.is_none() {
+                let mut settings = self.settings.clone();
+                settings.core_mut().ipm.chordal_decomposition_enable = false;
+                *adjoint = Some(Box::new(Self::new_with_xcones(
+                    self.n,
+                    self.m,
+                    &self.P_row_offsets,
+                    &self.P_col_indices,
+                    &self.A_row_offsets,
+                    &self.A_col_indices,
+                    &chordal_info.init_cones,
+                    &self.dir_cones,
+                    settings,
+                    self.num_threads,
+                    true,
+                )?));
+            }
+            return adjoint.as_ref().unwrap().backward_with_data_and_z_x(
+                upstream_grads,
+                P_values_batch,
+                A_values_batch,
+                q_batch,
+                b_batch,
+                x_batch,
+                z_batch,
+                s_batch,
+                z_x_batch,
+            );
         }
 
         let start = Instant::now();
