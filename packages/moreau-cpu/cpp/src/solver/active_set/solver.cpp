@@ -123,6 +123,9 @@ ActiveSetSolver::ActiveSetSolver(
     P_ci_.assign(P_ci, P_ci + nnzP);
     A_ro_.assign(A_ro, A_ro + m + 1);
     A_ci_.assign(A_ci, A_ci + nnzA);
+    if (enable_grad_) {
+        P_gradient_weights_ = symmetric_csr_gradient_weights(n_, P_ro_.data(), P_ci_.data());
+    }
 
     // Pre-allocate result buffers
     x_sol.resize(batchSize * n, 0.0);
@@ -448,9 +451,9 @@ void ActiveSetSolver::backward(const double* dx, const double* dz, const double*
                 dA_buf.data(), db.data() + batch * m_);
 
             dense_to_csr_values(dH_buf.data(), n_, n_, P_ro_.data(), P_ci_.data(),
-                                dP_values.data() + batch * nnzP_, true);
+                                dP_values.data() + batch * nnzP_, P_gradient_weights_.data());
             dense_to_csr_values(dA_buf.data(), m_, n_, A_ro_.data(), A_ci_.data(),
-                                dA_values.data() + batch * nnzA_, false);
+                                dA_values.data() + batch * nnzA_);
         }
     } else {
         std::vector<std::thread> threads;
@@ -484,9 +487,9 @@ void ActiveSetSolver::backward(const double* dx, const double* dz, const double*
                             dA_buf.data(), db.data() + batch * m_);
 
                         dense_to_csr_values(dH_buf.data(), n_, n_, P_ro_.data(), P_ci_.data(),
-                                            dP_values.data() + batch * nnzP_, true);
+                                            dP_values.data() + batch * nnzP_, P_gradient_weights_.data());
                         dense_to_csr_values(dA_buf.data(), m_, n_, A_ro_.data(), A_ci_.data(),
-                                            dA_values.data() + batch * nnzA_, false);
+                                            dA_values.data() + batch * nnzA_);
                     }
                 } catch (...) {
                     exceptions[t] = std::current_exception();
@@ -607,9 +610,9 @@ void ActiveSetSolver::backward_with_data(
         );
 
         dense_to_csr_values(dH_buf.data(), n_, n_, P_ro_.data(), P_ci_.data(),
-                            dP_values.data() + batch * nnzP_, true);
+                            dP_values.data() + batch * nnzP_, P_gradient_weights_.data());
         dense_to_csr_values(dA_buf.data(), m_, n_, A_ro_.data(), A_ci_.data(),
-                            dA_values.data() + batch * nnzA_, false);
+                            dA_values.data() + batch * nnzA_);
     };
 
     if (nthreads <= 1) {

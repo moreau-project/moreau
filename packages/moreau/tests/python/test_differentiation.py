@@ -486,8 +486,9 @@ class TestBatchedDifferentiation:
 @pytest.mark.parametrize(
     "method,storage,interface",
     [
-        (method, "full", interface)
+        (method, storage, interface)
         for method in ("auto", "active_set", "ipm")
+        for storage in ("full", "full_unsorted")
         for interface in ("numpy", "torch")
     ]
     + [("active_set", storage, "torch") for storage in ("upper", "lower")],
@@ -510,8 +511,12 @@ def test_equality_qp_symmetric_P_gradient(method, storage, interface):
         ),
     )
     matrix = sparse.csr_matrix(
-        P if storage == "full" else np.triu(P) if storage == "upper" else np.tril(P)
+        P if storage.startswith("full") else np.triu(P) if storage == "upper" else np.tril(P)
     )
+    if storage == "full_unsorted":
+        for start, end in zip(matrix.indptr[:-1], matrix.indptr[1:]):
+            matrix.indices[start:end] = matrix.indices[start:end][::-1]
+            matrix.data[start:end] = matrix.data[start:end][::-1]
     if interface == "numpy":
         solver = moreau.Solver(matrix, q, A, b, cones, settings)
         sol = solver.solve()
@@ -564,7 +569,7 @@ def test_equality_qp_symmetric_P_gradient(method, storage, interface):
         expected = ref_grad[name].reshape(-1)
         if name == "dP_values":
             expected = expected.reshape(2, 2)[row, col]
-            if storage != "full":
+            if not storage.startswith("full"):
                 expected = expected * np.where(row == col, 1.0, 2.0)
         np.testing.assert_allclose(
             gradients[name],

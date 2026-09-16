@@ -183,6 +183,9 @@ pub struct CompiledSolver<T: FloatT> {
     A_col_indices: Vec<usize>,
     /// CSR to CSC index mapping for P
     P_csr_to_csc: Vec<usize>,
+    /// Gradient gather map, including lower entries mapped to their upper counterpart.
+    /// Uses the original pattern before chordal augmentation.
+    P_csr_to_csc_grad: Vec<usize>,
     /// CSR to CSC index mapping for A
     A_csr_to_csc: Vec<usize>,
     /// CSC pattern for P (for solver initialization)
@@ -434,41 +437,55 @@ impl<T: FloatT> CompiledSolver<T> {
             vec![T::zero(); nnz_A],
         );
 
-        // Convert to CSC with mapping
-        let (P_csc_full, _P_csr_to_csc_full) = P_csr.to_csc_with_mapping();
+        // Convert to CSC with mapping. CSR-to-CSC already provides the full
+        // permutation, so compose it with the upper-triangle filter directly.
+        let (P_csc_full, P_csr_to_csc_full) = P_csr.to_csc_with_mapping();
         let (A_csc, A_csr_to_csc) = A_csr.to_csc_with_mapping();
-
-        // Convert P to upper-triangular (solver internally uses triu form)
         let (P_csc, P_csr_to_csc) = if !P_csc_full.is_triu() {
             let P_triu = P_csc_full.to_triu();
-            let mut mapping = vec![usize::MAX; nnz_P];
-            let mut csr_idx = 0;
-            for row in 0..n {
-                let row_start = P_row_offsets[row];
-                let row_end = P_row_offsets[row + 1];
-                for k in row_start..row_end {
-                    let col = P_col_indices[k];
-                    if col >= row {
-                        let csc_col_start = P_triu.colptr[col];
-                        let csc_col_end = P_triu.colptr[col + 1];
-                        let mut found = false;
-                        for csc_idx in csc_col_start..csc_col_end {
-                            if P_triu.rowval[csc_idx] == row {
-                                mapping[csr_idx] = csc_idx;
-                                found = true;
-                                break;
-                            }
-                        }
-                        assert!(found,
-                            "P CSR-to-CSC mapping failed: upper-tri entry ({},{}) not found in triu CSC pattern",
-                            row, col);
+            let mut full_to_triu = vec![usize::MAX; nnz_P];
+            let mut triu_idx = 0;
+            for col in 0..n {
+                for k in P_csc_full.colptr[col]..P_csc_full.colptr[col + 1] {
+                    if P_csc_full.rowval[k] <= col {
+                        full_to_triu[k] = triu_idx;
+                        triu_idx += 1;
                     }
-                    csr_idx += 1;
                 }
             }
+            let mapping = P_csr_to_csc_full.iter().map(|&k| full_to_triu[k]).collect();
             (P_triu, mapping)
         } else {
-            (P_csc_full, _P_csr_to_csc_full)
+            (P_csc_full, P_csr_to_csc_full)
+        };
+
+        // The value scatter must ignore lower entries, but the gradient gather
+        // must fill them. Build its separate map once in O(n + nnz(P)), before
+        // chordal augmentation changes the internal pattern. A stamped column
+        // lookup supports unsorted input CSR without any per-entry searches.
+        let P_csr_to_csc_grad = if enable_grad {
+            let mut mapping = P_csr_to_csc.clone();
+            let mut upper_position = vec![usize::MAX; n];
+            for row in 0..n {
+                let start = P_csc.colptr[row];
+                let end = P_csc.colptr[row + 1];
+                for k in start..end {
+                    upper_position[P_csc.rowval[k]] = k;
+                }
+                for k in P_row_offsets[row]..P_row_offsets[row + 1] {
+                    if mapping[k] == usize::MAX {
+                        let col = P_col_indices[k];
+                        let counterpart = upper_position[col];
+                        assert!(counterpart >= start && counterpart < end,
+                            "P sparsity pattern inconsistency: lower-tri entry ({},{}) has no upper-tri counterpart ({},{})",
+                            row, col, col, row);
+                        mapping[k] = counterpart;
+                    }
+                }
+            }
+            mapping
+        } else {
+            Vec::new()
         };
 
         let mut cones_internal = cones.to_vec();
@@ -652,6 +669,7 @@ impl<T: FloatT> CompiledSolver<T> {
             A_row_offsets: A_row_offsets.to_vec(),
             A_col_indices: A_col_indices.to_vec(),
             P_csr_to_csc,
+            P_csr_to_csc_grad,
             A_csr_to_csc,
             P_csc_pattern: P_csc_solver,
             A_csc_pattern: A_csc_solver,
@@ -742,57 +760,6 @@ impl<T: FloatT> CompiledSolver<T> {
                 csr_values[csr_idx] = csc_values[csc_idx];
             }
         }
-        csr_values
-    }
-
-    /// Convert P gradient from CSC (upper-tri) back to CSR (full symmetric).
-    ///
-    /// For symmetric P, the gradient dP is also symmetric: dP[i,j] = dP[j,i].
-    /// The backward pass computes gradients in upper-triangular CSC format.
-    /// When the input P was full symmetric (both triangles stored), we need to
-    /// copy the gradient to both the upper and lower triangle positions.
-    fn csc_to_csr_values_symmetric_P(&self, csc_values: &[T], mapping: &[usize]) -> Vec<T> {
-        let mut csr_values = vec![T::zero(); mapping.len()];
-
-        // First pass: copy values from CSC to CSR for entries that have direct mappings
-        // (upper-triangle entries that map to upper-triangle positions)
-        let mut csr_idx = 0;
-        for row in 0..self.n {
-            let row_start = self.P_row_offsets[row];
-            let row_end = self.P_row_offsets[row + 1];
-            for k in row_start..row_end {
-                let col = self.P_col_indices[k];
-                let csc_idx = mapping[csr_idx];
-
-                if csc_idx != usize::MAX {
-                    // This entry maps directly (upper-tri in CSR maps to upper-tri in CSC)
-                    csr_values[csr_idx] = csc_values[csc_idx];
-                } else {
-                    // This is a lower-triangle entry (row > col) - find the transpose entry
-                    // The transpose is at (col, row) in CSC format
-                    // For CSC, we find column 'row' and look for row index 'col'
-                    let trans_col = row;
-                    let trans_row = col;
-                    // Look up (trans_row, trans_col) in the CSC structure
-                    // CSC: colptr[j]..colptr[j+1] gives entries in column j, rowval[k] gives row
-                    let col_start = self.P_csc_pattern.colptr[trans_col];
-                    let col_end = self.P_csc_pattern.colptr[trans_col + 1];
-                    let mut found = false;
-                    for kk in col_start..col_end {
-                        if self.P_csc_pattern.rowval[kk] == trans_row {
-                            csr_values[csr_idx] = csc_values[kk];
-                            found = true;
-                            break;
-                        }
-                    }
-                    assert!(found,
-                        "P sparsity pattern inconsistency: lower-tri entry ({},{}) has no upper-tri counterpart ({},{})",
-                        row, col, col, row);
-                }
-                csr_idx += 1;
-            }
-        }
-
         csr_values
     }
 
@@ -2458,44 +2425,40 @@ impl<T: FloatT> CompiledSolver<T> {
 
                     // Map output gradients from augmented to original space if chordal is active
                     #[cfg(feature = "sdp")]
-                    let (dP_values, dq_out, dA_values, db_out) =
-                        if let Some(ref aug) = self.augmented_problem {
-                            // dq: first n_orig entries (overlap variables discarded)
-                            let dq_orig = backward_result.dq[..aug.n_orig].to_vec();
+                    let (dP_values, dq_out, dA_values, db_out) = if let Some(ref aug) =
+                        self.augmented_problem
+                    {
+                        // dq: first n_orig entries (overlap variables discarded)
+                        let dq_orig = backward_result.dq[..aug.n_orig].to_vec();
 
-                            // db: reverse the b_row_map permutation (adjoint of scatter)
-                            let mut db_orig = vec![T::zero(); aug.m_orig];
-                            for (aug_i, &orig_i) in aug.b_row_map.iter().enumerate() {
-                                if orig_i != usize::MAX {
-                                    db_orig[orig_i] += backward_result.db[aug_i];
-                                }
+                        // db: reverse the b_row_map permutation (adjoint of scatter)
+                        let mut db_orig = vec![T::zero(); aug.m_orig];
+                        for (aug_i, &orig_i) in aug.b_row_map.iter().enumerate() {
+                            if orig_i != usize::MAX {
+                                db_orig[orig_i] += backward_result.db[aug_i];
                             }
+                        }
 
-                            // dP: first P_nnz_orig entries of augmented P gradient (CSC)
-                            let dP_csc_orig = backward_result.dP.nzval[..aug.P_nnz_orig].to_vec();
-                            // dA: first A_nnz_orig entries of augmented A gradient (CSC)
-                            let dA_csc_orig = backward_result.dA.nzval[..aug.A_nnz_orig].to_vec();
+                        // dP: first P_nnz_orig entries of augmented P gradient (CSC)
+                        let dP_csc_orig = backward_result.dP.nzval[..aug.P_nnz_orig].to_vec();
+                        // dA: first A_nnz_orig entries of augmented A gradient (CSC)
+                        let dA_csc_orig = backward_result.dA.nzval[..aug.A_nnz_orig].to_vec();
 
-                            let dP_csr = self
-                                .csc_to_csr_values_symmetric_P(&dP_csc_orig, &self.P_csr_to_csc);
-                            let dA_csr = self.csc_to_csr_values(&dA_csc_orig, &self.A_csr_to_csc);
+                        let dP_csr = self.csc_to_csr_values(&dP_csc_orig, &self.P_csr_to_csc_grad);
+                        let dA_csr = self.csc_to_csr_values(&dA_csc_orig, &self.A_csr_to_csc);
 
-                            (dP_csr, dq_orig, dA_csr, db_orig)
-                        } else {
-                            let dP_values = self.csc_to_csr_values_symmetric_P(
-                                &backward_result.dP.nzval,
-                                &self.P_csr_to_csc,
-                            );
-                            let dA_values = self
-                                .csc_to_csr_values(&backward_result.dA.nzval, &self.A_csr_to_csc);
-                            (dP_values, backward_result.dq, dA_values, backward_result.db)
-                        };
+                        (dP_csr, dq_orig, dA_csr, db_orig)
+                    } else {
+                        let dP_values = self
+                            .csc_to_csr_values(&backward_result.dP.nzval, &self.P_csr_to_csc_grad);
+                        let dA_values =
+                            self.csc_to_csr_values(&backward_result.dA.nzval, &self.A_csr_to_csc);
+                        (dP_values, backward_result.dq, dA_values, backward_result.db)
+                    };
                     #[cfg(not(feature = "sdp"))]
                     let (dP_values, dq_out, dA_values, db_out) = {
-                        let dP_values = self.csc_to_csr_values_symmetric_P(
-                            &backward_result.dP.nzval,
-                            &self.P_csr_to_csc,
-                        );
+                        let dP_values = self
+                            .csc_to_csr_values(&backward_result.dP.nzval, &self.P_csr_to_csc_grad);
                         let dA_values =
                             self.csc_to_csr_values(&backward_result.dA.nzval, &self.A_csr_to_csc);
                         (dP_values, backward_result.dq, dA_values, backward_result.db)
@@ -2774,10 +2737,8 @@ impl<T: FloatT> CompiledSolver<T> {
                     solver.smoothing_cached = saved_smoothing_cached;
 
                     // Convert CSC gradients back to CSR order
-                    let dP_values = self.csc_to_csr_values_symmetric_P(
-                        &backward_result.dP.nzval,
-                        &self.P_csr_to_csc,
-                    );
+                    let dP_values =
+                        self.csc_to_csr_values(&backward_result.dP.nzval, &self.P_csr_to_csc_grad);
                     let dA_values =
                         self.csc_to_csr_values(&backward_result.dA.nzval, &self.A_csr_to_csc);
 

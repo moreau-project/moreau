@@ -71,10 +71,37 @@ TEST_F(ActiveSetTest, DenseToCsrValues) {
     int64_t ci[] = {0, 1, 1};
     double vals[3] = {};
 
-    dense_to_csr_values(dense, 2, 2, ro, ci, vals, false);
+    dense_to_csr_values(dense, 2, 2, ro, ci, vals);
     EXPECT_EQ(vals[0], 2.0);
     EXPECT_EQ(vals[1], 1.0);
     EXPECT_EQ(vals[2], 2.0);
+}
+
+TEST_F(ActiveSetTest, SymmetricCsrGradientStorage) {
+    struct Case {
+        const char* name;
+        std::vector<int64_t> ro, ci;
+        std::vector<double> expected;
+    };
+    // Use an asymmetric dense gradient so neither summing nor averaging can
+    // accidentally pass as a direct gather. Include an empty row and pattern.
+    double dense[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    const std::vector<Case> cases = {
+        {"full", {0, 2, 4, 5, 6}, {0, 1, 0, 1, 2, 3}, {1, 3.5, 3.5, 6, 11, 16}},
+        {"upper", {0, 2, 3, 4, 5}, {0, 1, 1, 2, 3}, {1, 7, 6, 11, 16}},
+        {"lower", {0, 1, 3, 4, 5}, {0, 0, 1, 2, 3}, {1, 7, 6, 11, 16}},
+        {"diagonal", {0, 1, 2, 3, 4}, {0, 1, 2, 3}, {1, 6, 11, 16}},
+        {"mixed_unsorted", {0, 4, 6, 6, 9}, {2, 0, 3, 1, 0, 1, 3, 0, 2},
+            {12, 1, 8.5, 3.5, 3.5, 6, 16, 8.5, 27}},
+        {"empty", {0, 0, 0, 0, 0}, {}, {}},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.name);
+        const auto weights = symmetric_csr_gradient_weights(4, c.ro.data(), c.ci.data());
+        std::vector<double> values(c.ci.size());
+        dense_to_csr_values(dense, 4, 4, c.ro.data(), c.ci.data(), values.data(), weights.data());
+        EXPECT_EQ(values, c.expected);
+    }
 }
 
 // ============================================================================

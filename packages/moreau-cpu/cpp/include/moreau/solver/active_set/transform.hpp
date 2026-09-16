@@ -83,9 +83,20 @@ void csr_to_dense(double* dense, int64_t rows, int64_t cols,
                   const double* values, bool symmetric = false);
 
 /**
+ * @brief Precompute symmetric CSR gradient weights from a fixed square pattern
+ *
+ * Off-diagonal entries have weight 0.5 when their transpose is also stored,
+ * otherwise 1.0. Diagonal entries have weight 1.0. Supports unsorted rows.
+ * Takes O(n + nnz) time and temporary storage; retain the result across backward calls.
+ */
+std::vector<double> symmetric_csr_gradient_weights(
+    int64_t n, const int64_t* row_offsets, const int64_t* col_indices);
+
+/**
  * @brief Extract sparse CSR values from a dense row-major matrix
  *
- * Inverse of csr_to_dense: reads values at CSR-specified positions.
+ * Reads values at CSR-specified positions, optionally symmetrizing a square
+ * matrix's gradient using precomputed weights. No allocation or pattern searches.
  *
  * @param dense Input dense matrix [rows × cols], row-major
  * @param rows Number of rows
@@ -93,11 +104,12 @@ void csr_to_dense(double* dense, int64_t rows, int64_t cols,
  * @param row_offsets CSR row offsets [rows+1]
  * @param col_indices CSR column indices [nnz]
  * @param values Output CSR values [nnz]
- * @param symmetric If true, for off-diagonal entries (i,j), sum dense[i][j] + dense[j][i]
- *                  to account for P being stored as full symmetric
+ * @param symmetric_weights If non-null, the result of symmetric_csr_gradient_weights:
+ *                  off-diagonal values are weight[k] * (dense[i][j] + dense[j][i]).
+ *                  If null, extract the dense entries without symmetrizing.
  */
 void dense_to_csr_values(const double* dense, int64_t rows, int64_t cols,
                          const int64_t* row_offsets, const int64_t* col_indices,
-                         double* values, bool symmetric = false);
+                         double* values, const double* symmetric_weights = nullptr);
 
 } // namespace moreau
