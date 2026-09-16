@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 namespace moreau {
 
@@ -303,14 +304,27 @@ int daqp_setup_ldp(DaqpWorkspace* work,
 void dense_to_csr_values(const double* dense, int64_t rows, int64_t cols,
                          const int64_t* row_offsets, const int64_t* col_indices,
                          double* values, bool symmetric) {
+    std::vector<bool> sorted_rows;
+    if (symmetric) {
+        sorted_rows.resize(rows);
+        for (int64_t i = 0; i < rows; i++) {
+            sorted_rows[i] = std::is_sorted(col_indices + row_offsets[i],
+                                            col_indices + row_offsets[i + 1]);
+        }
+    }
     for (int64_t i = 0; i < rows; i++) {
         for (int64_t k = row_offsets[i]; k < row_offsets[i + 1]; k++) {
             int64_t j = col_indices[k];
             if (symmetric && i != j) {
-                // dH = -v1 * x' is an asymmetric outer product. Since P is
-                // full symmetric (P[i,j] == P[j,i]), changing one CSR entry
-                // affects both, so the gradient is dH[i,j] + dH[j,i].
-                values[k] = dense[i * cols + j] + dense[j * cols + i];
+                // dH = -v1 * x' is asymmetric. A triangular entry carries
+                // the whole symmetric sensitivity; full CSR shares it between
+                // the two stored entries, as in the IPM gradient convention.
+                const auto begin = col_indices + row_offsets[j];
+                const auto end = col_indices + row_offsets[j + 1];
+                const bool mirrored = sorted_rows[j] ? std::binary_search(begin, end, i)
+                                                      : std::find(begin, end, i) != end;
+                values[k] = (dense[i * cols + j] + dense[j * cols + i])
+                          * (mirrored ? 0.5 : 1.0);
             } else {
                 values[k] = dense[i * cols + j];
             }
