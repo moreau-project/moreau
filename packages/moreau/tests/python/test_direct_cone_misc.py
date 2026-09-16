@@ -85,6 +85,49 @@ def test_cuda_torch_asymmetric_direct_x_kinds(kind, extra_kwargs, q_vals):
     assert np.all(np.isfinite(x)), f"{kind} produced non-finite x: {x}"
 
 
+@pytest.mark.parametrize("equilibrate", [False, True])
+def test_nonneg_dual_scaling_and_external_warm_start(device, equilibrate):
+    # x* = (0, 1, 0), equality dual = 4, direct duals = (3, 6).
+    # Gather direct coordinates out of order, with a free coordinate between them.
+    P = sparse.diags([4.0, 2.0, 0.25], format="csr")
+    q = np.array([2.0, -6.0, 3.0])
+    A = sparse.csr_matrix([[1.0, 1.0, 0.0]])
+    b = np.array([1.0])
+    cones = moreau.Cones(
+        num_zero_cones=1,
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[2, 0])],
+    )
+    settings = moreau.Settings(
+        device=device,
+        solver="ipm",
+        verbose=False,
+        ipm_settings=moreau.IPMSettings(
+            presolve_enable=False,
+            equilibrate_enable=equilibrate,
+        ),
+    )
+    solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
+    sol = solver.solve()
+    assert solver.info.status.name == "Solved"
+    np.testing.assert_allclose(sol.z_x, (P @ sol.x + q + A.T @ sol.z)[[2, 0]], atol=1e-6)
+    np.testing.assert_allclose(sol.z_x, [3.0, 6.0], atol=1e-6)
+
+    # An independent optimum exposes incorrect input scaling even when output
+    # and input scaling bugs would cancel in a solution.to_warm_start() roundtrip.
+    settings.max_iter = 1
+    warm_solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
+    warm_solver.solve(
+        warm_start=moreau.WarmStart(
+            x=np.array([0.0, 1.0, 0.0]),
+            z=np.array([4.0]),
+            s=np.array([0.0]),
+            z_x=np.array([3.0, 6.0]),
+        )
+    )
+    assert warm_solver.info.status.name == "Solved"
+    assert warm_solver.info.iterations == 0
+
+
 def test_direct_x_warm_start_reduces_iters(device):
     """Warm-starting a direct-x problem with its own solution must converge
     in **fewer** iterations than a cold solve. Regression for the

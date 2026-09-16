@@ -165,6 +165,36 @@ private:
         }
     }
 
+    void append_direct_duals(nb::dict& result) {
+        // Direct-x cone duals in user (original) frame. Empty array when
+        // the problem has no direct-x cones.
+        int64_t total_xn = solver_->variables.totalXConeNumel();
+        if (total_xn > 0) {
+            // Allocate a temporary device buffer + unscale, then copy to numpy.
+            CudaDeviceMemory d_z_x_user(sizeof(double) * total_xn * batchSize_);
+            const auto& cones = solver_->data.cones;
+            // dinv / c_scale / (tau for solutions, kappa for certificates).
+            moreau::unscale_z_x(
+                reinterpret_cast<double*>(d_z_x_user.get()),
+                solver_->solution.z_x_raw.data(),
+                solver_->data.equilibration.dinv.data(),
+                solver_->data.equilibration.c.data(),
+                solver_->solution.normalization_scale.data(),
+                cones.d_xcone_indices,
+                n_, total_xn, batchSize_, 0
+            );
+            cudaDeviceSynchronize();
+            result["z_x"] = make_numpy_array_2d<double>(
+                reinterpret_cast<double*>(d_z_x_user.get()),
+                static_cast<size_t>(batchSize_), static_cast<size_t>(total_xn));
+        } else {
+            // Return shape (batch_size, 0)
+            result["z_x"] = make_numpy_array_2d<double>(
+                /*data=*/nullptr,
+                static_cast<size_t>(batchSize_), 0);
+        }
+    }
+
     // Build numpy result dict from solver state after solve.
     // When include_tau_kappa is true, includes tau, kappa, and dual_obj_val.
     nb::dict make_solve_result_dict(bool include_tau_kappa = true) {
@@ -191,33 +221,7 @@ private:
         result["z"] = z_result;
         result["status"] = status_result;
 
-        // Direct-x cone duals in user (original) frame. Empty array when
-        // the problem has no direct-x cones.
-        int64_t total_xn = solver_->variables.totalXConeNumel();
-        if (total_xn > 0) {
-            // Allocate a temporary device buffer + unscale, then copy to numpy.
-            CudaDeviceMemory d_z_x_user(sizeof(double) * total_xn * batchSize_);
-            const auto& cones = solver_->data.cones;
-            // dinv / c_scale / τ_raw read from solver state.
-            moreau::unscale_z_x(
-                reinterpret_cast<double*>(d_z_x_user.get()),
-                solver_->variables.z_x.data(),
-                solver_->data.equilibration.dinv.data(),
-                solver_->data.equilibration.c.data(),
-                solver_->solution.τ_raw.data(),
-                cones.d_xcone_indices,
-                n_, total_xn, batchSize_, 0
-            );
-            cudaDeviceSynchronize();
-            result["z_x"] = make_numpy_array_2d<double>(
-                reinterpret_cast<double*>(d_z_x_user.get()),
-                static_cast<size_t>(batchSize_), static_cast<size_t>(total_xn));
-        } else {
-            // Return shape (batch_size, 0)
-            result["z_x"] = make_numpy_array_2d<double>(
-                /*data=*/nullptr,
-                static_cast<size_t>(batchSize_), 0);
-        }
+        append_direct_duals(result);
 
         if (include_tau_kappa) {
             result["tau"] = make_numpy_array_1d<double>(solver_->solution.τ_raw.data(),
@@ -276,10 +280,10 @@ private:
             const auto& cones = solver_->data.cones;
             moreau::unscale_z_x(
                 reinterpret_cast<double*>(z_x_out_ptr),
-                solver_->variables.z_x.data(),
+                solver_->solution.z_x_raw.data(),
                 solver_->data.equilibration.dinv.data(),
                 solver_->data.equilibration.c.data(),
-                solver_->solution.τ_raw.data(),
+                solver_->solution.normalization_scale.data(),
                 cones.d_xcone_indices,
                 n_, total_xn, batchSize_, 0
             );
@@ -1058,10 +1062,10 @@ public:
             const auto& cones = solver_->data.cones;
             moreau::unscale_z_x(
                 reinterpret_cast<double*>(z_x_out_ptr),
-                solver_->variables.z_x.data(),
+                solver_->solution.z_x_raw.data(),
                 solver_->data.equilibration.dinv.data(),
                 solver_->data.equilibration.c.data(),
-                solver_->solution.τ_raw.data(),
+                solver_->solution.normalization_scale.data(),
                 cones.d_xcone_indices,
                 n_, total_xn, batchSize_, 0);
         }
@@ -1101,31 +1105,7 @@ public:
             result["x"] = make_numpy_array_2d<double>((double*)d_x_orig.get(), (size_t)batchSize_, (size_t)n_user_);
             result["z"] = make_numpy_array_2d<double>((double*)d_z_orig.get(), (size_t)batchSize_, (size_t)m_user_);
             result["s"] = make_numpy_array_2d<double>((double*)d_s_orig.get(), (size_t)batchSize_, (size_t)m_user_);
-            // Direct-x duals: the non-chordal path adds `z_x` via
-            // make_solve_result_dict; the chordal branch built the dict by
-            // hand and omitted it, so chordal + direct-x silently dropped
-            // the z_x output (callers see result.get('z_x') == None).
-            // Chordal augments only slack space — z_x is unchanged — so the
-            // same unscale_z_x path applies.
-            int64_t total_xn = solver_->variables.totalXConeNumel();
-            if (total_xn > 0) {
-                CudaDeviceMemory d_z_x_user(sizeof(double) * total_xn * batchSize_);
-                moreau::unscale_z_x(
-                    reinterpret_cast<double*>(d_z_x_user.get()),
-                    solver_->variables.z_x.data(),
-                    solver_->data.equilibration.dinv.data(),
-                    solver_->data.equilibration.c.data(),
-                    solver_->solution.τ_raw.data(),
-                    solver_->data.cones.d_xcone_indices,
-                    n_, total_xn, batchSize_, 0);
-                cudaDeviceSynchronize();
-                result["z_x"] = make_numpy_array_2d<double>(
-                    (double*)d_z_x_user.get(),
-                    (size_t)batchSize_, (size_t)total_xn);
-            } else {
-                result["z_x"] = make_numpy_array_2d<double>(
-                    (double*)nullptr, (size_t)batchSize_, 0);
-            }
+            append_direct_duals(result);
             auto status_result = make_status_array(solver_->info.status_device, static_cast<size_t>(batchSize_));
             result["status"] = status_result;
             std::vector<double> cost_primal(batchSize_);
@@ -1273,7 +1253,7 @@ public:
 
         // Direct-x dual: when supplied (in user/original frame), convert
         // to the equilibrated τ=1 frame and store in DiffState. Inverse
-        // of `Variables::unscale`: z_x_eq = z_x_user * c / d[J].
+        // of `Variables::unscale`: z_x_eq = z_x_user * c * d[J].
         int64_t total_xn = solver_->variables.totalXConeNumel();
         if (total_xn > 0 && z_x_ptr != 0) {
             moreau::equilibrate_z_x(

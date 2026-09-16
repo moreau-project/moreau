@@ -715,6 +715,9 @@ void compute_warmness_mu(
     cudaStream_t stream = 0
 );
 
+void copy_direct_duals_masked(double* dst, const double* src, const int32_t* mask,
+                             int64_t xn, int64_t batch_size, cudaStream_t stream);
+
 /**
  * @brief Fused tau numerator base: ξ=x/τ, tau_num = (rτ - rκ/τ) + q'x1 + b'z1 (3 → 1 kernel)
  *

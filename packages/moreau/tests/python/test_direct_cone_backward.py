@@ -185,7 +185,7 @@ def test_compiled_solver_xcone_backward_batch_cuda():
     _batched_backward_matches_per_problem("cuda")
 
 
-def _check_dz_x_finite_difference(device):
+def _check_dz_x_finite_difference(device, equilibrate):
     """Helper: backward(dz_x=e_j) must match central FD of z_x[j] on the
     given device. Active-boundary problem keeps the test well-conditioned."""
     from moreau._backend import device_available
@@ -194,18 +194,16 @@ def _check_dz_x_finite_difference(device):
         pytest.skip(f"{device} backend not available")
 
     n = 3
-    P = sparse.diags([1.0, 1.0, 1.0], format="csr")
+    P = sparse.diags([4.0, 2.0, 0.25], format="csr")
     q = np.array([-0.5, -0.5, 1.0])  # active boundary on x[2] = 0
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
         dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])],
     )
-    # Equilibration is a non-smooth rescaling that produces asymmetric
-    # finite differences at the cone boundary; disable it to keep the FD
-    # reference clean. The IFT-direct math is invariant under uniform
-    # per-cone equilibration.
-    ipm = moreau.IPMSettings(equilibrate_enable=False)
+    # Returned derivatives are in original coordinates, so the answer must
+    # remain correct with equilibration enabled and nontrivial scaling.
+    ipm = moreau.IPMSettings(equilibrate_enable=equilibrate)
     settings = moreau.Settings(
         device=device,
         solver="ipm",
@@ -242,18 +240,20 @@ def _check_dz_x_finite_difference(device):
     np.testing.assert_allclose(analytic, fd, atol=1e-3)
 
 
-def test_solver_dz_x_finite_difference_cpu():
+@pytest.mark.parametrize("equilibrate", [False, True])
+def test_solver_dz_x_finite_difference_cpu(equilibrate):
     """Upstream gradient on z_x must match finite differences of z_x_orig.
 
     Mirrors the Rust integration test (`direct_cone_dz_x_backward`) but at the
     Python API level.
     """
-    _check_dz_x_finite_difference("cpu")
+    _check_dz_x_finite_difference("cpu", equilibrate)
 
 
-def test_solver_dz_x_finite_difference_cuda():
+@pytest.mark.parametrize("equilibrate", [False, True])
+def test_solver_dz_x_finite_difference_cuda(equilibrate):
     """Same dz_x parity check as the CPU test, but on CUDA."""
-    _check_dz_x_finite_difference("cuda")
+    _check_dz_x_finite_difference("cuda", equilibrate)
 
 
 def _check_torch_autograd_through_z_x(device):

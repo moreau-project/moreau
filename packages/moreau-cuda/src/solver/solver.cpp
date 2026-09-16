@@ -356,7 +356,7 @@ void CompiledSolver::warmStart(
                              data.equilibration.e, data.equilibration.c, stream);
 
     // Direct-x: convert user-frame z_x to the equilibrated frame the IPM
-    // operates in. `z_x_eq[b,k] = z_x_user[b,k] * c[b] / d[J[k]]`. Inverse
+    // operates in. `z_x_eq[b,k] = z_x_user[b,k] * c[b] * d[J[k]]`. Inverse
     // of the user-facing unscale. When warm_z_x is omitted we must fall
     // back to the same unit-init point `default_start` uses — otherwise
     // z_x carries stale values from a prior solve (resetState clears only
@@ -1555,6 +1555,9 @@ void CompiledSolver::save_best_iterate(
         batchSize,
         stream
     );
+    copy_direct_duals_masked(solution.z_x_raw.data(), variables.z_x.data(),
+                            solution.should_save.get(), data.cones.totalXConeNumel,
+                            batchSize, stream);
     // Also mirror the cost snapshot into the best_cost_* buffers so
     // restore_best_iterate has a complete metric picture (save_best_iterate
     // writes cost into solution.*_raw; restore_best_iterate reads from Info).
@@ -1618,6 +1621,9 @@ void CompiledSolver::save_terminated_solutions(
         batchSize,
         stream
     );
+    copy_direct_duals_masked(solution.z_x_raw.data(), variables.z_x.data(),
+                            solution.should_save.get(), data.cones.totalXConeNumel,
+                            batchSize, stream);
 }
 
 void CompiledSolver::resetState(cudaStream_t stream) {
@@ -1993,6 +1999,9 @@ void CompiledSolver::runIPMLoop(cudaStream_t stream) {
                     solution.τ_raw.data(), solution.κ_raw.data(),
                     solution.solution_saved.get(),
                     data.n, data.m, data.batchSize, stream);
+                copy_direct_duals_masked(variables.z_x.data(), solution.z_x_raw.data(),
+                                        solution.solution_saved.get(), data.cones.totalXConeNumel,
+                                        data.batchSize, stream);
             }
 
         // Check deferred per-batch scaling success from previous iteration.
@@ -2359,6 +2368,14 @@ void CompiledSolver::runIPMLoop(cudaStream_t stream) {
         info.post_process(residuals, settings, stream);
     } else {
         info.sync_status_to_host(stream);
+    }
+
+    // Return every component from the same saved (possibly best) iterate.
+    if (data.cones.totalXConeNumel > 0) {
+        double* dst = yolo_mode ? solution.z_x_raw.data() : variables.z_x.data();
+        const double* src = yolo_mode ? variables.z_x.data() : solution.z_x_raw.data();
+        cudaMemcpyAsync(dst, src, sizeof(double) * data.cones.totalXConeNumel * data.batchSize,
+                        cudaMemcpyDeviceToDevice, stream);
     }
 
     solution.post_process(

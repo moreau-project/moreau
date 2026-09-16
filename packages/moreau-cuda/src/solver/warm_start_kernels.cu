@@ -13,6 +13,21 @@
 
 namespace moreau {
 
+__global__ void copy_direct_duals_masked_kernel(
+    double* dst, const double* src, const int32_t* mask, int64_t xn, int64_t batch_size
+) {
+    const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < xn * batch_size && mask[i / xn]) dst[i] = src[i];
+}
+
+void copy_direct_duals_masked(double* dst, const double* src, const int32_t* mask,
+                             int64_t xn, int64_t batch_size, cudaStream_t stream) {
+    if (xn == 0 || batch_size == 0) return;
+    const int64_t blocks = (xn * batch_size + 255) / 256;
+    MOREAU_KERNEL_LAUNCH(copy_direct_duals_masked_kernel, blocks, 256, 0, stream,
+                        dst, src, mask, xn, batch_size);
+}
+
 // ============================================================================
 // Warmness mu computation kernel
 // ============================================================================
