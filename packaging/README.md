@@ -3,7 +3,7 @@
 The recipes under `yggdrasil/M/Moreau/` build the CPU and CUDA C interfaces
 from the immutable Moreau 0.4.0 source commit. Copy these directories into the
 same paths in a Yggdrasil checkout. The CUDA recipe uses Yggdrasil's shared
-`platforms/cuda.jl` and `fancy_toys.jl` helpers.
+`platforms/cuda.jl`, `C/CUDA/common.jl`, and `fancy_toys.jl` helpers.
 
 ## Package identities and versions
 
@@ -33,10 +33,15 @@ upgrade was reverted upstream for performance and determinism regressions.
 
 ## Build and validation
 
-From each recipe directory, with BinaryBuilder available:
+Run BinaryBuilder with Julia 1.10 (validated with BinaryBuilder 0.6.6); use
+Julia 1.12 for Moreau.jl and its tests.
+BinaryBuilder's temporary dependency environment can select a TOML version that
+is incompatible with Julia 1.12's package-manager precompilation.
+
+From each recipe directory, with BinaryBuilder and JSON3 available:
 
 ```sh
-julia --project=/path/to/binarybuilder-env build_tarballs.jl --verbose --deploy=local
+julia +1.10 --project=/path/to/binarybuilder-env build_tarballs.jl --verbose --deploy=local
 ```
 
 `--deploy=local` generates local wrappers and does not publish or register them.
@@ -66,6 +71,8 @@ For the pending General PR #167256, retain version **0.4.0** and register the
 corrected commit after the JLL dependencies are available. Updating the existing
 registration then avoids creating a new package or version registration.
 
-The source recipes still need full BinaryBuilder build/audit validation before
-publication. Locally generated wrappers around existing release libraries test
-the Julia integration; they do not establish that the recipes cross-compile.
+Local source builds passed BinaryBuilder audits for all five non-macOS CPU
+targets and both CUDA 13 architectures. The source-built x86-64 Linux libraries
+also passed the CPU package suite and GPU regression/conformance suites.
+The remaining CUDA 12 and macOS build validation belongs in Yggdrasil CI;
+native Windows and ARM execution remains for platform CI before publication.
