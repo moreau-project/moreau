@@ -9,7 +9,6 @@ on:
       - '.github/workflows/ci-cpu.yml'
       - 'scripts/**'
   pull_request:
-    branches: [ main ]
     paths:
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
