@@ -419,3 +419,76 @@ def test_torch_cpu_direct_duals_batch_and_warm_start(batch_size, shared_matrices
     warm = solver.solve(P, A, q, b, warm_start=solution.to_warm_start())
     torch.testing.assert_close(warm.x, solution.x, atol=1e-7, rtol=1e-7)
     torch.testing.assert_close(warm.z_x, solution.z_x, atol=1e-7, rtol=1e-7)
+
+
+@pytest.mark.parametrize("direct", [False, True])
+@pytest.mark.parametrize("batched", [False, True])
+def test_cuda_jax_fallback_duals_and_gradients(monkeypatch, direct, batched):
+    """The non-FFI route preserves direct duals under jit, vmap, and backward."""
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    cuda_solver = pytest.importorskip("moreau_cuda.jax._solver")
+    if not moreau.device_available("cuda"):
+        pytest.skip("CUDA not available")
+    from moreau.jax import Solver
+
+    jax.config.update("jax_enable_x64", True)
+    monkeypatch.setattr(cuda_solver, "_get_ffi_lib", lambda: None)
+    monkeypatch.setattr(cuda_solver, "ffi_available", lambda: False)
+    cones = moreau.Cones(
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])]
+        if direct
+        else []
+    )
+    solver = Solver(
+        n=3,
+        m=0,
+        P_row_offsets=[0, 1, 2, 3],
+        P_col_indices=[0, 1, 2],
+        A_row_offsets=[0],
+        A_col_indices=[],
+        cones=cones,
+        settings=moreau.Settings(device="cuda", solver="ipm", enable_grad=True),
+    )
+    assert solver.device == "cuda"
+    P = jnp.array([2.0, 3.0, 4.0])
+    A = b = jnp.empty(0)
+    q = jnp.array([-3.0, 2.0, -1.0])
+
+    def solve(q):
+        return solver.solve(P, A, q, b)
+
+    if batched:
+        q = jnp.stack([q, 2 * q])
+        solve = jax.vmap(solve)
+    solution = jax.jit(solve)(q)
+    assert solution.z_x.shape == q.shape[:-1] + ((3,) if direct else (0,))
+    expected_x = jnp.maximum(-q / P, 0) if direct else -q / P
+    np.testing.assert_allclose(solution.x, expected_x, atol=1e-7)
+    if direct:
+        np.testing.assert_allclose(solution.z_x, jnp.maximum(q, 0), atol=1e-7)
+
+    def loss(q):
+        solution = solve(q)
+        return solution.x.sum() + solution.z_x.sum()
+
+    derivative = jax.jit(jax.grad(loss))(q)
+    expected_grad = jnp.array([-0.5, 1.0 if direct else -1.0 / 3, -0.25])
+    np.testing.assert_allclose(
+        derivative, jnp.broadcast_to(expected_grad, q.shape), atol=1e-6
+    )
+
+    def warm_solve(q, x, z, s, z_x):
+        return solver._impl.solve_warm(P, A, q, b, x, z, s, z_x)[0]
+
+    if batched:
+        warm_solve = jax.vmap(warm_solve)
+    warm_args = (solution.x, solution.z, solution.s, solution.z_x)
+    warmed = jax.jit(warm_solve)(q, *warm_args)
+    np.testing.assert_allclose(warmed.x, expected_x, atol=1e-7)
+    np.testing.assert_allclose(warmed.z_x, solution.z_x, atol=1e-7)
+    warm_grad = jax.jit(jax.grad(lambda q: warm_solve(q, *warm_args).z_x.sum()))(q)
+    expected_warm_grad = jnp.array([0.0, 1.0 if direct else 0.0, 0.0])
+    np.testing.assert_allclose(
+        warm_grad, jnp.broadcast_to(expected_warm_grad, q.shape), atol=1e-6
+    )

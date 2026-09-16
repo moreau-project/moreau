@@ -87,6 +87,12 @@ print(sol.x)
 Batched problems with direct conic constraints (`CompiledSolver` with
 `batch_size > 1`) are supported on CPU and CUDA for every listed kind.
 
+CUDA JAX gradients through direct-cone duals (`solution.z_x`) work with both
+the XLA FFI backend and the `pure_callback` fallback used when the FFI library
+is unavailable.
+The fallback also supports `jit` and `vmap` for warm starts, including direct
+dual warm-start values.
+
 ## KKT solver compatibility
 
 | Linear solver                        | Direct Conic Constraint support |

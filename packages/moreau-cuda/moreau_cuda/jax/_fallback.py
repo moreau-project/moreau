@@ -24,6 +24,10 @@ def _solve_fallback_callback(
     A_data: np.ndarray,
     q: np.ndarray,
     b: np.ndarray,
+    warm_x: Optional[np.ndarray] = None,
+    warm_z: Optional[np.ndarray] = None,
+    warm_s: Optional[np.ndarray] = None,
+    warm_z_x: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, ...]:
     """Callback function for pure_callback fallback.
 
@@ -59,28 +63,15 @@ def _solve_fallback_callback(
 
     cuda_solver = solver_wrapper._get_or_create_cuda_solver(batch_size, enable_grad=True)
 
-    # Check for pending warm start. The underlying CUDA solver's
-    # `solve_warm_start` signature is 7-arg (no direct warm); if a
-    # `warm_z_x` was provided we pass it as a kwarg when the binding
-    # accepts it, otherwise silently drop (matches the historical
-    # behavior — direct warm in fallback is best-effort).
-    if solver_wrapper._pending_warm_start is not None:
-        pending_warm = solver_wrapper._pending_warm_start
-        warm_x = np.ascontiguousarray(pending_warm["warm_x"].reshape(batch_size, -1))
-        warm_z = np.ascontiguousarray(pending_warm["warm_z"].reshape(batch_size, -1))
-        warm_s = np.ascontiguousarray(pending_warm["warm_s"].reshape(batch_size, -1))
-        warm_z_x = pending_warm.get("warm_z_x")
-        if warm_z_x is not None and warm_z_x.size > 0:
-            try:
-                warm_z_x_2d = np.ascontiguousarray(warm_z_x.reshape(batch_size, -1))
-                result = cuda_solver.solve_warm_start(
-                    P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x_2d
-                )
-            except TypeError:
-                # Binding doesn't accept warm_z_x — fall through to slack-only warm.
-                result = cuda_solver.solve_warm_start(P_data, A_data, q, b, warm_x, warm_z, warm_s)
-        else:
-            result = cuda_solver.solve_warm_start(P_data, A_data, q, b, warm_x, warm_z, warm_s)
+    if warm_x is not None:
+        warm_x = np.ascontiguousarray(warm_x.reshape(batch_size, -1))
+        warm_z = np.ascontiguousarray(warm_z.reshape(batch_size, -1))
+        warm_s = np.ascontiguousarray(warm_s.reshape(batch_size, -1))
+        if warm_z_x is not None:
+            warm_z_x = np.ascontiguousarray(warm_z_x.reshape(batch_size, -1))
+        result = cuda_solver.solve_warm_start(
+            P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x
+        )
     else:
         result = cuda_solver.solve(P_data, A_data, q, b)
 
@@ -136,6 +127,7 @@ def _backward_fallback_callback(
     dx: np.ndarray,
     dz: np.ndarray,
     ds: np.ndarray,
+    dz_x: np.ndarray,
     P_data: np.ndarray,
     A_data: np.ndarray,
     q: np.ndarray,
@@ -150,6 +142,7 @@ def _backward_fallback_callback(
     dx = np.asarray(dx, dtype=np.float64)
     dz = np.asarray(dz, dtype=np.float64)
     ds = np.asarray(ds, dtype=np.float64)
+    dz_x = np.asarray(dz_x, dtype=np.float64)
     P_data = np.asarray(P_data, dtype=np.float64)
     A_data = np.asarray(A_data, dtype=np.float64)
     q = np.asarray(q, dtype=np.float64)
@@ -160,6 +153,7 @@ def _backward_fallback_callback(
         dx = dx.reshape(1, -1)
         dz = dz.reshape(1, -1)
         ds = ds.reshape(1, -1)
+        dz_x = dz_x.reshape(1, -1)
         P_data = P_data.reshape(1, -1)
         A_data = A_data.reshape(1, -1)
         q = q.reshape(1, -1)
@@ -176,10 +170,11 @@ def _backward_fallback_callback(
     dx = np.ascontiguousarray(dx)
     dz = np.ascontiguousarray(dz)
     ds = np.ascontiguousarray(ds)
+    dz_x = np.ascontiguousarray(dz_x)
 
     cuda_solver = solver_wrapper._get_or_create_cuda_solver(batch_size, enable_grad=True)
     cuda_solver.solve(P_data, A_data, q, b)
-    grad_result = cuda_solver.backward(dx, dz, ds)
+    grad_result = cuda_solver.backward(dx, dz, ds, dz_x)
 
     dP = np.asarray(grad_result["dP_values"], dtype=np.float64)
     dA = np.asarray(grad_result["dA_values"], dtype=np.float64)
@@ -202,6 +197,10 @@ def _solve_fallback(
     A_data: jnp.ndarray,
     q: jnp.ndarray,
     b: jnp.ndarray,
+    warm_x: Optional[jnp.ndarray] = None,
+    warm_z: Optional[jnp.ndarray] = None,
+    warm_s: Optional[jnp.ndarray] = None,
+    warm_z_x: Optional[jnp.ndarray] = None,
 ) -> Tuple[jnp.ndarray, ...]:
     """Solve conic QP using pure_callback fallback.
 
@@ -258,6 +257,10 @@ def _solve_fallback(
             A_data,
             q,
             b,
+            warm_x,
+            warm_z,
+            warm_s,
+            warm_z_x,
             vmap_method="broadcast_all",
         )
     )
@@ -271,15 +274,19 @@ def _solve_fallback_fwd(
     A_data: jnp.ndarray,
     q: jnp.ndarray,
     b: jnp.ndarray,
+    warm_x: Optional[jnp.ndarray] = None,
+    warm_z: Optional[jnp.ndarray] = None,
+    warm_s: Optional[jnp.ndarray] = None,
+    warm_z_x: Optional[jnp.ndarray] = None,
 ) -> Tuple[Tuple[jnp.ndarray, ...], tuple]:
     """Forward pass with saved residuals for backward."""
     x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time = (
-        _solve_fallback(solver_id, P_data, A_data, q, b)
+        _solve_fallback(
+            solver_id, P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x
+        )
     )
-    # Save inputs and x, z, s for backward (metadata not needed; z_x is the
-    # direct dual but the fallback backward callback doesn't yet thread
-    # it through, so omit from residuals — direct backward in fallback
-    # mode is a known limitation.)
+    # The callback re-solves from the inputs before differentiating, so it
+    # does not need to retain the direct-dual solution in the residuals.
     residuals = (P_data, A_data, q, b, x, z, s)
     return (
         x,
@@ -298,17 +305,16 @@ def _solve_fallback_fwd(
 def _solve_fallback_bwd(solver_id: int, residuals, g):
     """Backward pass via pure_callback.
 
-    Receives 10 gradients but only uses first 3 (solution vectors).
-    Metadata gradients (z_x grad, status, obj_val, iterations, times) are
-    ignored — fallback mode does not yet support direct backward.
+    Receives 10 gradients and uses the first four solution cotangents.
+    Status, objective, iteration, and timing metadata are not differentiated.
     """
     P_data, A_data, q, b, x, z, s = residuals
-    # Unpack all 10 gradients - metadata + z_x grads will be ignored
+    # Unpack all solution cotangents, including the direct-cone duals.
     (
         dx,
         dz,
         ds,
-        _dz_x,
+        dz_x,
         _dstatus,
         _dobj_val,
         _diterations,
@@ -339,6 +345,7 @@ def _solve_fallback_bwd(solver_id: int, residuals, g):
         dx,
         dz,
         ds,
+        dz_x,
         P_data,
         A_data,
         q,
@@ -349,7 +356,8 @@ def _solve_fallback_bwd(solver_id: int, residuals, g):
         vmap_method="broadcast_all",
     )
 
-    return dP, dA, dq, db
+    # Warm starts affect the iteration path, not the solution derivative.
+    return dP, dA, dq, db, None, None, None, None
 
 
 _solve_fallback.defvjp(_solve_fallback_fwd, _solve_fallback_bwd)
@@ -401,37 +409,21 @@ def _solve_fallback_warm_with_solution(
     warm_s: jnp.ndarray,
     warm_z_x: Optional[jnp.ndarray] = None,
 ) -> Tuple[JaxSolution, JaxSolveInfo]:
-    """Fallback warm-start solve via _pending_warm_start side channel.
-
-    ``warm_z_x`` is accepted for FFI-path API parity but only stored when
-    the underlying cuda_solver supports direct warm-start (otherwise it
-    is silently dropped, since the fallback `solve_warm_start` binding
-    only takes 7 arguments).
-    """
-    solver_wrapper = _SOLVER_REGISTRY[solver_id]
-    pending = {
-        "warm_x": np.asarray(warm_x, dtype=np.float64),
-        "warm_z": np.asarray(warm_z, dtype=np.float64),
-        "warm_s": np.asarray(warm_s, dtype=np.float64),
-    }
-    if warm_z_x is not None:
-        pending["warm_z_x"] = np.asarray(warm_z_x, dtype=np.float64)
-    solver_wrapper._pending_warm_start = pending
-    try:
-        (
-            x,
-            z,
-            s,
-            z_x,
-            status,
-            obj_val,
-            iterations,
-            solve_time,
-            setup_time,
-            _callback_construction_time,
-        ) = _solve_fallback(solver_id, P_data, A_data, q, b)
-    finally:
-        solver_wrapper._pending_warm_start = None
+    """Fallback warm solve with explicit arrays, compatible with jit and vmap."""
+    (
+        x,
+        z,
+        s,
+        z_x,
+        status,
+        obj_val,
+        iterations,
+        solve_time,
+        setup_time,
+        _callback_construction_time,
+    ) = _solve_fallback(
+        solver_id, P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x
+    )
     solution = JaxSolution(x=x, z=z, s=s, z_x=z_x)
     info = JaxSolveInfo(
         status=status,
