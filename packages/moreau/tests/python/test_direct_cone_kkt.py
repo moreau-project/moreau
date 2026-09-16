@@ -255,6 +255,62 @@ def test_all_cones_batched_setup_and_warm_reuse(device):
         previous = sol.to_warm_start()
 
 
+@pytest.mark.torch
+def test_all_cones_delayed_chained_backward(device):
+    import torch
+    from moreau.torch import Solver
+
+    problem = planted_problem()
+    ipm = moreau.IPMSettings(
+        diff_method="exact",
+        tol_feas=1e-11,
+        tol_gap_abs=1e-11,
+        tol_gap_rel=1e-11,
+        chordal_decomposition_enable=False,
+    )
+    solver = Solver(
+        n=len(problem.q),
+        m=len(problem.b),
+        P_row_offsets=torch.tensor(problem.P.indptr),
+        P_col_indices=torch.tensor(problem.P.indices),
+        A_row_offsets=torch.tensor(problem.A.indptr),
+        A_col_indices=torch.tensor(problem.A.indices),
+        cones=problem.cones,
+        settings=moreau.Settings(device=device, solver="ipm", verbose=False, ipm_settings=ipm),
+    )
+
+    def tensor(value):
+        return torch.tensor(value, dtype=torch.float64, device=device)
+
+    P, A, q, b = [tensor(v) for v in (problem.P.data, problem.A.data, problem.q, problem.b)]
+    rng = np.random.default_rng(7)
+    H = rng.normal(scale=0.01, size=problem.P.shape)
+    dP = tensor((H + H.T).ravel())
+    dA, dq, db = [tensor(rng.normal(scale=0.02, size=v.shape)) for v in (A, q, b)]
+    weights = {
+        name: tensor(rng.normal(size=getattr(problem.optimum, name).shape))
+        for name in ("x", "s", "z", "z_x")
+    }
+
+    def loss(theta):
+        first = solver.solve(P + theta * dP, A + theta * dA, q + theta * dq, b + theta * db)
+        # Change P, A, q, b before backpropagating through either solution.
+        second = solver.solve(
+            1.2 * P + theta * dP,
+            0.9 * A + theta * dA,
+            q + theta * dq + 0.02 * first.x,
+            b + theta * db,
+        )
+        return sum(
+            weights[name] @ (getattr(first, name) + 0.3 * getattr(second, name)) for name in weights
+        )
+
+    theta = tensor(0.0).requires_grad_()
+    # Perturbations have scale 0.01-0.02; this step resolves forward-solve noise
+    # near active cone boundaries while keeping each data change small.
+    assert torch.autograd.gradcheck(loss, (theta,), eps=1e-2, atol=3e-3, rtol=3e-3, nondet_tol=1e-6)
+
+
 @pytest.mark.parametrize("cone_kind", ["soc", "gen_power"])
 @pytest.mark.parametrize("diff_method", ["auto", "exact"])
 @pytest.mark.parametrize("equilibrate", [False, True])

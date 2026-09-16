@@ -250,6 +250,7 @@ class _TorchSolverCpu:
         warm_x: Optional[np.ndarray] = None,
         warm_z: Optional[np.ndarray] = None,
         warm_s: Optional[np.ndarray] = None,
+        warm_z_x: Optional[np.ndarray] = None,
     ) -> dict:
         """Solve a single problem using batch_solver with batch_size=1.
 
@@ -276,6 +277,8 @@ class _TorchSolverCpu:
             warm_kwargs["warm_z"] = warm_z.reshape(1, -1)
         if warm_s is not None:
             warm_kwargs["warm_s"] = warm_s.reshape(1, -1)
+        if warm_z_x is not None:
+            warm_kwargs["warm_z_x"] = warm_z_x.reshape(1, -1)
 
         # Solve with numpy arrays directly
         result = self._batch_solver.solve(q_batch, b_batch, **warm_kwargs)
@@ -327,6 +330,7 @@ class _TorchSolverCpu:
         warm_x: Optional[np.ndarray] = None,
         warm_z: Optional[np.ndarray] = None,
         warm_s: Optional[np.ndarray] = None,
+        warm_z_x: Optional[np.ndarray] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Solve batched problems with per-problem P/A using numpy interface."""
         batch_size = q.shape[0]
@@ -369,6 +373,8 @@ class _TorchSolverCpu:
             warm_kwargs["warm_z"] = warm_z
         if warm_s is not None:
             warm_kwargs["warm_s"] = warm_s
+        if warm_z_x is not None:
+            warm_kwargs["warm_z_x"] = warm_z_x
 
         # Solve with numpy arrays directly
         result = self._batch_solver.solve(q_np, b_np, **warm_kwargs)
@@ -420,6 +426,7 @@ class _TorchSolverCpu:
         warm_x: Optional[np.ndarray] = None,
         warm_z: Optional[np.ndarray] = None,
         warm_s: Optional[np.ndarray] = None,
+        warm_z_x: Optional[np.ndarray] = None,
     ) -> dict:
         """Solve batched problems with shared P/A using optimized numpy path.
 
@@ -480,6 +487,8 @@ class _TorchSolverCpu:
             warm_kwargs["warm_z"] = warm_z
         if warm_s is not None:
             warm_kwargs["warm_s"] = warm_s
+        if warm_z_x is not None:
+            warm_kwargs["warm_z_x"] = warm_z_x
 
         # Solve with numpy arrays directly (no tolist() needed!)
         result = self._batch_solver.solve(q_np, b_np, **warm_kwargs)
@@ -530,6 +539,7 @@ class _TorchSolverCpu:
         warm_x: Optional[torch.Tensor] = None,
         warm_z: Optional[torch.Tensor] = None,
         warm_s: Optional[torch.Tensor] = None,
+        warm_z_x: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Solve the optimization problem.
 
@@ -545,6 +555,7 @@ class _TorchSolverCpu:
             warm_x: Optional warm start for primal variables
             warm_z: Optional warm start for dual variables
             warm_s: Optional warm start for slack variables
+            warm_z_x: Optional warm start for direct-cone dual variables
 
         Returns:
             Dict with keys: x, z, s, status, obj_val, etc. as CPU tensors
@@ -588,6 +599,8 @@ class _TorchSolverCpu:
             warm_np["warm_z"] = warm_z.cpu().double().numpy()
         if warm_s is not None:
             warm_np["warm_s"] = warm_s.cpu().double().numpy()
+        if warm_z_x is not None:
+            warm_np["warm_z_x"] = warm_z_x.cpu().double().numpy()
 
         # Get stored matrix values
         P_values = self._P_values
@@ -634,6 +647,7 @@ class _TorchSolverCpu:
                 "x": result["x"].unsqueeze(0),
                 "z": result["z"].unsqueeze(0),
                 "s": result["s"].unsqueeze(0),
+                "z_x": result["z_x"].unsqueeze(0),
                 "status": result["status"].unsqueeze(0),
                 "obj_val": result["obj_val"].unsqueeze(0),
                 "obj_val_dual": result["obj_val_dual"].unsqueeze(0),
