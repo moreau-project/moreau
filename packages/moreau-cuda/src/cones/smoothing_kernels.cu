@@ -398,6 +398,12 @@ __global__ void smoothing_all_cones_kernel(
             double z_local[3] = {z[base], z[base + 1], z[base + 2]};
             double w_local[3] = {work[base], work[base + 1], work[base + 2]};
 
+            // Rounded boundary points can pass feasibility but overflow the
+            // barrier Hessian. Move the Newton initial guess into the interior.
+            z_local[0] -= mu_val * 1.051383945322714;
+            z_local[1] += mu_val * 0.556409619469370;
+            z_local[2] += mu_val * 1.258967884768947;
+
             // Check if current z is a good starting point
             bool needs_fallback = !exp_is_dual_feasible(z_local)
                 || fabs(z_local[0]) < min_val
@@ -456,7 +462,8 @@ __global__ void smoothing_all_cones_kernel(
 
                 // Newton decrement
                 double lambda_sq = res[0] * delta[0] + res[1] * delta[1] + res[2] * delta[2];
-                double lambda = (lambda_sq > 0.0) ? sqrt(lambda_sq) : 0.0;
+                // Damping uses the self-concordant objective ||z-work||²/(2mu) + F*(z).
+                double lambda = (lambda_sq > 0.0) ? sqrt(lambda_sq / mu_val) : 0.0;
 
                 // Damped update
                 double damping = (lambda < two_minus_sqrt3) ? 1.0 : 1.0 / (1.0 + lambda);
@@ -489,6 +496,8 @@ __global__ void smoothing_all_cones_kernel(
             double w_local[3] = {work[base], work[base + 1], work[base + 2]};
 
             // Check if current z is a good starting point
+            z_local[0] += mu_val * sqrt(1.0 + alpha);
+            z_local[1] += mu_val * sqrt(2.0 - alpha);
             bool needs_fallback = !power_is_dual_feasible(z_local, alpha)
                 || fabs(z_local[0]) < min_val
                 || fabs(z_local[1]) < min_val;
@@ -546,7 +555,8 @@ __global__ void smoothing_all_cones_kernel(
 
                 // Newton decrement
                 double lambda_sq = res[0] * delta[0] + res[1] * delta[1] + res[2] * delta[2];
-                double lambda = (lambda_sq > 0.0) ? sqrt(lambda_sq) : 0.0;
+                // Damping uses the self-concordant objective ||z-work||²/(2mu) + F*(z).
+                double lambda = (lambda_sq > 0.0) ? sqrt(lambda_sq / mu_val) : 0.0;
 
                 // Damped update
                 double damping = (lambda < two_minus_sqrt3) ? 1.0 : 1.0 / (1.0 + lambda);
@@ -606,6 +616,8 @@ __global__ void smoothing_all_cones_kernel(
             }
 
             // Check if current z is a good starting point
+            for (int64_t i = 0; i < dim1; ++i)
+                z_local[i] += mu_val * sqrt(1.0 + cone_alphas[i]);
             bool needs_fallback = !genpow_is_dual_feasible_smooth(z_local, dim1, dim2, cone_alphas);
             if (!needs_fallback) {
                 for (int64_t i = 0; i < dim1; i++) {
@@ -733,7 +745,8 @@ __global__ void smoothing_all_cones_kernel(
                 for (int64_t i = 0; i < dim; i++) {
                     lambda_sq += res[i] * delta[i];
                 }
-                double lambda = (lambda_sq > 0.0) ? sqrt(lambda_sq) : 0.0;
+                // Damping uses the self-concordant objective ||z-work||²/(2mu) + F*(z).
+                double lambda = (lambda_sq > 0.0) ? sqrt(lambda_sq / mu_val) : 0.0;
 
                 // Save current feasible z for rollback (reuse res buffer,
                 // which is no longer needed after lambda_sq computation)

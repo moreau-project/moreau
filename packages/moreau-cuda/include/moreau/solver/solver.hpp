@@ -272,7 +272,7 @@ public:
           tau_den_work(1, batchSize_),
           ξ(n_, batchSize_),
           settings(settings_),
-          solution(n_, m_, batchSize_),
+          solution(n_, m_, batchSize_, data.cones.totalXConeNumel),
           info(batchSize_),
           sigma(1, batchSize_),
           alpha(1, batchSize_),

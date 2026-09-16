@@ -238,6 +238,7 @@ DiffKKT::DiffKKT(
         int64_t xc_du_offset;   // offset within direct-x du_x block
         int64_t genpow_dim;     // total dimension of this cone
         int64_t exp_col_base;   // expansion column base in J
+        int64_t sparse_dim_off;
     };
     std::vector<XGenpowExpansionInfo> xgenpow_expansion_info;
     numXGenPowerCones_ = cones.numXGenPowerCones;
@@ -252,7 +253,8 @@ DiffKKT::DiffKKT(
             if (xc.kind == XConeKind::GenPower) {
                 xgenpow_expansion_info.push_back({
                     c, xc_du_offset, d,
-                    base_jdim_ + slack_exp_count + 3 * xgp_idx
+                    base_jdim_ + slack_exp_count + 3 * xgp_idx,
+                    total_xgenpow_dim
                 });
                 total_xgenpow_dim += d;
                 ++xgp_idx;
@@ -261,6 +263,10 @@ DiffKKT::DiffKKT(
         }
     }
     totalXGenPowDim_ = total_xgenpow_dim;
+    H_xcone_genpow_du_stat_diag_idx_host.resize(total_xgenpow_dim);
+    H_xcone_genpow_v1_col_stat_idx_host.resize(total_xgenpow_dim);
+    H_xcone_genpow_v2_col_stat_idx_host.resize(total_xgenpow_dim);
+    H_xcone_genpow_v3_col_stat_idx_host.resize(total_xgenpow_dim);
 
     // Direct-x SOC sparse expansion info (only cones with dim > 4 use
     // the rank-2 path; smaller stay on dense `xcone_soc_H`). Direct-x
@@ -297,6 +303,9 @@ DiffKKT::DiffKKT(
     }
     numSparseXSoc_ = static_cast<int64_t>(xsoc_sparse_info.size());
     totalSparseXSocDim_ = total_xsoc_sparse_dim;
+    H_xcone_soc_du_stat_diag_idx_host.resize(total_xsoc_sparse_dim);
+    H_xcone_soc_v1_col_stat_idx_host.resize(total_xsoc_sparse_dim);
+    H_xcone_soc_v2_col_stat_idx_host.resize(total_xsoc_sparse_dim);
 
     // Sparse SOC indexing info (in original order for KKT row structure)
     std::vector<int64_t> soc_sparse_offsets_host(cones.numSocCones + 1, 0);
@@ -414,40 +423,46 @@ DiffKKT::DiffKKT(
                     if (xc.indices[k] == row) {
                         if (xc.kind == XConeKind::GenPower) {
                             int64_t xgp_exp_col_base = -1;
+                            // Rows are visited in variable order; kernels use cone order.
+                            int64_t sparse_row = -1;
                             for (const auto& info : xgenpow_expansion_info) {
                                 if (info.cone_x_idx == xc_idx) {
                                     xgp_exp_col_base = info.exp_col_base;
+                                    sparse_row = info.sparse_dim_off + k;
                                     break;
                                 }
                             }
-                            H_xcone_genpow_du_stat_diag_idx_host.push_back(nnz);
+                            H_xcone_genpow_du_stat_diag_idx_host[sparse_row] = nnz;
                             colIdx.push_back(jdim + n + 2 * m + xc_off + k);
                             ++nnz;
-                            H_xcone_genpow_v1_col_stat_idx_host.push_back(nnz);
+                            H_xcone_genpow_v1_col_stat_idx_host[sparse_row] = nnz;
                             colIdx.push_back(jdim + xgp_exp_col_base);
                             ++nnz;
-                            H_xcone_genpow_v2_col_stat_idx_host.push_back(nnz);
+                            H_xcone_genpow_v2_col_stat_idx_host[sparse_row] = nnz;
                             colIdx.push_back(jdim + xgp_exp_col_base + 1);
                             ++nnz;
-                            H_xcone_genpow_v3_col_stat_idx_host.push_back(nnz);
+                            H_xcone_genpow_v3_col_stat_idx_host[sparse_row] = nnz;
                             colIdx.push_back(jdim + xgp_exp_col_base + 2);
                             ++nnz;
                         } else if (xc.kind == XConeKind::SOC && dim_xc > 4) {
                             // Direct-x SOC rank-2 sparse path.
                             int64_t xsoc_exp_col_base = -1;
+                            // Rows are visited in variable order; kernels use cone order.
+                            int64_t sparse_row = -1;
                             for (const auto& info : xsoc_sparse_info) {
                                 if (info.cone_x_idx == xc_idx) {
                                     xsoc_exp_col_base = info.exp_col_base;
+                                    sparse_row = info.sparse_dim_off + k;
                                     break;
                                 }
                             }
-                            H_xcone_soc_du_stat_diag_idx_host.push_back(nnz);
+                            H_xcone_soc_du_stat_diag_idx_host[sparse_row] = nnz;
                             colIdx.push_back(jdim + n + 2 * m + xc_off + k);
                             ++nnz;
-                            H_xcone_soc_v1_col_stat_idx_host.push_back(nnz);
+                            H_xcone_soc_v1_col_stat_idx_host[sparse_row] = nnz;
                             colIdx.push_back(jdim + xsoc_exp_col_base);
                             ++nnz;
-                            H_xcone_soc_v2_col_stat_idx_host.push_back(nnz);
+                            H_xcone_soc_v2_col_stat_idx_host[sparse_row] = nnz;
                             colIdx.push_back(jdim + xsoc_exp_col_base + 1);
                             ++nnz;
                         } else {
@@ -2335,10 +2350,9 @@ void DiffKKT::updateJ(
     // The caller passes direct-x H values via the new parameters of
     // updateJ; this kernel writes them at the index slots reserved
     // during sparsity construction.
-    if (numXCones_ > 0 &&
-        xcone_E_idx_.get() != nullptr &&
-        xcone_du_idx_.get() != nullptr &&
-        xcone_stat_idx_.get() != nullptr) {
+    // Sparse SOC/GenPower cones still need E even when the dense du/stat
+    // maps are empty. Those maps are only read by loops with nonzero counts.
+    if (numXConeE_ > 0) {
         MOREAU_KERNEL_LAUNCH(populate_xcone_H_blocks_kernel, batchSize, 256, 0, stream,
             KKT.values(),
             xcone_E_idx_.get(),

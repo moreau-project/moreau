@@ -165,6 +165,36 @@ private:
         }
     }
 
+    void append_direct_duals(nb::dict& result) {
+        // Direct-x cone duals in user (original) frame. Empty array when
+        // the problem has no direct-x cones.
+        int64_t total_xn = solver_->variables.totalXConeNumel();
+        if (total_xn > 0) {
+            // Allocate a temporary device buffer + unscale, then copy to numpy.
+            CudaDeviceMemory d_z_x_user(sizeof(double) * total_xn * batchSize_);
+            const auto& cones = solver_->data.cones;
+            // dinv / c_scale / (tau for solutions, kappa for certificates).
+            moreau::unscale_z_x(
+                reinterpret_cast<double*>(d_z_x_user.get()),
+                solver_->solution.z_x_raw.data(),
+                solver_->data.equilibration.dinv.data(),
+                solver_->data.equilibration.c.data(),
+                solver_->solution.normalization_scale.data(),
+                cones.d_xcone_indices,
+                n_, total_xn, batchSize_, 0
+            );
+            cudaDeviceSynchronize();
+            result["z_x"] = make_numpy_array_2d<double>(
+                reinterpret_cast<double*>(d_z_x_user.get()),
+                static_cast<size_t>(batchSize_), static_cast<size_t>(total_xn));
+        } else {
+            // Return shape (batch_size, 0)
+            result["z_x"] = make_numpy_array_2d<double>(
+                /*data=*/nullptr,
+                static_cast<size_t>(batchSize_), 0);
+        }
+    }
+
     // Build numpy result dict from solver state after solve.
     // When include_tau_kappa is true, includes tau, kappa, and dual_obj_val.
     nb::dict make_solve_result_dict(bool include_tau_kappa = true) {
@@ -191,33 +221,7 @@ private:
         result["z"] = z_result;
         result["status"] = status_result;
 
-        // Direct-x cone duals in user (original) frame. Empty array when
-        // the problem has no direct-x cones.
-        int64_t total_xn = solver_->variables.totalXConeNumel();
-        if (total_xn > 0) {
-            // Allocate a temporary device buffer + unscale, then copy to numpy.
-            CudaDeviceMemory d_z_x_user(sizeof(double) * total_xn * batchSize_);
-            const auto& cones = solver_->data.cones;
-            // dinv / c_scale / τ_raw read from solver state.
-            moreau::unscale_z_x(
-                reinterpret_cast<double*>(d_z_x_user.get()),
-                solver_->variables.z_x.data(),
-                solver_->data.equilibration.dinv.data(),
-                solver_->data.equilibration.c.data(),
-                solver_->solution.τ_raw.data(),
-                cones.d_xcone_indices,
-                n_, total_xn, batchSize_, 0
-            );
-            cudaDeviceSynchronize();
-            result["z_x"] = make_numpy_array_2d<double>(
-                reinterpret_cast<double*>(d_z_x_user.get()),
-                static_cast<size_t>(batchSize_), static_cast<size_t>(total_xn));
-        } else {
-            // Return shape (batch_size, 0)
-            result["z_x"] = make_numpy_array_2d<double>(
-                /*data=*/nullptr,
-                static_cast<size_t>(batchSize_), 0);
-        }
+        append_direct_duals(result);
 
         if (include_tau_kappa) {
             result["tau"] = make_numpy_array_1d<double>(solver_->solution.τ_raw.data(),
@@ -276,10 +280,10 @@ private:
             const auto& cones = solver_->data.cones;
             moreau::unscale_z_x(
                 reinterpret_cast<double*>(z_x_out_ptr),
-                solver_->variables.z_x.data(),
+                solver_->solution.z_x_raw.data(),
                 solver_->data.equilibration.dinv.data(),
                 solver_->data.equilibration.c.data(),
-                solver_->solution.τ_raw.data(),
+                solver_->solution.normalization_scale.data(),
                 cones.d_xcone_indices,
                 n_, total_xn, batchSize_, 0
             );
@@ -332,7 +336,7 @@ public:
         std::vector<int64_t> aug_P_ro_storage, aug_P_ci_storage;
         std::vector<int64_t> aug_A_ro_storage, aug_A_ci_storage;
 
-        if (!cones.psdConeDims.empty()) {
+        if (settings.ipm.chordalDecompositionEnable && !cones.psdConeDims.empty()) {
             // Convert CSR A to CSC for chordal analysis
             // CSC of A(m×n): colptr[n+1], rowind[nnz]
             std::vector<int64_t> A_csc_colptr(n + 1, 0);
@@ -657,6 +661,7 @@ public:
         result["x"] = make_numpy_array_2d<double>((double*)d_x_orig.get(), (size_t)batchSize_, (size_t)n_user_);
         result["z"] = make_numpy_array_2d<double>((double*)d_z_orig.get(), (size_t)batchSize_, (size_t)m_user_);
         result["s"] = make_numpy_array_2d<double>((double*)d_s_orig.get(), (size_t)batchSize_, (size_t)m_user_);
+        append_direct_duals(result);
 
         // Copy status and other info from solver
         auto status_result = make_status_array(solver_->info.status_device,
@@ -890,6 +895,7 @@ public:
         result["x"] = make_numpy_array_2d<double>((double*)d_x_orig.get(), (size_t)batchSize_, (size_t)n_user_);
         result["z"] = make_numpy_array_2d<double>((double*)d_z_orig.get(), (size_t)batchSize_, (size_t)m_user_);
         result["s"] = make_numpy_array_2d<double>((double*)d_s_orig.get(), (size_t)batchSize_, (size_t)m_user_);
+        append_direct_duals(result);
 
         auto status_result = make_status_array(solver_->info.status_device, static_cast<size_t>(batchSize_));
         result["status"] = status_result;
@@ -1058,10 +1064,10 @@ public:
             const auto& cones = solver_->data.cones;
             moreau::unscale_z_x(
                 reinterpret_cast<double*>(z_x_out_ptr),
-                solver_->variables.z_x.data(),
+                solver_->solution.z_x_raw.data(),
                 solver_->data.equilibration.dinv.data(),
                 solver_->data.equilibration.c.data(),
-                solver_->solution.τ_raw.data(),
+                solver_->solution.normalization_scale.data(),
                 cones.d_xcone_indices,
                 n_, total_xn, batchSize_, 0);
         }
@@ -1101,31 +1107,7 @@ public:
             result["x"] = make_numpy_array_2d<double>((double*)d_x_orig.get(), (size_t)batchSize_, (size_t)n_user_);
             result["z"] = make_numpy_array_2d<double>((double*)d_z_orig.get(), (size_t)batchSize_, (size_t)m_user_);
             result["s"] = make_numpy_array_2d<double>((double*)d_s_orig.get(), (size_t)batchSize_, (size_t)m_user_);
-            // Direct-x duals: the non-chordal path adds `z_x` via
-            // make_solve_result_dict; the chordal branch built the dict by
-            // hand and omitted it, so chordal + direct-x silently dropped
-            // the z_x output (callers see result.get('z_x') == None).
-            // Chordal augments only slack space — z_x is unchanged — so the
-            // same unscale_z_x path applies.
-            int64_t total_xn = solver_->variables.totalXConeNumel();
-            if (total_xn > 0) {
-                CudaDeviceMemory d_z_x_user(sizeof(double) * total_xn * batchSize_);
-                moreau::unscale_z_x(
-                    reinterpret_cast<double*>(d_z_x_user.get()),
-                    solver_->variables.z_x.data(),
-                    solver_->data.equilibration.dinv.data(),
-                    solver_->data.equilibration.c.data(),
-                    solver_->solution.τ_raw.data(),
-                    solver_->data.cones.d_xcone_indices,
-                    n_, total_xn, batchSize_, 0);
-                cudaDeviceSynchronize();
-                result["z_x"] = make_numpy_array_2d<double>(
-                    (double*)d_z_x_user.get(),
-                    (size_t)batchSize_, (size_t)total_xn);
-            } else {
-                result["z_x"] = make_numpy_array_2d<double>(
-                    (double*)nullptr, (size_t)batchSize_, 0);
-            }
+            append_direct_duals(result);
             auto status_result = make_status_array(solver_->info.status_device, static_cast<size_t>(batchSize_));
             result["status"] = status_result;
             std::vector<double> cost_primal(batchSize_);
@@ -1505,12 +1487,6 @@ public:
         }
 
         if (chordal_) {
-            if (dz_x_ptr != 0) {
-                throw std::runtime_error(
-                    "dz_x backward with chordal-decomposed PSD slack cones is "
-                    "not yet supported on the CUDA path; either disable "
-                    "chordal decomposition or omit dz_x.");
-            }
             // Upstream grads are in user dims. Augment, run backward, reverse-map outputs.
 
             // Download user-dim upstream grads
@@ -1543,7 +1519,14 @@ public:
             BatchedVector dz_bar(d_dz.get(), m_, batchSize_);
             BatchedVector ds_bar(d_ds.get(), m_, batchSize_);
 
-            moreau::backward(*solver_->diff_state(), dx_bar, dz_bar, ds_bar, *solver_, 0);
+            // Chordal augmentation preserves the direct cone coordinates.
+            std::unique_ptr<BatchedVector> dz_x_bar;
+            if (dz_x_ptr != 0) {
+                dz_x_bar = std::make_unique<BatchedVector>(
+                    reinterpret_cast<double*>(dz_x_ptr), solver_->variables.totalXConeNumel(), batchSize_);
+            }
+            moreau::backward_with_dz_x(*solver_->diff_state(), dx_bar, dz_bar, ds_bar,
+                                      dz_x_bar.get(), *solver_, 0);
             cudaDeviceSynchronize();
 
             // Download augmented output grads, reverse-map to user dims, re-upload
@@ -1625,27 +1608,6 @@ public:
             throw std::runtime_error("enable_grad must be True to use backward()");
         }
 
-        if (chordal_) {
-            if (dz_x.has_value() && dz_x->size() > 0) {
-                throw std::runtime_error(
-                    "Backward with dz_x is not supported on chordal-decomposed problems");
-            }
-            return backward_with_chordal(dx, dz, ds);
-        }
-
-        // Standard path (no chordal): user dimensions = solver dimensions
-        CudaDeviceMemory d_dx(sizeof(double) * n_ * batchSize_);
-        CudaDeviceMemory d_dz(sizeof(double) * m_ * batchSize_);
-        CudaDeviceMemory d_ds(sizeof(double) * m_ * batchSize_);
-
-        CUDA_CHECK(cudaMemcpy(d_dx.get(), dx.data(), sizeof(double) * n_ * batchSize_, cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_dz.get(), dz.data(), sizeof(double) * m_ * batchSize_, cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_ds.get(), ds.data(), sizeof(double) * m_ * batchSize_, cudaMemcpyHostToDevice));
-
-        BatchedVector dx_bar(d_dx.get(), n_, batchSize_);
-        BatchedVector dz_bar(d_dz.get(), m_, batchSize_);
-        BatchedVector ds_bar(d_ds.get(), m_, batchSize_);
-
         // Optional dz_x: upload + wrap if provided.
         std::unique_ptr<CudaDeviceMemory> d_dz_x;
         std::unique_ptr<BatchedVector> dz_x_bar;
@@ -1665,6 +1627,23 @@ public:
             dz_x_bar = std::make_unique<BatchedVector>(d_dz_x->get(), total_xn, batchSize_);
             dz_x_ptr = dz_x_bar.get();
         }
+
+        if (chordal_) {
+            return backward_with_chordal(dx, dz, ds, dz_x_ptr);
+        }
+
+        // Standard path (no chordal): user dimensions = solver dimensions
+        CudaDeviceMemory d_dx(sizeof(double) * n_ * batchSize_);
+        CudaDeviceMemory d_dz(sizeof(double) * m_ * batchSize_);
+        CudaDeviceMemory d_ds(sizeof(double) * m_ * batchSize_);
+
+        CUDA_CHECK(cudaMemcpy(d_dx.get(), dx.data(), sizeof(double) * n_ * batchSize_, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_dz.get(), dz.data(), sizeof(double) * m_ * batchSize_, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_ds.get(), ds.data(), sizeof(double) * m_ * batchSize_, cudaMemcpyHostToDevice));
+
+        BatchedVector dx_bar(d_dx.get(), n_, batchSize_);
+        BatchedVector dz_bar(d_dz.get(), m_, batchSize_);
+        BatchedVector ds_bar(d_ds.get(), m_, batchSize_);
 
         moreau::backward_with_dz_x(
             *solver_->diff_state(),
@@ -1717,7 +1696,8 @@ public:
     nb::dict backward_with_chordal(
         const input_array<double>& dx,
         const input_array<double>& dz,
-        const input_array<double>& ds
+        const input_array<double>& ds,
+        const BatchedVector* dz_x_bar
     ) {
         // Upstream grads are in user (original) dimensions.
         // We need to augment dz and ds (dx stays as-is for the first n_user_ entries).
@@ -1751,7 +1731,8 @@ public:
         BatchedVector dz_bar(d_dz.get(), m_, batchSize_);
         BatchedVector ds_bar(d_ds.get(), m_, batchSize_);
 
-        moreau::backward(*solver_->diff_state(), dx_bar, dz_bar, ds_bar, *solver_, 0);
+        moreau::backward_with_dz_x(*solver_->diff_state(), dx_bar, dz_bar, ds_bar,
+                                  dz_x_bar, *solver_, 0);
         cudaDeviceSynchronize();
 
         // Download augmented gradients
@@ -2060,6 +2041,9 @@ NB_MODULE(_moreau_cuda, m) {
             "cuDSS iterative refinement steps (default: 2)")
         .def_rw("cudss_pivot_enable", &IPMSettings::cudssPivotEnable,
             "Enable cuDSS pivoting for numerically challenging problems (default: false)")
+        .def_rw("chordal_decomposition_enable",
+            &IPMSettings::chordalDecompositionEnable,
+            "Enable chordal decomposition of sparse PSD cones")
         .def_rw("chordal_decomposition_merge_method",
             &IPMSettings::chordalDecompositionMergeMethod,
             "Chordal merge strategy for sparse PSD: 'clique_graph' (default, "

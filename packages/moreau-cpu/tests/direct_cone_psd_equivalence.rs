@@ -135,82 +135,153 @@ fn test_psd2_ill_scaled_P() {
     assert!(det + 1e-6 >= 0.0, "PSD violated: det={}", det);
 }
 
-/// Chordal analysis must not misapply to direct-x PSD cones.
-///
-/// Setup: one slack PSD(6) cone (block-diag structure that chordal WOULD
-/// decompose) + one direct-x PSD(2) cone on x[0..3]. Confirms:
-///  - chordal decomp is only applied to the slack side (we enable it)
-///  - direct-x PSD indices survive the augmentation
-///  - the augmented solve produces the same answer as the chordal-disabled
-///    reference.
+/// A slack PSD(4) genuinely splits into two PSD(2) blocks, alongside a
+/// direct PSD(2). Check original-coordinate duals as well as primal values.
 #[test]
 fn test_mixed_chordal_slack_psd_plus_direct_x_psd() {
-    // Primal variable layout: x[0..3] for direct-x PSD(2), x[3..9] for the
-    // slack PSD(6) image. We encode the slack constraint as `-x[3..9] + s = 0,
-    // s ∈ PSD(6)`, so x[3..9] must also be PSD.
-    //
-    // Build the slack PSD(6) with a block-diag sparsity on A so chordal decomp
-    // has something to work with. We use A = -block_diag(I_3, I_3) acting on
-    // two separate triples of x[3..9], which makes the PSD image decomposable
-    // into PSD(3) ⊕ PSD(3) when the off-diagonal block is structurally zero.
-    //
-    // For simplicity: A = -I_6 on x[3..9], b = 0, PSDTriangleConeT(6) slack.
-    // Zero-pattern of b means full svec is unconstrained → chordal detects no
-    // decomp; set some entries of b slightly nonzero on the block diagonal
-    // only to force a block-diag sparsity pattern if chordal is enabled.
     let n = 9;
-    let m = 6;
-
-    // P = I_n
-    let P_colptr: Vec<usize> = (0..=n).collect();
-    let P_rowval: Vec<usize> = (0..n).collect();
-    let P_nzval: Vec<f64> = vec![1.0; n];
-    let P = CscMatrix::new(n, n, P_colptr, P_rowval, P_nzval);
-
-    // q chosen to force non-trivial PSD constraint on both cones.
-    let mut q = vec![0.0; n];
-    q[1] = -1.0; // pushes b≠0 in direct-x PSD(2)
-    q[7] = -1.0; // pushes off-diag in slack PSD(6) side
-
-    // A scatters x[3..9] to s with negation.
-    let A_colptr: Vec<usize> = {
-        let mut v = vec![0; n + 1];
-        for j in 3..n {
-            v[j + 1] = v[j] + 1;
-        }
-        for j in 0..=3 {
-            v[j] = 0;
-        }
-        v
-    };
-    let A_rowval: Vec<usize> = (0..6).collect();
-    let A_nzval: Vec<f64> = vec![-1.0; 6];
-    let A = CscMatrix::new(m, n, A_colptr, A_rowval, A_nzval);
-    let b = vec![0.0f64; m];
-
-    let slack_cones = vec![SupportedConeT::PSDTriangleConeT(3)]; // size-3 slack
-                                                                 // ^ Note: if we used PSDTriangleConeT(3), svec dim = 6 which matches m=6.
+    let m = 10;
+    let diagonal: Vec<f64> = vec![4., 0.5, 2., 1., 3., 2., 5., 2., 0.4];
+    let P = CscMatrix::new(n, n, (0..=n).collect(), (0..n).collect(), diagonal.clone());
+    let mut q = vec![0.; n];
+    q[1] = -1.;
+    q[4] = -1.;
+    q[7] = -1.;
+    // Only the two diagonal 2x2 blocks of the 4x4 slack matrix occur.
+    let A = CscMatrix::new(
+        m,
+        n,
+        vec![0, 0, 0, 0, 1, 2, 3, 4, 5, 6],
+        vec![0, 1, 2, 5, 8, 9],
+        vec![-1.; 6],
+    );
+    let b = vec![0.; m];
+    let slack_cones = vec![SupportedConeT::PSDTriangleConeT(4)];
     let dir_cones = vec![SupportedXConeT::PSDTriangleXConeT(vec![0, 1, 2], 2)];
-
-    // Solve twice: with chordal disabled (reference) and with chordal enabled
-    // (to check that chordal on slack side coexists with direct-x).
-    let mut run = |chordal: bool| -> DefaultSolution<f64> {
+    let run = |chordal| {
         let mut settings = DefaultSettings::default();
+        settings.verbose = false;
         settings.ipm.presolve_enable = false;
         settings.ipm.chordal_decomposition_enable = chordal;
-        let mut solver =
-            DefaultSolver::new_with_xcones(&P, &q, &A, &b, &slack_cones, &dir_cones, settings)
-                .unwrap();
+        settings.ipm.chordal_decomposition_merge_method = "none".to_string();
+        settings.ipm.tol_gap_abs = 1e-11;
+        settings.ipm.tol_gap_rel = 1e-11;
+        settings.ipm.tol_feas = 1e-11;
+        let mut solver = DefaultSolver::new_with_xcones(
+            &P,
+            &q,
+            &A,
+            &b,
+            &slack_cones,
+            &dir_cones,
+            settings.clone(),
+        )
+        .unwrap();
+        if chordal {
+            assert_ne!(solver.data.m, m, "fixture must actually decompose");
+        } else {
+            assert_eq!(solver.data.m, m);
+        }
         solver.solve();
-        solver.solution
+        let sol = solver.solution;
+        assert_eq!(sol.status, SolverStatus::Solved);
+        assert!(sol.z_x.iter().any(|v| v.abs() > 0.1));
+        for j in 0..n {
+            let dual = if j < 3 {
+                -sol.z_x[j]
+            } else {
+                -sol.z[[0, 1, 2, 5, 8, 9][j - 3]]
+            };
+            assert!((diagonal[j] * sol.x[j] + q[j] + dual).abs() < 1e-6);
+        }
+        assert!(
+            sol.x[..3]
+                .iter()
+                .zip(&sol.z_x)
+                .map(|(x, z)| x * z)
+                .sum::<f64>()
+                .abs()
+                < 1e-6
+        );
+
+        let p = CsrMatrix::from_csc(&P);
+        let a = CsrMatrix::from_csc(&A);
+        let mut compiled = CompiledSolver::new_with_b_nnz_mask_and_xcones(
+            n,
+            m,
+            &p.rowptr,
+            &p.colval,
+            &a.rowptr,
+            &a.colval,
+            &slack_cones,
+            &dir_cones,
+            settings,
+            1,
+            true,
+            Some(&[false; 10]),
+        )
+        .unwrap();
+        compiled
+            .setup(&[p.nzval.clone()], &[a.nzval.clone()])
+            .unwrap();
+        let compiled_sol = compiled.solve(&[q.clone()], &[b.clone()]).unwrap();
+        assert_close(&sol.z_x, &compiled_sol[0].z_x, 1e-5, "compiled z_x");
+        let upstream = [UpstreamGradients {
+            dx: vec![0.7; n],
+            ds: vec![0.2; m],
+            dz: vec![0.1; m],
+            dz_x: vec![0.3; 3],
+        }];
+        let grads = compiled.backward(&upstream).unwrap();
+        // Autograd may restore an earlier forward result after solver reuse.
+        compiled
+            .solve(&[q.iter().map(|v| v * 0.9).collect()], &[b.clone()])
+            .unwrap();
+        let saved = &compiled_sol[0];
+        let explicit = compiled
+            .backward_with_data_and_z_x(
+                &upstream,
+                &[p.nzval],
+                &[a.nzval],
+                &[q.clone()],
+                &[b.clone()],
+                &[saved.x.clone()],
+                &[saved.z.clone()],
+                &[saved.s.clone()],
+                &[saved.z_x.clone()],
+            )
+            .unwrap();
+        assert_close(&grads[0].dq, &explicit[0].dq, 1e-4, "external dq");
+        assert_close(
+            &grads[0].dP_values,
+            &explicit[0].dP_values,
+            1e-4,
+            "external dP",
+        );
+        assert_close(
+            &grads[0].dA_values,
+            &explicit[0].dA_values,
+            1e-4,
+            "external dA",
+        );
+        for i in [0, 1, 2, 5, 8, 9] {
+            assert!((grads[0].db[i] - explicit[0].db[i]).abs() < 1e-4);
+        }
+        (sol, grads.into_iter().next().unwrap())
     };
-
-    let ref_sol = run(false);
-    let chord_sol = run(true);
-
-    assert_eq!(ref_sol.status, SolverStatus::Solved, "reference failed");
-    assert_eq!(chord_sol.status, SolverStatus::Solved, "chordal failed");
-    assert_close(&ref_sol.x, &chord_sol.x, 1e-5, "x");
+    let (reference, ref_grad) = run(false);
+    let (decomposed, dec_grad) = run(true);
+    assert_close(&reference.x, &decomposed.x, 1e-5, "x");
+    assert_close(&reference.s, &decomposed.s, 1e-5, "s");
+    assert_close(&reference.z, &decomposed.z, 1e-5, "z");
+    assert_close(&reference.z_x, &decomposed.z_x, 1e-5, "z_x");
+    assert_close(&ref_grad.dq, &dec_grad.dq, 1e-4, "dq");
+    assert_close(&ref_grad.dP_values, &dec_grad.dP_values, 1e-4, "dP");
+    assert_close(&ref_grad.dA_values, &dec_grad.dA_values, 1e-4, "dA");
+    // Only structurally present rows of b are parameters of this decomposition.
+    for i in [0, 1, 2, 5, 8, 9] {
+        assert!((ref_grad.db[i] - dec_grad.db[i]).abs() < 1e-4);
+    }
 }
 
 #[test]

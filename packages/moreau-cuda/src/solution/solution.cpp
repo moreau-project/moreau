@@ -48,16 +48,15 @@ void Solution::post_process(
     // Normalize by τ (optimal) or κ (infeasible) per batch, matching CPU solver.
     // For infeasible problems, dividing by κ produces a proper infeasibility certificate.
     // Use saved raw variables to avoid NaN values if solver continued past convergence.
-    BatchedVector scale(1, batchSize);
-    build_normalization_scale(scale, τ_raw, κ_raw, info.status_device, batchSize, stream);
+    build_normalization_scale(normalization_scale, τ_raw, κ_raw, info.status_device, batchSize, stream);
 
     BatchedVector x_normalized(n, batchSize);
     BatchedVector s_normalized(m, batchSize);
     BatchedVector z_normalized(m, batchSize);
 
-    div_per_batch(x_normalized, x_raw, scale, stream);
-    div_per_batch(s_normalized, s_raw, scale, stream);
-    div_per_batch(z_normalized, z_raw, scale, stream);
+    div_per_batch(x_normalized, x_raw, normalization_scale, stream);
+    div_per_batch(s_normalized, s_raw, normalization_scale, stream);
+    div_per_batch(z_normalized, z_raw, normalization_scale, stream);
 
     // Then unscale the variables to get a solution to the original (user-provided) problem
     // This reverses the equilibration scaling applied during problem setup

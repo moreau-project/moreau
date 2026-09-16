@@ -9,11 +9,10 @@ Covers:
 - jax.Solver autograd through JaxSolution.z_x (CPU + CUDA).
 """
 
+import moreau
 import numpy as np
 import pytest
 from scipy import sparse
-
-import moreau
 
 
 def test_solver_with_dir_cones_backward_matches_slack():
@@ -185,7 +184,7 @@ def test_compiled_solver_xcone_backward_batch_cuda():
     _batched_backward_matches_per_problem("cuda")
 
 
-def _check_dz_x_finite_difference(device):
+def _check_dz_x_finite_difference(device, equilibrate):
     """Helper: backward(dz_x=e_j) must match central FD of z_x[j] on the
     given device. Active-boundary problem keeps the test well-conditioned."""
     from moreau._backend import device_available
@@ -194,18 +193,16 @@ def _check_dz_x_finite_difference(device):
         pytest.skip(f"{device} backend not available")
 
     n = 3
-    P = sparse.diags([1.0, 1.0, 1.0], format="csr")
+    P = sparse.diags([4.0, 2.0, 0.25], format="csr")
     q = np.array([-0.5, -0.5, 1.0])  # active boundary on x[2] = 0
     A = sparse.csr_matrix(np.zeros((0, n)))
     b = np.array([])
     cones = moreau.Cones(
         dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])],
     )
-    # Equilibration is a non-smooth rescaling that produces asymmetric
-    # finite differences at the cone boundary; disable it to keep the FD
-    # reference clean. The IFT-direct math is invariant under uniform
-    # per-cone equilibration.
-    ipm = moreau.IPMSettings(equilibrate_enable=False)
+    # Returned derivatives are in original coordinates, so the answer must
+    # remain correct with equilibration enabled and nontrivial scaling.
+    ipm = moreau.IPMSettings(equilibrate_enable=equilibrate)
     settings = moreau.Settings(
         device=device,
         solver="ipm",
@@ -242,18 +239,20 @@ def _check_dz_x_finite_difference(device):
     np.testing.assert_allclose(analytic, fd, atol=1e-3)
 
 
-def test_solver_dz_x_finite_difference_cpu():
+@pytest.mark.parametrize("equilibrate", [False, True])
+def test_solver_dz_x_finite_difference_cpu(equilibrate):
     """Upstream gradient on z_x must match finite differences of z_x_orig.
 
     Mirrors the Rust integration test (`direct_cone_dz_x_backward`) but at the
     Python API level.
     """
-    _check_dz_x_finite_difference("cpu")
+    _check_dz_x_finite_difference("cpu", equilibrate)
 
 
-def test_solver_dz_x_finite_difference_cuda():
+@pytest.mark.parametrize("equilibrate", [False, True])
+def test_solver_dz_x_finite_difference_cuda(equilibrate):
     """Same dz_x parity check as the CPU test, but on CUDA."""
-    _check_dz_x_finite_difference("cuda")
+    _check_dz_x_finite_difference("cuda", equilibrate)
 
 
 def _check_torch_autograd_through_z_x(device):
@@ -393,15 +392,18 @@ def test_torch_cpu_direct_duals_batch_and_warm_start(batch_size, shared_matrices
     from moreau.torch import Solver
 
     solver = Solver(
-        n=3, m=0,
-        P_row_offsets=[0, 1, 2, 3], P_col_indices=[0, 1, 2],
-        A_row_offsets=[0], A_col_indices=[],
+        n=3,
+        m=0,
+        P_row_offsets=[0, 1, 2, 3],
+        P_col_indices=[0, 1, 2],
+        A_row_offsets=[0],
+        A_col_indices=[],
         cones=moreau.Cones(dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])]),
         settings=moreau.Settings(device="cpu", enable_grad=True, solver="ipm"),
     )
-    P = torch.tensor([2., 3., 4.], dtype=torch.float64)
+    P = torch.tensor([2.0, 3.0, 4.0], dtype=torch.float64)
     A = torch.empty(0, dtype=torch.float64)
-    q = torch.tensor([-3., 2., -1.], dtype=torch.float64)
+    q = torch.tensor([-3.0, 2.0, -1.0], dtype=torch.float64)
     b = torch.empty(0, dtype=torch.float64)
     if batch_size is not None:
         q = q.repeat(batch_size, 1)
@@ -414,7 +416,7 @@ def test_torch_cpu_direct_duals_batch_and_warm_start(batch_size, shared_matrices
     assert solution.z_x.shape == q.shape
     torch.testing.assert_close(solution.z_x, torch.relu(q), atol=1e-7, rtol=1e-7)
     (solution.x.sum() + solution.z_x.sum()).backward()
-    expected_grad = torch.tensor([-.5, 1., -.25], dtype=torch.float64).expand_as(q)
+    expected_grad = torch.tensor([-0.5, 1.0, -0.25], dtype=torch.float64).expand_as(q)
     torch.testing.assert_close(q.grad, expected_grad, atol=1e-6, rtol=1e-6)
     warm = solver.solve(P, A, q, b, warm_start=solution.to_warm_start())
     torch.testing.assert_close(warm.x, solution.x, atol=1e-7, rtol=1e-7)
@@ -436,9 +438,7 @@ def test_cuda_jax_fallback_duals_and_gradients(monkeypatch, direct, batched):
     monkeypatch.setattr(cuda_solver, "_get_ffi_lib", lambda: None)
     monkeypatch.setattr(cuda_solver, "ffi_available", lambda: False)
     cones = moreau.Cones(
-        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])]
-        if direct
-        else []
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])] if direct else []
     )
     solver = Solver(
         n=3,
@@ -474,9 +474,7 @@ def test_cuda_jax_fallback_duals_and_gradients(monkeypatch, direct, batched):
 
     derivative = jax.jit(jax.grad(loss))(q)
     expected_grad = jnp.array([-0.5, 1.0 if direct else -1.0 / 3, -0.25])
-    np.testing.assert_allclose(
-        derivative, jnp.broadcast_to(expected_grad, q.shape), atol=1e-6
-    )
+    np.testing.assert_allclose(derivative, jnp.broadcast_to(expected_grad, q.shape), atol=1e-6)
 
     def warm_solve(q, x, z, s, z_x):
         return solver._impl.solve_warm(P, A, q, b, x, z, s, z_x)[0]
@@ -489,6 +487,4 @@ def test_cuda_jax_fallback_duals_and_gradients(monkeypatch, direct, batched):
     np.testing.assert_allclose(warmed.z_x, solution.z_x, atol=1e-7)
     warm_grad = jax.jit(jax.grad(lambda q: warm_solve(q, *warm_args).z_x.sum()))(q)
     expected_warm_grad = jnp.array([0.0, 1.0 if direct else 0.0, 0.0])
-    np.testing.assert_allclose(
-        warm_grad, jnp.broadcast_to(expected_warm_grad, q.shape), atol=1e-6
-    )
+    np.testing.assert_allclose(warm_grad, jnp.broadcast_to(expected_warm_grad, q.shape), atol=1e-6)
