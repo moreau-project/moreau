@@ -4,10 +4,53 @@
 #include "moreau/equilibration/equilibration.hpp"
 #include "moreau/equilibration/equilibration_kernels.cuh"
 #include "moreau/cones/cones.hpp"
+#include "moreau/diff/diff_kernels.cuh"
 #include <vector>
 #include <cmath>
 
 using namespace moreau;
+
+TEST(DirectConeEquilibrationTest, DualRecoveryWarmStartAndAdjoint) {
+    constexpr int n = 3, xn = 2, batchSize = 2;
+    const std::vector<int64_t> indices = {2, 0};
+    const std::vector<double> h_dinv = {0.5, 2.0, 0.25, 4.0, 0.125, 2.0};
+    const std::vector<double> h_c = {2.0, 5.0}, h_tau = {4.0, 3.0};
+    const std::vector<double> h_raw = {24.0, 32.0, 15.0, 40.0};
+    const std::vector<double> h_bar = {1.0, 2.0, 3.0, 4.0};
+    const std::vector<double> expected_user = {0.75, 2.0, 2.0, 40.0 * 4.0 / 15.0};
+    const std::vector<double> expected_adjoint = {0.125, 0.5, 1.2, 3.2};
+    BatchedVector dinv(n, batchSize), c(1, batchSize), tau(1, batchSize);
+    BatchedVector raw(xn, batchSize), user(xn, batchSize), restored(xn, batchSize);
+    BatchedVector bar(xn, batchSize), adjoint(xn, batchSize);
+    dinv.cpuToGpu(h_dinv.data());
+    c.cpuToGpu(h_c.data());
+    tau.cpuToGpu(h_tau.data());
+    raw.cpuToGpu(h_raw.data());
+    bar.cpuToGpu(h_bar.data());
+    int64_t* d_indices = nullptr;
+    ASSERT_EQ(cudaMalloc(&d_indices, xn * sizeof(int64_t)), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(d_indices, indices.data(), xn * sizeof(int64_t),
+                         cudaMemcpyHostToDevice), cudaSuccess);
+
+    unscale_z_x(user.data(), raw.data(), dinv.data(), c.data(), tau.data(),
+                d_indices, n, xn, batchSize);
+    equilibrate_z_x(restored.data(), user.data(), dinv.data(), c.data(),
+                    d_indices, n, xn, batchSize);
+    equilibrate_dz_x(adjoint.data(), bar.data(), dinv.data(), c.data(),
+                     d_indices, n, xn, batchSize);
+    std::vector<double> h_user(xn * batchSize), h_restored(xn * batchSize);
+    std::vector<double> h_adjoint(xn * batchSize);
+    user.gpuToCpu(h_user.data());
+    restored.gpuToCpu(h_restored.data());
+    adjoint.gpuToCpu(h_adjoint.data());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    cudaFree(d_indices);
+    for (int k = 0; k < xn * batchSize; ++k) {
+        EXPECT_NEAR(h_user[k], expected_user[k], 1e-12);
+        EXPECT_NEAR(h_restored[k], h_raw[k] / h_tau[k / xn], 1e-12);
+        EXPECT_NEAR(h_adjoint[k], expected_adjoint[k], 1e-12);
+    }
+}
 
 class EquilibrationDataTest : public ::testing::Test {
 protected:

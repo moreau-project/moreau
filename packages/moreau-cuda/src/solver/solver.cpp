@@ -356,7 +356,7 @@ void CompiledSolver::warmStart(
                              data.equilibration.e, data.equilibration.c, stream);
 
     // Direct-x: convert user-frame z_x to the equilibrated frame the IPM
-    // operates in. `z_x_eq[b,k] = z_x_user[b,k] * c[b] / d[J[k]]`. Inverse
+    // operates in. `z_x_eq[b,k] = z_x_user[b,k] * c[b] * d[J[k]]`. Inverse
     // of the user-facing unscale. When warm_z_x is omitted we must fall
     // back to the same unit-init point `default_start` uses — otherwise
     // z_x carries stale values from a prior solve (resetState clears only

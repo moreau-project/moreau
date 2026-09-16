@@ -1755,7 +1755,7 @@ impl<T: FloatT> CompiledSolver<T> {
                                     for xcone in &solver_ref.data.dir_cones {
                                         for (k, &idx) in xcone.indices().iter().enumerate() {
                                             solver_ref.variables.z_x[off + k] =
-                                                warm_z_x[off + k] * c / d[idx];
+                                                warm_z_x[off + k] * c * d[idx];
                                         }
                                         off += xcone.indices().len();
                                     }

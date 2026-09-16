@@ -1273,7 +1273,7 @@ public:
 
         // Direct-x dual: when supplied (in user/original frame), convert
         // to the equilibrated τ=1 frame and store in DiffState. Inverse
-        // of `Variables::unscale`: z_x_eq = z_x_user * c / d[J].
+        // of `Variables::unscale`: z_x_eq = z_x_user * c * d[J].
         int64_t total_xn = solver_->variables.totalXConeNumel();
         if (total_xn > 0 && z_x_ptr != 0) {
             moreau::equilibrate_z_x(
