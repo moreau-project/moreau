@@ -1001,8 +1001,14 @@ class Solver:
 
         # Batched solve (handles both shared and per-problem P/A)
         result = self._solve_batch(
-            P_values, A_values, q, b,
-            warm_x=warm_x, warm_z=warm_z, warm_s=warm_s, warm_z_x=warm_z_x,
+            P_values,
+            A_values,
+            q,
+            b,
+            warm_x=warm_x,
+            warm_z=warm_z,
+            warm_s=warm_s,
+            warm_z_x=warm_z_x,
         )
 
         # If we reshuffled from single to batch, squeeze back
