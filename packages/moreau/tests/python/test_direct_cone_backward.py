@@ -383,3 +383,39 @@ def test_jax_solver_direct_x_autograd_through_z_x():
     """JAX (CPU) direct-x autograd. Regression: previously
     `JaxSolver(cones=Cones(dir_cones=...))` raised `NotImplementedError`."""
     _check_jax_autograd_through_z_x("cpu")
+
+
+@pytest.mark.parametrize("batch_size", [None, 1, 2])
+@pytest.mark.parametrize("shared_matrices", [False, True])
+def test_torch_cpu_direct_duals_batch_and_warm_start(batch_size, shared_matrices):
+    """Direct duals survive size-one batching and every CPU warm-start route."""
+    torch = pytest.importorskip("torch")
+    from moreau.torch import Solver
+
+    solver = Solver(
+        n=3, m=0,
+        P_row_offsets=[0, 1, 2, 3], P_col_indices=[0, 1, 2],
+        A_row_offsets=[0], A_col_indices=[],
+        cones=moreau.Cones(dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])]),
+        settings=moreau.Settings(device="cpu", enable_grad=True, solver="ipm"),
+    )
+    P = torch.tensor([2., 3., 4.], dtype=torch.float64)
+    A = torch.empty(0, dtype=torch.float64)
+    q = torch.tensor([-3., 2., -1.], dtype=torch.float64)
+    b = torch.empty(0, dtype=torch.float64)
+    if batch_size is not None:
+        q = q.repeat(batch_size, 1)
+        b = b.repeat(batch_size, 1)
+        if not shared_matrices:
+            P = P.repeat(batch_size, 1)
+            A = A.repeat(batch_size, 1)
+    q.requires_grad_()
+    solution = solver.solve(P, A, q, b)
+    assert solution.z_x.shape == q.shape
+    torch.testing.assert_close(solution.z_x, torch.relu(q), atol=1e-7, rtol=1e-7)
+    (solution.x.sum() + solution.z_x.sum()).backward()
+    expected_grad = torch.tensor([-.5, 1., -.25], dtype=torch.float64).expand_as(q)
+    torch.testing.assert_close(q.grad, expected_grad, atol=1e-6, rtol=1e-6)
+    warm = solver.solve(P, A, q, b, warm_start=solution.to_warm_start())
+    torch.testing.assert_close(warm.x, solution.x, atol=1e-7, rtol=1e-7)
+    torch.testing.assert_close(warm.z_x, solution.z_x, atol=1e-7, rtol=1e-7)
