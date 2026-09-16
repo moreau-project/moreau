@@ -1,0 +1,161 @@
+name: Julia
+
+on:
+  push:
+    branches: [main]
+    paths: ['packages/moreau-julia/**', 'packages/moreau-cpu/**', 'scripts/*julia*', '.github/workflows/julia.yml']
+  pull_request:
+    paths: ['packages/moreau-julia/**', 'packages/moreau-cpu/**', 'scripts/*julia*', '.github/workflows/julia.yml']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Stable release tag to test against registered JLLs; empty builds CPU from source'
+        type: string
+      run_gpu_tests:
+        description: Run CUDA 12/13 tests on GPU runners
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+      run_gpu_tests:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  JULIA_PROJECT: packages/moreau-julia/Moreau.jl
+
+jobs:
+  cpu:
+    name: CPU / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x64
+            library: libmoreau.so
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+            library: libmoreau.so
+          - os: windows-latest
+            arch: x64
+            library: moreau.dll
+          - os: macos-15-intel
+            arch: x64
+            library: libmoreau.dylib
+          - os: macos-14
+            arch: aarch64
+            library: libmoreau.dylib
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.12'
+          arch: ${{ matrix.arch }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.release_tag == ''
+      - name: Build native CPU for source CI
+        if: inputs.release_tag == ''
+        shell: bash
+        env:
+          LIBRARY: ${{ matrix.library }}
+        run: |
+          cargo build --manifest-path packages/moreau-cpu/Cargo.toml --locked --release --lib --features c-api
+          python scripts/julia_release.py native-fixture --output native-qa/Moreau_CPU_jll \
+            --library "packages/moreau-cpu/target/release/$LIBRARY"
+          julia --project="$JULIA_PROJECT" -e 'using Pkg; Pkg.develop(path="native-qa/Moreau_CPU_jll")'
+      - name: Test package and internal integration suite
+        shell: bash
+        run: |
+          julia --project="$JULIA_PROJECT" -e 'using Pkg; Pkg.instantiate(); Pkg.test(coverage=true)'
+          julia --project=packages/moreau-julia/MoreauTests.jl -e '
+            using Pkg
+            specs = [PackageSpec(path=ENV["JULIA_PROJECT"])]
+            isdir("native-qa/Moreau_CPU_jll") && push!(specs, PackageSpec(path="native-qa/Moreau_CPU_jll"))
+            Pkg.develop(specs)
+            Pkg.test()
+          '
+      - uses: julia-actions/julia-processcoverage@v1
+        with:
+          directories: packages/moreau-julia/Moreau.jl/src,packages/moreau-julia/Moreau.jl/ext
+      - uses: actions/upload-artifact@v4
+        with:
+          name: julia-coverage-${{ matrix.os }}
+          path: lcov.info
+          if-no-files-found: error
+
+  musl:
+    if: inputs.release_tag != ''
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+      - name: Test registered musl CPU JLL
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work julia:1.12-alpine \
+            julia --project=packages/moreau-julia/Moreau.jl -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+
+  cuda:
+    if: inputs.release_tag != ''
+    name: CUDA ${{ matrix.cuda }} / ${{ inputs.run_gpu_tests && 'runtime' || 'load' }}
+    runs-on: ${{ inputs.run_gpu_tests && matrix.gpu_runner || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: '12.2'
+            gpu_runner: gpu-t4
+          - cuda: '13.0'
+            gpu_runner: gpu-instance
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.12'
+      - name: Select CUDA runtime and resolve matching JLL
+        env:
+          CUDA_VERSION: ${{ matrix.cuda }}
+        shell: julia {0}
+        run: |
+          using Pkg, TOML
+          package = abspath(ENV["JULIA_PROJECT"])
+          env = joinpath(package, "test", "cuda")
+          open(joinpath(env, "LocalPreferences.toml"), "w") do io
+              TOML.print(io, Dict("CUDA_Runtime_jll" => Dict("version" => ENV["CUDA_VERSION"], "local" => "false")))
+          end
+          Pkg.activate(env)
+          Pkg.develop(path=package)
+          Pkg.instantiate()
+      - name: Test CUDA extensions and ownership
+        env:
+          MOREAU_TEST_CUDA: ${{ inputs.run_gpu_tests && '1' || '0' }}
+        run: julia --project=packages/moreau-julia/Moreau.jl/test/cuda packages/moreau-julia/Moreau.jl/test/cuda/runtests.jl
+      - name: Run CUDA JuMP/MOI conformance suite
+        if: inputs.run_gpu_tests
+        env:
+          MOREAU_TEST_CUDA: '1'
+        run: |
+          julia --project=packages/moreau-julia/Moreau.jl/test/cuda -e '
+            using Pkg
+            Pkg.add("JuMP")
+            include("packages/moreau-julia/MoreauTests.jl/test/test_cuda.jl")
+          '

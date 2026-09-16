@@ -7,13 +7,11 @@ name = "Moreau_CPU"
 version = v"0.4.0"
 sources = [
     GitSource("https://github.com/moreau-project/moreau.git",
-        "36ea4ead046d00b40a3ab703aeb3099bb99667ca"),
-    DirectorySource("./bundled"),
+        "de2d7d9ff2221b122a7c7ef5622df8d3c483db86"),
 ]
 
 script = raw"""
 cd ${WORKSPACE}/srcdir/moreau
-atomic_patch -p1 ../patches/target-cxx-runtime.patch
 install_license LICENSE NOTICE
 cd packages/moreau-cpu
 # Rust's musl target otherwise defaults to a static CRT and disallows cdylibs.

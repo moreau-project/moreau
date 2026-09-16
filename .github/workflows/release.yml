@@ -1,9 +1,10 @@
 # Build all artifacts and create a GitHub Release for QA.
 #
-# This is stage 1 of a 3-stage release pipeline:
-#   1. release.yml    — build wheels, create GitHub Release (this workflow)
-#   2. test-release.yml — test wheels from a GitHub Release (re-triggerable)
-#   3. publish.yml    — push Python wheels to PyPI
+# Stable release pipeline (see RELEASE.md):
+#   release.yml -> julia-release.yml submit-jlls -> external Yggdrasil registration
+#   -> julia-release.yml test -> test-release.yml -> julia-release.yml register
+#   -> external General registration -> publish.yml.
+# Development/prerelease builds go directly to test-release.yml.
 #
 # Usage:
 #   gh workflow run release.yml
@@ -34,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      stable: ${{ steps.version.outputs.stable }}
     steps:
       - uses: actions/checkout@v4
       - name: Resolve version
@@ -46,6 +48,12 @@ jobs:
           else
             BASE=$(grep '^version = ' packages/moreau/pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
             VERSION="${BASE}.dev$(date -u +%Y%m%d%H%M%S)"
+          fi
+          python3 scripts/julia_release.py check-version "$VERSION"
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=false" >> "$GITHUB_OUTPUT"
           fi
           python3 scripts/bump_version.py "$VERSION" --pin-dependencies
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -543,6 +551,10 @@ jobs:
           fi
           echo "Release name: $(grep name= $GITHUB_OUTPUT | cut -d= -f2)"
 
+      - name: Prepare Yggdrasil recipes for the committed stable release
+        if: needs.resolve-version.outputs.stable == 'true'
+        run: python3 scripts/julia_release.py prepare --output julia-handoff
+
       - name: Set Julia source release version
         env:
           VERSION: ${{ needs.resolve-version.outputs.version }}
@@ -550,10 +562,8 @@ jobs:
 
       - name: Package Julia source tarball
         run: |
-          tar czf moreau-julia-src.tar.gz \
-            --exclude='Moreau.jl/Manifest.toml' \
-            -C packages/moreau-julia \
-            Moreau.jl
+          git -C packages/moreau-julia ls-files -z Moreau.jl | \
+            tar --null -czf moreau-julia-src.tar.gz -C packages/moreau-julia -T -
           echo "Julia source tarball:"
           tar tzf moreau-julia-src.tar.gz | head -20
           du -h moreau-julia-src.tar.gz
@@ -564,6 +574,9 @@ jobs:
           cp dist-wheels/*.whl dist-release/
           cp dist-clibs/*.tar.gz dist-release/
           cp moreau-julia-src.tar.gz dist-release/
+          if [ -d julia-handoff ]; then
+            cp julia-handoff/*.tar.gz julia-handoff/*.json julia-handoff/*.txt dist-release/
+          fi
           echo "=== Release assets ==="
           ls -la dist-release/
           du -h dist-release/*
@@ -628,12 +641,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Trigger test-release workflow
+      - name: Start the next release stage
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.release.outputs.name }}
           RUN_GPU_TESTS: ${{ vars.MOREAU_GPU_RUNNERS_ENABLED == 'true' }}
+          STABLE: ${{ needs.resolve-version.outputs.stable }}
         run: |
-          echo "Triggering test-release for tag: $RELEASE_TAG"
-          gh workflow run test-release.yml --ref "$RELEASE_TAG" \
-            -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"
+          if [ "$STABLE" = true ]; then
+            gh workflow run julia-release.yml --ref "$RELEASE_TAG" \
+              -f "release_tag=$RELEASE_TAG" -f stage=submit-jlls
+            echo 'ChatGPT generated: JLL submission dispatched. After Yggdrasil registers both JLLs, run Julia Release with stage=test.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh workflow run test-release.yml --ref "$RELEASE_TAG" \
+              -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"
+          fi

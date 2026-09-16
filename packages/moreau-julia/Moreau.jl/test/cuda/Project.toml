@@ -1,4 +1,5 @@
 [deps]
+CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Moreau = "c8b129f6-74e5-4f0d-b2d8-2ea10d91a548"
 Moreau_CUDA_jll = "c77365f8-1b8a-5c63-97c9-c9362ae64116"

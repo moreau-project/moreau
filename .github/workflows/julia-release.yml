@@ -1,0 +1,116 @@
+name: Julia Release
+run-name: Julia Release ${{ inputs.stage }} ${{ inputs.release_tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Stable Moreau release tag
+        required: true
+        type: string
+      stage:
+        description: 'Submit recipes, resume QA after JLL registration, or register the tested frontend'
+        required: true
+        type: choice
+        options: [submit-jlls, test, register]
+      run_gpu_tests:
+        description: Run CUDA 12/13 runtime QA using the configured GPU runners
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: julia-release-${{ inputs.release_tag }}-${{ inputs.stage }}
+  cancel-in-progress: false
+
+jobs:
+  submit-jlls:
+    if: inputs.stage == 'submit-jlls'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [CPU, CUDA]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check submission configuration
+        env:
+          GH_TOKEN: ${{ secrets.JULIA_RELEASE_TOKEN }}
+          YGGDRASIL_FORK: ${{ vars.YGGDRASIL_FORK }}
+        run: |
+          test -n "$GH_TOKEN" || { echo '::error::Set JULIA_RELEASE_TOKEN for the release maintainer'; exit 1; }
+          test -n "$YGGDRASIL_FORK" || { echo '::error::Set YGGDRASIL_FORK to your JuliaPackaging/Yggdrasil fork'; exit 1; }
+          test "$(gh api "repos/$YGGDRASIL_FORK" --jq '.parent.full_name')" = JuliaPackaging/Yggdrasil
+      - name: Prepare recipes for this exact source commit
+        run: python scripts/julia_release.py prepare --output julia-handoff
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.YGGDRASIL_FORK }}
+          token: ${{ secrets.JULIA_RELEASE_TOKEN }}
+          path: yggdrasil
+      - name: Open or reuse Yggdrasil pull request
+        env:
+          GH_TOKEN: ${{ secrets.JULIA_RELEASE_TOKEN }}
+          YGGDRASIL_FORK: ${{ vars.YGGDRASIL_FORK }}
+          BACKEND: ${{ matrix.backend }}
+        run: bash scripts/submit_julia_jll.sh
+
+  advance:
+    if: inputs.stage != 'submit-jlls'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/checkout@v4
+        with:
+          repository: JuliaRegistries/General
+          path: general-registry
+          sparse-checkout: |
+            jll/M/Moreau_CPU_jll
+            jll/M/Moreau_CUDA_jll
+            M/Moreau
+      - name: Require both matching JLL registrations
+        run: python scripts/julia_release.py check-registry general-registry
+      - name: Run release QA
+        if: inputs.stage == 'test'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RUN_GPU_TESTS: ${{ inputs.run_gpu_tests }}
+        run: |
+          gh workflow run test-release.yml --ref "$RELEASE_TAG" \
+            -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"
+      - name: Require successful QA before registration
+        if: inputs.stage == 'register'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
+            --limit 100 --json displayTitle,conclusion,status,url > qa-runs.json
+          python scripts/julia_release.py check-qa qa-runs.json "$RELEASE_TAG"
+          gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir julia-assets
+          python scripts/julia_release.py check-source julia-assets/moreau-julia-src.tar.gz
+      - name: Request registration from the monorepo commit
+        if: inputs.stage == 'register'
+        env:
+          GH_TOKEN: ${{ secrets.JULIA_RELEASE_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          test -n "$GH_TOKEN" || { echo '::error::Set JULIA_RELEASE_TOKEN for a Moreau maintainer'; exit 1; }
+          python scripts/julia_release.py registration-body > registration-body.txt
+          python -c 'import json; print(json.dumps({"body": open("registration-body.txt").read()}))' > registration.json
+          gh api --method POST "repos/$GH_REPO/commits/$(git rev-parse HEAD)/comments" --input registration.json
+          echo 'ChatGPT generated: Registration requested. Run publish.yml after General merges the matching package tree.' >> "$GITHUB_STEP_SUMMARY"

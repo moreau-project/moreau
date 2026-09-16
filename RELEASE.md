@@ -1,0 +1,124 @@
+# Moreau releases
+
+The monorepo owns the native libraries, Python packages, and Julia frontend.
+Moreau.jl is registered from `packages/moreau-julia/Moreau.jl` with its existing
+name and UUID. All use the same release version and source commit. There is no
+standalone frontend synchronization or separate Julia version bump.
+
+Yggdrasil builds and registers `Moreau_CPU_jll` and `Moreau_CUDA_jll`. Its generated
+repositories under JuliaBinaryWrappers are build outputs; Moreau does not maintain
+parallel source repositories for them.
+
+## One-time GitHub configuration
+
+- Enable the Registrator GitHub app on `moreau-project/moreau`.
+- Set `YGGDRASIL_FORK` to a writable fork of `JuliaPackaging/Yggdrasil`, for example
+  `moreau-project/Yggdrasil` if that fork has been created.
+- Set the `JULIA_RELEASE_TOKEN` secret to a release maintainer's token with access
+  to push branches in that fork, open Yggdrasil PRs, and comment on Moreau commits.
+  The Registrator caller must be an eligible Moreau collaborator or public
+  organization member. The workflow never replies to the General review PR.
+- Keep the existing PyPI trusted-publishing configuration. Optional CUDA runtime
+  tests use the existing `gpu-t4` and `gpu-instance` runners. CPU and CUDA loading
+  tests run on hosted runners.
+
+No settings, tokens, repository permissions, or external repositories are changed
+by preparing this branch. The configuration above is required when running the
+publication workflows.
+
+## Stable release sequence
+
+1. Run `python scripts/bump_version.py X.Y.Z --pin-dependencies`, review the change,
+   and commit it. The script updates Julia, JLL compatibility bounds, and both
+   recipe versions alongside Python/native versions. Merge the release changes.
+   Stable release dispatch rejects an uncommitted or different frontend/native
+   version; the registered package must exist in the tagged source tree.
+2. Start the normal release workflow from that commit:
+
+   ```sh
+   gh workflow run release.yml --repo moreau-project/moreau --ref main \
+     -f version=X.Y.Z -f release_name=vX.Y.Z
+   ```
+
+   The workflow builds wheels/C libraries, packages the tracked Julia source,
+   and prepares CPU/CUDA Yggdrasil recipes with the full release source commit.
+   It attaches `moreau-yggdrasil.tar.gz`, `moreau-julia-release.json`, and the
+   registration request text to the candidate release, then dispatches the
+   `submit-jlls` stage of `julia-release.yml`. That stage opens or reuses two
+   Yggdrasil PRs. A dispatch is not evidence that either PR built or merged.
+3. After Yggdrasil has built, reviewed, merged, and registered both JLLs, resume:
+
+   ```sh
+   gh workflow run julia-release.yml --repo moreau-project/moreau --ref vX.Y.Z \
+     -f release_tag=vX.Y.Z -f stage=test
+   ```
+
+   This checks General for both exact native versions before dispatching release
+   QA. `test-release.yml` calls the shared Julia workflow: all seven CPU platform
+   variants plus CUDA 12/13 extension loading. With `-f run_gpu_tests=true`, CUDA
+   ownership and JuMP/MOI conformance also run on GPU runners and require working
+   devices. Python QA remains part of the same release gate. Without GPU runners,
+   runtime coverage is explicitly reported as not run; loading checks still run.
+4. After the exact tag/commit's QA run succeeds, request frontend registration:
+
+   ```sh
+   gh workflow run julia-release.yml --repo moreau-project/moreau --ref vX.Y.Z \
+     -f release_tag=vX.Y.Z -f stage=register
+   ```
+
+   The workflow verifies the JLLs and latest matching QA, then requests
+   `@JuliaRegistrator register subdir=packages/moreau-julia/Moreau.jl` on the
+   monorepo release commit. The package remains named **Moreau**. The existing
+   native release workflow owns the shared tag; a second TagBot release is not
+   required. General/Yggdrasil review and merge remain external stages.
+5. After General merges the frontend registration, publish normally:
+
+   ```sh
+   gh workflow run publish.yml --repo moreau-project/moreau --ref vX.Y.Z \
+     -f release_tag=vX.Y.Z
+   ```
+
+   Publication checks successful QA, matching wheel versions, both JLL
+   registrations, the monorepo package location, and the exact registered Julia
+   tree. It then publishes Python, verifies PyPI installation, updates docs, and
+   promotes the GitHub release. Missing registration prevents publication.
+
+All stages can be rerun after an external dependency becomes ready. Do not move an
+existing release tag or overwrite a registered package version.
+
+## Initial 0.4.0 registration
+
+General PR #167256 is still an open initial registration. Retain version 0.4.0 and
+UUID `c8b129f6-74e5-4f0d-b2d8-2ea10d91a548`, and register the corrected monorepo
+subdirectory. The pending metadata must point to `moreau-project/moreau` and set
+`subdir = "packages/moreau-julia/Moreau.jl"`.
+
+The existing native 0.4.0 tag and PyPI packages are already published. For this
+bootstrap, use a distinct candidate tag such as `julia-v0.4.0` on the corrected
+commit for the build/JLL/QA/registration stages. Do not move `v0.4.0`, and do not
+rerun PyPI publication for the already published native version. Subsequent
+releases use the single normal version/tag sequence above.
+
+## Development and prerelease builds
+
+Development/prerelease versions continue through the existing native build and
+QA pipeline without General or Yggdrasil submission. Julia CPU QA loads the
+actual candidate C library through a temporary local dependency shim; the native
+version check remains active. These shims are never registered or shipped.
+Stable releases always test the real registered JLLs on the full platform matrix.
+
+## Local preparation and verification
+
+```sh
+python scripts/julia_release.py prepare --output /tmp/moreau-julia-handoff
+python -m pytest scripts/tests/test_release.py scripts/tests/test_julia_release.py -q
+actionlint
+```
+
+Preparation only writes local handoff files. It does not submit PRs, trigger
+registration, or publish anything. The workflow scripts can be validated without
+repeating the local native build matrix.
+
+References: [Registrator subdirectory registration](https://github.com/JuliaRegistries/Registrator.jl#registering-a-package-in-a-subdirectory),
+[General subdirectory packages](https://github.com/JuliaRegistries/General#how-do-i-move-a-package-into-a-subdirectory-of-a-repository),
+[generated JLL packages](https://docs.binarybuilder.org/stable/jll/).

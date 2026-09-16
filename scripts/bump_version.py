@@ -71,6 +71,14 @@ def bump_version(root: pathlib.Path, version: str, *, pin_dependencies: bool = F
         "packages/moreau-julia/Moreau.jl/test/cuda/Project.toml",
     ]:
         replace(path, r'^(Moreau_(?:CPU|CUDA)_jll) = "=[^"]+"', rf'\g<1> = "={base}"')
+    for backend in ("CPU", "CUDA"):
+        path = f"packaging/yggdrasil/M/Moreau/Moreau_{backend}/build_tarballs.jl"
+        replace(path, r'^version = v"[^"]+"', f'version = v"{cargo_version}"')
+    replace(
+        "packaging/yggdrasil/M/Moreau/Moreau_CUDA/build_tarballs.jl",
+        r"-DMOREAU_VERSION=[^\s]+",
+        f"-DMOREAU_VERSION={version}",
+    )
     for path in [
         "packages/moreau/python/moreau/__init__.py",
         "packages/moreau-cpu/python/moreau_cpu/__init__.py",

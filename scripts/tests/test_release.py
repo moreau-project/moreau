@@ -40,6 +40,8 @@ validate = load_script("validate_release_wheels")
 @pytest.fixture
 def release_tree(tmp_path):
     paths = [
+        "packaging/yggdrasil/M/Moreau/Moreau_CPU/build_tarballs.jl",
+        "packaging/yggdrasil/M/Moreau/Moreau_CUDA/build_tarballs.jl",
         "packages/moreau-julia/Moreau.jl/Project.toml",
         "packages/moreau-julia/Moreau.jl/test/cuda/Project.toml",
         "packages/moreau-julia/MoreauTests.jl/Project.toml",
@@ -254,3 +256,12 @@ def test_julia_and_jll_versions_follow_native_release(release_tree):
         release_tree / "packages/moreau-julia/Moreau.jl/test/cuda/Project.toml"
     ).read_text()
     assert 'Moreau_CUDA_jll = "=1.2.3"' in cuda_tests
+
+
+def test_recipe_versions_follow_the_native_release(release_tree):
+    bump.bump_version(release_tree, "0.5.1", pin_dependencies=True)
+    for backend in ("CPU", "CUDA"):
+        text = (release_tree / f"packaging/yggdrasil/M/Moreau/Moreau_{backend}/build_tarballs.jl").read_text()
+        assert 'version = v"0.5.1"' in text
+        if backend == "CUDA":
+            assert "-DMOREAU_VERSION=0.5.1" in text

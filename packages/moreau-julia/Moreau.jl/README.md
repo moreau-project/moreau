@@ -3,6 +3,9 @@
 Moreau.jl is a Julia interface to the
 [Moreau](https://moreau.so) batched differentiable convex conic solver.
 
+The package is maintained and released from `packages/moreau-julia/Moreau.jl`
+in the [Moreau monorepo](https://github.com/moreau-project/moreau).
+
 ## Installation
 
 ```julia

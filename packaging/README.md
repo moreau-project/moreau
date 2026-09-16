@@ -1,8 +1,11 @@
 # Moreau Julia binary packaging
 
-The recipes under `yggdrasil/M/Moreau/` build the CPU and CUDA C interfaces
-from the immutable Moreau 0.4.0 source commit. Copy these directories into the
-same paths in a Yggdrasil checkout. The CUDA recipe uses Yggdrasil's shared
+The recipes under `yggdrasil/M/Moreau/` build the CPU and CUDA C interfaces.
+For each release, first commit the version bump, then run
+`python scripts/julia_release.py prepare --output /tmp/moreau-julia-handoff`.
+This writes recipe copies pinned to that exact source commit. Copy the generated
+`yggdrasil/M/Moreau/` directories into the same paths in a Yggdrasil checkout.
+The CUDA recipe uses Yggdrasil's shared
 `platforms/cuda.jl`, `C/CUDA/common.jl`, and `fancy_toys.jl` helpers.
 
 ## Package identities and versions
@@ -23,8 +26,8 @@ release in its JLL compatibility bounds and checks the loaded library's version.
 
 The CPU recipe targets x86-64 and ARM64 glibc/musl Linux, Intel/Apple Silicon
 macOS, and x86-64 Windows. It retains the native default features, including
-FAER and the active-set solver. The bundled patch selects the C++ runtime for
-the **target** platform when cross-compiling.
+FAER and the active-set solver. The native build selects the C++ runtime for the **target** platform when
+cross-compiling.
 
 The CUDA recipe targets Linux x86-64 and ARM64, CUDA 12.2 and 13.0. CUDA 12
 has separate Jetson and SBSA platform variants. CUDA platform augmentation
@@ -59,17 +62,17 @@ For the legacy `MoreauTests.jl` GPU conformance suite, add `Moreau_CUDA_jll`
 to that test environment before setting `MOREAU_TEST_CUDA=1`. Its CPU tests
 do not require the CUDA package.
 
-## Release order
+## Release integration
 
-1. Build and validate native release artifacts and the matching JLL recipes.
-2. Publish/register the generated JLLs through the Yggdrasil process.
-3. Run Moreau's release QA against those JLLs. Julia QA must pass before the
-   native release is promoted by the publishing workflow.
-4. Register the matching Moreau.jl version using its existing name and UUID.
+See [the release runbook](../RELEASE.md). Moreau.jl is registered directly from
+`packages/moreau-julia/Moreau.jl` in the monorepo. No frontend repository sync is
+needed. `bump_version.py` updates the frontend, JLL bounds, and recipe versions;
+`julia_release.py prepare` pins both recipes to the exact release commit.
 
-For the pending General PR #167256, retain version **0.4.0** and register the
-corrected commit after the JLL dependencies are available. Updating the existing
-registration then avoids creating a new package or version registration.
+The release workflow prepares and submits the recipes through `julia-release.yml`.
+After JLL registration, release QA runs the shared Julia platform matrix. Frontend
+registration targets the tested monorepo subdirectory. Stable publication requires
+General to contain that exact package tree and both matching JLL versions.
 
 Local source builds passed BinaryBuilder audits for all five non-macOS CPU
 targets and both CUDA 13 architectures. The source-built x86-64 Linux libraries

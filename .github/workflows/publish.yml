@@ -81,6 +81,24 @@ jobs:
             echo "stable=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - uses: actions/checkout@v4
+        if: steps.version.outputs.stable == 'true'
+        with:
+          repository: JuliaRegistries/General
+          path: general-registry
+          sparse-checkout: |
+            jll/M/Moreau_CPU_jll
+            jll/M/Moreau_CUDA_jll
+            M/Moreau
+      - name: Require the same Julia release in General
+        if: steps.version.outputs.stable == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 scripts/julia_release.py check-version "$VERSION"
+          python3 scripts/julia_release.py check-source dist/moreau-julia-src.tar.gz
+          python3 scripts/julia_release.py check-registry general-registry --frontend
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

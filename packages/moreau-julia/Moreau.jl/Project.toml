@@ -1,7 +1,7 @@
 name = "Moreau"
 uuid = "c8b129f6-74e5-4f0d-b2d8-2ea10d91a548"
 version = "0.4.0"
-repo = "https://github.com/moreau-project/Moreau.jl"
+repo = "https://github.com/moreau-project/moreau"
 
 [deps]
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
