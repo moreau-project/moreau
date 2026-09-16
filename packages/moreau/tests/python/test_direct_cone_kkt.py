@@ -141,6 +141,51 @@ def test_all_cones_match_slack_representation(device, equilibrate):
     np.testing.assert_allclose(reference.z, np.concatenate(expected_z), atol=3e-4, rtol=3e-4)
 
 
+@pytest.mark.parametrize("output", ["x", "s", "z", "z_x"])
+def test_all_cones_directional_derivatives(device, output):
+    problem = planted_problem()
+    ipm = {"diff_method": "exact", "tol_gap_abs": 1e-11, "tol_gap_rel": 1e-11, "tol_feas": 1e-11}
+    solver = problem.solver(device, enable_grad=True, ipm_options=ipm)
+    sol = solver.solve()
+    problem.check(sol)
+    rng = np.random.default_rng(42)
+    upstream = rng.normal(size=getattr(sol, output).shape)
+    args = {"d" + output: upstream}
+    args.setdefault("dx", np.zeros_like(sol.x))
+    grad = solver.backward(**args)
+
+    # Separate directions identify which data pullback failed; off-diagonal P
+    # perturbations are symmetric, matching the public full-CSR convention.
+    H = rng.normal(size=problem.P.shape)
+    directions = {
+        "P": 0.03 * (H + H.T),
+        "A": rng.normal(scale=0.03, size=problem.A.shape),
+        "q": rng.normal(size=problem.q.shape),
+        "b": rng.normal(size=problem.b.shape),
+    }
+    # At smaller steps the boundary solve error can dominate the difference.
+    # A 1e-2 step retains agreement with the analytic pullback on CPU and CUDA.
+    eps = 1e-2
+    for name, direction in directions.items():
+        value = getattr(problem, name)
+        losses = []
+        for sign in (-1, 1):
+            perturbation = sparse.csr_matrix(direction) if name in ("P", "A") else direction
+            setattr(problem, name, value + sign * eps * perturbation)
+            perturbed = problem.solver(device, ipm_options=ipm).solve()
+            losses.append(upstream @ getattr(perturbed, output))
+        setattr(problem, name, value)
+        key = "d" + name + ("_values" if name in ("P", "A") else "")
+        analytic = grad[key] @ direction.ravel() if name in ("P", "A") else grad[key] @ direction
+        np.testing.assert_allclose(
+            analytic,
+            (losses[1] - losses[0]) / (2 * eps),
+            atol=2e-3,
+            rtol=3e-3,
+            err_msg=f"{output} wrt {name}",
+        )
+
+
 def test_all_cones_batched_setup_and_warm_reuse(device):
     problem = planted_problem()
     solver = moreau.CompiledSolver(
@@ -186,3 +231,72 @@ def test_all_cones_batched_setup_and_warm_reuse(device):
                 SimpleNamespace(**{name: getattr(sol, name)[i] for name in ("x", "s", "z", "z_x")})
             )
         previous = sol.to_warm_start()
+
+
+@pytest.mark.parametrize("cone_kind", ["soc", "gen_power"])
+@pytest.mark.parametrize("diff_method", ["auto", "exact"])
+@pytest.mark.parametrize("equilibrate", [False, True])
+def test_sparse_inactive_and_active_blocks(device, diff_method, equilibrate, cone_kind):
+    """Sparse-only direct cones must populate E even without any dense H blocks."""
+    if cone_kind == "gen_power":
+        n = 8
+        q = np.linspace(-1.7, 0.6, n)
+        specs = [
+            moreau.DirectConeSpec(
+                kind="gen_power", indices=[0, 1, 2, 6], alphas=[0.2, 0.3, 0.5], dim2=1
+            ),
+            moreau.DirectConeSpec(
+                kind="gen_power", indices=[3, 4, 5, 7], alphas=[0.3, 0.3, 0.4], dim2=1
+            ),
+        ]
+    else:
+        n = 12
+        q = np.empty(n)
+        q[::2] = [-2.0, 0.1, -0.1, 0.2, -0.2, 0.3]
+        q[1::2] = [0.2, 0.4, -0.8, 0.6, 0.3, -0.5]
+        specs = [
+            moreau.DirectConeSpec(kind="soc", indices=list(range(start, n, 2))) for start in (0, 1)
+        ]
+    P = sparse.eye(n, format="csr")
+    A = sparse.csr_matrix((0, n))
+    b = np.zeros(0)
+    cones = moreau.Cones(dir_cones=specs)
+    settings = moreau.Settings(
+        device=device,
+        solver="ipm",
+        enable_grad=True,
+        verbose=False,
+        ipm_settings=moreau.IPMSettings(
+            diff_method=diff_method,
+            equilibrate_enable=equilibrate,
+            tol_gap_abs=1e-10,
+            tol_gap_rel=1e-10,
+            tol_feas=1e-10,
+        ),
+    )
+    solver = moreau.Solver(P, q, A, b, cones, settings)
+    sol = solver.solve()
+    np.testing.assert_allclose(sol.z_x[: n // 2], 0, atol=1e-6)
+    assert np.linalg.norm(sol.z_x[n // 2 :]) > 0.1
+    # Check every Jacobian entry through both primal and direct-dual outputs.
+    analytic = {
+        out: np.stack(
+            [
+                solver.backward(
+                    dx=np.eye(n)[i] if out == "x" else np.zeros(n),
+                    dz_x=np.eye(n)[i] if out == "z_x" else None,
+                )["dq"]
+                for i in range(n)
+            ]
+        )
+        for out in ("x", "z_x")
+    }
+    for j in range(n):
+        eps = 1e-3
+        plus = moreau.Solver(P, q + eps * np.eye(n)[j], A, b, cones, settings).solve()
+        minus = moreau.Solver(P, q - eps * np.eye(n)[j], A, b, cones, settings).solve()
+        for out in analytic:
+            fd = (getattr(plus, out) - getattr(minus, out)) / (2 * eps)
+            np.testing.assert_allclose(
+                analytic[out][:, j], fd, atol=5e-4, rtol=5e-3, err_msg=f"{out} wrt q[{j}]"
+            )
