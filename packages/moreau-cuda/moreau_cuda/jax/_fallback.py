@@ -281,9 +281,7 @@ def _solve_fallback_fwd(
 ) -> Tuple[Tuple[jnp.ndarray, ...], tuple]:
     """Forward pass with saved residuals for backward."""
     x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time = (
-        _solve_fallback(
-            solver_id, P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x
-        )
+        _solve_fallback(solver_id, P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x)
     )
     # The callback re-solves from the inputs before differentiating, so it
     # does not need to retain the direct-dual solution in the residuals.
@@ -421,9 +419,7 @@ def _solve_fallback_warm_with_solution(
         solve_time,
         setup_time,
         _callback_construction_time,
-    ) = _solve_fallback(
-        solver_id, P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x
-    )
+    ) = _solve_fallback(solver_id, P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x)
     solution = JaxSolution(x=x, z=z, s=s, z_x=z_x)
     info = JaxSolveInfo(
         status=status,
