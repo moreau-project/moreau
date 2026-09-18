@@ -384,7 +384,7 @@ void CompiledSolver::warmStart(
     residuals.update(variables, data, cusparse_handle_, cublas_handle_, stream);
     info.update(data, variables, residuals, stream);
 
-    // Step 3: Compute warmness mu = max(rp, rd, min(ga, gr)), floor 1e-6.
+    // Step 3: Compute warmness mu with a positive smoothing floor.
     compute_warmness_mu(
         mu.data(),
         info.res_primal.data(),
@@ -410,6 +410,9 @@ void CompiledSolver::warmStart(
     // difference and retaining the supplied dual rather than reinitializing it.
     interiorize_direct_warm_start(
         variables.x.data(), variables.z_x.data(), mu.data(),
+        info.res_primal.data(), info.res_dual.data(),
+        info.gap_abs.data(), info.gap_rel.data(),
+        settings.ipm.tolFeas, settings.ipm.tolGapAbs, settings.ipm.tolGapRel,
         data.cones.d_xcone_kinds, data.cones.d_xcone_dims,
         data.cones.d_xcone_numel_offsets, data.cones.d_xcone_indices,
         data.cones.d_xcone_pow_idx, data.cones.d_xcone_pow_alpha,

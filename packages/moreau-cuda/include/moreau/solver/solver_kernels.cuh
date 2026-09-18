@@ -721,6 +721,9 @@ void copy_direct_duals_masked(double* dst, const double* src, const int32_t* mas
 
 void interiorize_direct_warm_start(
     double* x, double* z_x, const double* mu,
+    const double* res_primal, const double* res_dual,
+    const double* gap_abs, const double* gap_rel,
+    double tol_feas, double tol_gap_abs, double tol_gap_rel,
     const int64_t* kinds, const int64_t* dims, const int64_t* offsets,
     const int64_t* indices, const int64_t* pow_idx, const double* pow_alpha,
     const int64_t* gp_idx, const int64_t* gp_dim1,

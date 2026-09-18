@@ -25,6 +25,61 @@ from scipy import sparse
 from .cone_test_utils import CONE_CASES, planted_problem, slack_cones
 
 
+@pytest.mark.parametrize("equilibrate", [False, True])
+@pytest.mark.parametrize("equality_rows", [False, True])
+@pytest.mark.parametrize("perturbation", ["exact", "dual", "primal", "gap"])
+def test_boundary_warm_start_respects_tolerances(device, equilibrate, equality_rows, perturbation):
+    # x* = (0, 1), z_x* = 1. Perturbations are below the 1e-6 smoothing
+    # floor but above the requested tolerance, and must not strand the IPM.
+    P = sparse.diags([2.0, 4.0], format="csr")
+    q = np.array([1.0, -4.0])
+    A = sparse.csr_matrix([[0.0, 1.0]]) if equality_rows else sparse.csr_matrix((0, 2))
+    b = np.ones(A.shape[0])
+    warm = moreau.WarmStart(
+        x=np.array([0.0, 1.0]),
+        z=np.zeros(len(b)),
+        s=np.zeros(len(b)),
+        z_x=np.ones(1),
+    )
+    if perturbation == "dual":
+        warm.z_x[0] += 5e-7
+    elif perturbation == "primal":
+        warm.x[1] += 5e-7
+    elif perturbation == "gap":
+        warm.x[0] += 5e-7
+        warm.z_x[0] += 1e-6  # Preserve stationarity while perturbing complementarity.
+    solver = moreau.Solver(
+        P,
+        q,
+        A,
+        b,
+        cones=moreau.Cones(
+            num_zero_cones=len(b),
+            dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0])],
+        ),
+        settings=moreau.Settings(
+            device=device,
+            solver="ipm",
+            verbose=False,
+            ipm_settings=moreau.IPMSettings(
+                equilibrate_enable=equilibrate,
+                presolve_enable=False,
+                tol_feas=1e-10,
+                tol_gap_abs=1e-10,
+                tol_gap_rel=1e-10,
+            ),
+        ),
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # A cold retry must not hide a failed warm solve.
+        sol = solver.solve(warm_start=warm)
+    assert solver.info.status.name == "Solved"
+    assert (solver.info.iterations == 0) == (perturbation == "exact")
+    np.testing.assert_allclose(sol.x, [0.0, 1.0], atol=2e-9, rtol=0)
+    np.testing.assert_allclose(P @ sol.x + q + A.T @ sol.z, [sol.z_x[0], 0.0], atol=2e-9)
+    assert abs(sol.x[0] * sol.z_x[0]) < 2e-9
+
+
 @pytest.mark.parametrize(
     "cases", [(c,) for c in CONE_CASES] + [CONE_CASES], ids=[*CONE_CASES, "all"]
 )

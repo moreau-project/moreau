@@ -15,6 +15,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 
+// Keep smoothing away from a numerically singular cone boundary. This floor
+// controls the interior perturbation, not whether the warm point has converged.
+const WARM_START_MU_FLOOR: f64 = 1e-6;
+
 /// A single problem in a batch - stores only values, not structure
 ///
 /// The sparsity pattern is shared across all problems in the batch and
@@ -1782,7 +1786,7 @@ impl<T: FloatT> CompiledSolver<T> {
 
                         // Step 3: Compute warmness ratio from info (same as
                         // info.update()).
-                        let mu_warm = {
+                        let (mu_warm, warm_point_is_optimal) = {
                             let τinv = T::recip(solver.variables.τ);
                             let normb = solver.data.get_normb();
                             let normq = solver.data.get_normq();
@@ -1812,8 +1816,14 @@ impl<T: FloatT> CompiledSolver<T> {
                             let gap_rel = gap_abs
                                 / T::max(T::one(), T::min(T::abs(cost_primal), T::abs(cost_dual)));
 
-                            T::max(T::max(res_primal, res_dual), T::min(gap_abs, gap_rel))
-                                .max((1e-6).as_T())
+                            let mu = T::max(T::max(res_primal, res_dual), T::min(gap_abs, gap_rel))
+                                .max(WARM_START_MU_FLOOR.as_T());
+                            let ipm = &solver.settings.core().ipm;
+                            let optimal = mu <= T::one()
+                                && res_primal < ipm.tol_feas
+                                && res_dual < ipm.tol_feas
+                                && (gap_abs < ipm.tol_gap_abs || gap_rel < ipm.tol_gap_rel);
+                            (mu, optimal)
                         };
 
                         // Step 4: Set τ=1, κ=mu_warm
@@ -1850,9 +1860,11 @@ impl<T: FloatT> CompiledSolver<T> {
                         let mut off = 0;
                         for entry in solver_ref.kktsystem.dir_cones_ref().iter() {
                             let k = entry.indices.len();
-                            // An exact optimum with only equality slack rows
-                            // needs no smoothing and can terminate at iter 0.
-                            if solver_ref.cones.degree() == 0 && mu_warm <= (1e-6).as_T() {
+                            // With only equality slack rows, preserve a point
+                            // satisfying the requested tolerances for iter 0.
+                            // Even residuals below the smoothing floor must be
+                            // interiorized when they exceed those tolerances.
+                            if solver_ref.cones.degree() == 0 && warm_point_is_optimal {
                                 off += k;
                                 continue;
                             }
