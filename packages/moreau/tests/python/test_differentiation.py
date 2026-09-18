@@ -489,12 +489,11 @@ class TestBatchedDifferentiation:
         (method, storage, interface)
         for method in ("auto", "active_set", "ipm")
         for storage in ("full", "full_unsorted")
-        for interface in ("numpy", "torch")
-    ]
-    + [("active_set", storage, "torch") for storage in ("upper", "lower")],
+        for interface in ("numpy", "torch", "jax")
+    ],
 )
 def test_equality_qp_symmetric_P_gradient(method, storage, interface):
-    """Full CSR shares an off-diagonal sensitivity; triangular CSR stores it once."""
+    """Full symmetric CSR shares each off-diagonal sensitivity across its pair."""
     P = np.array([[3.0, 0.7], [0.7, 2.0]])
     q = np.array([-1.0, 0.3])
     A = sparse.csr_matrix([[1.0, 2.0]])
@@ -510,9 +509,7 @@ def test_equality_qp_symmetric_P_gradient(method, storage, interface):
             diff_method="exact", tol_feas=1e-11, tol_gap_abs=1e-11, tol_gap_rel=1e-11
         ),
     )
-    matrix = sparse.csr_matrix(
-        P if storage.startswith("full") else np.triu(P) if storage == "upper" else np.tril(P)
-    )
+    matrix = sparse.csr_matrix(P)
     if storage == "full_unsorted":
         for start, end in zip(matrix.indptr[:-1], matrix.indptr[1:]):
             matrix.indices[start:end] = matrix.indices[start:end][::-1]
@@ -523,7 +520,7 @@ def test_equality_qp_symmetric_P_gradient(method, storage, interface):
         x = sol.x
         gradients = {name: value.reshape(-1) for name, value in solver.backward(dx).items()}
         grad = gradients["dP_values"]
-    else:
+    elif interface == "torch":
         solver = Solver(
             n=2,
             m=1,
@@ -545,6 +542,28 @@ def test_equality_qp_symmetric_P_gradient(method, storage, interface):
             name: tensor.grad.numpy()
             for name, tensor in zip(("dP_values", "dA_values", "dq", "db"), (values, av, qt, bt))
         }
+        grad = gradients["dP_values"]
+    else:
+        jax = pytest.importorskip("jax")
+        jnp = pytest.importorskip("jax.numpy")
+        jax_solver = pytest.importorskip("moreau.jax").Solver
+        jax.config.update("jax_enable_x64", True)
+        solver = jax_solver(
+            n=2,
+            m=1,
+            P_row_offsets=matrix.indptr,
+            P_col_indices=matrix.indices,
+            A_row_offsets=A.indptr,
+            A_col_indices=A.indices,
+            cones=cones,
+            settings=settings,
+        )
+        args = tuple(jnp.asarray(v) for v in (matrix.data, A.data, q, b))
+        x = np.asarray(solver.solve(*args).x)
+        values = jax.jit(
+            jax.grad(lambda *a: solver.solve(*a).x @ jnp.asarray(dx), argnums=(0, 1, 2, 3))
+        )(*args)
+        gradients = dict(zip(("dP_values", "dA_values", "dq", "db"), map(np.asarray, values)))
         grad = gradients["dP_values"]
     assert solver._settings.solver == (
         moreau.SolverType.IPM if method == "ipm" else moreau.SolverType.ACTIVE_SET
@@ -569,8 +588,6 @@ def test_equality_qp_symmetric_P_gradient(method, storage, interface):
         expected = ref_grad[name].reshape(-1)
         if name == "dP_values":
             expected = expected.reshape(2, 2)[row, col]
-            if not storage.startswith("full"):
-                expected = expected * np.where(row == col, 1.0, 2.0)
         np.testing.assert_allclose(
             gradients[name],
             expected,

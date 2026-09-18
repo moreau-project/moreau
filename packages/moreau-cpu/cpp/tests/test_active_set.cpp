@@ -511,72 +511,68 @@ TEST_F(ActiveSetTest, BackwardUnconstrainedQP) {
 }
 
 TEST_F(ActiveSetTest, BackwardDenseHessianFD) {
-    // min 0.5 * x' [[2,1],[1,2]] x + [-1,-1]'x s.t. x1+x2 <= 1
-    // x* = [1/3, 1/3] (unconstrained, constraint inactive)
-    //
-    // Use full symmetric CSR: perturbing entry (i,j) for i≠j must also
-    // perturb the symmetric counterpart (j,i) to keep H symmetric.
+    // Native active-set accepts full, upper, and lower storage. Public Python
+    // solvers require full symmetry so switching backend preserves the contract.
     const int64_t n = 2, m = 1, batch = 1;
-
-    int64_t P_ro[] = {0, 2, 4};
-    int64_t P_ci[] = {0, 1, 0, 1};
     int64_t A_ro[] = {0, 2};
     int64_t A_ci[] = {0, 1};
-
-    Cones cones;
-    cones.numZeroCones = 0;
-    cones.numNonnegCones = 1;
-
-    ActiveSetSolver solver(n, m, batch, P_ro, P_ci, 4, A_ro, A_ci, 2, cones,
-                           ActiveSetSettings{}, true);
-
-    double P_vals[] = {2.0, 1.0, 1.0, 2.0};
     double A_vals[] = {1.0, 1.0};
-    solver.setup(P_vals, A_vals);
-
     double q[] = {-1.0, -1.0};
     double b[] = {1.0};
-    solver.solve(q, b);
+    Cones cones;
+    cones.numNonnegCones = 1;
 
-    ASSERT_EQ(solver.status_vec[0], static_cast<int32_t>(SolverStatus::Solved));
+    const std::vector<std::vector<int64_t>> rows = {{0, 2, 4}, {0, 2, 3}, {0, 1, 3}};
+    const std::vector<std::vector<int64_t>> cols = {{0, 1, 0, 1}, {0, 1, 1}, {0, 0, 1}};
+    const std::vector<std::vector<double>> values = {{2, 1, 1, 2}, {2, 1, 2}, {2, 1, 2}};
+    for (size_t storage = 0; storage < rows.size(); ++storage) {
+        SCOPED_TRACE(storage);
+        const auto& ro = rows[storage];
+        const auto& ci = cols[storage];
+        const auto& pv = values[storage];
+        const int64_t nnz = pv.size();
+        ActiveSetSolver solver(n, m, batch, ro.data(), ci.data(), nnz,
+                               A_ro, A_ci, 2, cones, ActiveSetSettings{}, true);
+        solver.setup(pv.data(), A_vals);
+        solver.solve(q, b);
+        ASSERT_EQ(solver.status_vec[0], static_cast<int32_t>(SolverStatus::Solved));
+        EXPECT_NEAR(solver.x_sol[0], 1.0 / 3.0, TOL);
+        EXPECT_NEAR(solver.x_sol[1], 1.0 / 3.0, TOL);
+        double dx[] = {1.0, 0.0}, dz[] = {0.0}, ds[] = {0.0};
+        solver.backward(dx, dz, ds);
 
-    // Backward with dx_bar = [1, 0]
-    double dx_bar[] = {1.0, 0.0};
-    double dz_bar[] = {0.0};
-    double ds_bar[] = {0.0};
-    solver.backward(dx_bar, dz_bar, ds_bar);
-
-    // FD for dP_values: perturb symmetric pairs together
-    // CSR layout: [0]=(0,0), [1]=(0,1), [2]=(1,0), [3]=(1,1)
-    double eps = 1e-6;
-
-    // Test diagonal entries (no symmetric counterpart)
-    for (int k : {0, 3}) {
-        double P_pert[4] = {P_vals[0], P_vals[1], P_vals[2], P_vals[3]};
-        P_pert[k] += eps;
-
-        ActiveSetSolver solver2(n, m, batch, P_ro, P_ci, 4, A_ro, A_ci, 2, cones);
-        solver2.setup(P_pert, A_vals);
-        solver2.solve(q, b);
-
-        double fd = (solver2.x_sol[0] - solver.x_sol[0]) / eps;
-        EXPECT_NEAR(solver.dP_values[k], fd, 1e-3)
-            << "dP[" << k << "]: analytic=" << solver.dP_values[k] << " fd=" << fd;
-    }
-
-    // Test off-diagonal: perturb both (0,1) and (1,0) together.
-    // The directional derivative includes both stored gradient entries.
-    {
-        double P_pert[4] = {P_vals[0], P_vals[1] + eps, P_vals[2] + eps, P_vals[3]};
-
-        ActiveSetSolver solver2(n, m, batch, P_ro, P_ci, 4, A_ro, A_ci, 2, cones);
-        solver2.setup(P_pert, A_vals);
-        solver2.solve(q, b);
-
-        double fd = (solver2.x_sol[0] - solver.x_sol[0]) / eps;
-        EXPECT_NEAR(solver.dP_values[1] + solver.dP_values[2], fd, 1e-3);
-        // Symmetry: dP[0,1] == dP[1,0]
-        EXPECT_NEAR(solver.dP_values[1], solver.dP_values[2], 1e-12);
+        // Perturb each independent symmetric coordinate. In full storage the
+        // off-diagonal directional derivative sums both gradient entries.
+        for (int direction = 0; direction < 3; ++direction) {
+            SCOPED_TRACE(direction);
+            auto plus = pv, minus = pv;
+            double predicted = 0.0;
+            const double eps = 1e-6;
+            for (int64_t row = 0; row < n; ++row) {
+                for (int64_t k = ro[row]; k < ro[row + 1]; ++k) {
+                    const bool selected = direction == 2 ? row != ci[k]
+                        : row == direction && ci[k] == direction;
+                    if (selected) {
+                        plus[k] += eps;
+                        minus[k] -= eps;
+                        predicted += solver.dP_values[k];
+                    }
+                }
+            }
+            ActiveSetSolver perturbed(n, m, batch, ro.data(), ci.data(), nnz,
+                                      A_ro, A_ci, 2, cones);
+            perturbed.setup(plus.data(), A_vals);
+            perturbed.solve(q, b);
+            ASSERT_EQ(perturbed.status_vec[0], static_cast<int32_t>(SolverStatus::Solved));
+            const double x_plus = perturbed.x_sol[0];
+            perturbed.setup(minus.data(), A_vals);
+            perturbed.solve(q, b);
+            ASSERT_EQ(perturbed.status_vec[0], static_cast<int32_t>(SolverStatus::Solved));
+            const double fd = (x_plus - perturbed.x_sol[0]) / (2 * eps);
+            EXPECT_GT(std::abs(fd), 1e-3);
+            EXPECT_NEAR(predicted, fd, 1e-7);
+        }
+        if (storage == 0) EXPECT_NEAR(solver.dP_values[1], solver.dP_values[2], 1e-12);
     }
 }
 

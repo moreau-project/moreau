@@ -18,6 +18,19 @@ on:
   workflow_call:
 
 jobs:
+  test-active-set:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install native test dependencies
+      run: sudo apt-get update && sudo apt-get install -y cmake libgtest-dev
+    - name: Build native active-set tests
+      run: |
+        cmake -S packages/moreau-cpu/cpp -B build/active-set -DCMAKE_BUILD_TYPE=Release -DMOREAU_BUILD_TESTS=ON
+        cmake --build build/active-set --target test_active_set --parallel 2
+    - name: Run native active-set tests
+      run: ctest --test-dir build/active-set --output-on-failure --no-tests=error
+
   test-linux:
     runs-on: ubuntu-latest
     strategy:
