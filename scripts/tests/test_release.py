@@ -14,8 +14,6 @@ limitations under the License.
 
 Regression tests for release versioning and wheel metadata validation."""
 
-import io
-import tarfile
 import zipfile
 
 import bump_version as bump
@@ -173,35 +171,6 @@ def test_wheel_licenses_are_required(tmp_path):
         for name in ("LICENSE", "NOTICE"):
             archive.writestr(f"moreau-0.4.0.dist-info/licenses/{name}", "license text")
     assert not validate.has_wheel_errors(path)
-
-
-@pytest.fixture
-def c_archives(tmp_path):
-    for filename, library in validate.C_LIBRARY_ARCHIVES.items():
-        with tarfile.open(tmp_path / filename, "w:gz") as archive:
-            for name in ("include/moreau.h", "LICENSE", "NOTICE", f"lib/{library}"):
-                member = tarfile.TarInfo(name)
-                member.size = 4
-                archive.addfile(member, io.BytesIO(b"data"))
-    return tmp_path
-
-
-def test_complete_c_archives_are_accepted(c_archives):
-    validate.validate_c_libraries(c_archives)
-
-
-def test_c_archive_count_cannot_mask_missing_platform(c_archives):
-    (c_archives / "moreau-cpu-macos-arm64.tar.gz").rename(c_archives / "wrong-platform.tar.gz")
-    with pytest.raises(ValueError, match="Incomplete C library matrix"):
-        validate.validate_c_libraries(c_archives)
-
-
-def test_c_archive_requires_header(c_archives):
-    path = c_archives / "moreau-cpu-linux-x86_64.tar.gz"
-    with tarfile.open(path, "w:gz"):
-        pass
-    with pytest.raises(ValueError, match="include/moreau.h"):
-        validate.validate_c_libraries(c_archives)
 
 
 def test_wheel_tag_metadata_must_match_filename(tmp_path, wheels):

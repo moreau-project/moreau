@@ -56,10 +56,10 @@ jobs:
             arch: aarch64
             library: libmoreau.dylib
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag || github.ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - uses: julia-actions/setup-julia@v3
@@ -101,7 +101,7 @@ jobs:
       matrix:
         runner: [ubuntu-latest, ubuntu-24.04-arm]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
       - name: Test registered musl CPU JLL
@@ -122,7 +122,7 @@ jobs:
           - cuda: '13.0'
             gpu_runner: gpu-instance
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
       - uses: julia-actions/setup-julia@v3
