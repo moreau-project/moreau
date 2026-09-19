@@ -7,11 +7,13 @@ Tests run on all available devices (CPU and CUDA when available).
 """
 
 import pytest
+import logging
 import numpy as np
 import gc
 import weakref
 
 torch = pytest.importorskip("torch")
+from torch._dynamo.testing import CompileCounterWithBackend
 
 import moreau
 import moreau.torch as moreau_torch
@@ -1682,6 +1684,46 @@ class TestAutogradRegressions:
 
 class TestTorchCompile:
     """Test that torch.compile works with the custom op."""
+
+    def test_native_boundary_inductor(self, simple_qp_setup, device, caplog, recwarn):
+        """Compile tensor work around native construction, setup, and solve."""
+        n, m, P_ro, P_ci, A_ro, A_ci, cones = simple_qp_setup
+        settings = moreau.Settings(device=device, solver="ipm")
+        P = torch.tensor([2.0, 2.0], dtype=torch.float64, device=device)
+        A = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
+        b = torch.tensor([1.0], dtype=torch.float64, device=device)
+
+        def loss_fn(q):
+            solver = Solver(n, m, P_ro, P_ci, A_ro, A_ci, cones, settings)
+            solver.setup(P, A)
+            x = solver.solve(P, A, 1.5 * q, b).x
+            return x.square().sum()
+
+        torch._dynamo.reset()
+        backend = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(loss_fn, backend=backend)
+        for values in ([0.1, -0.3], [0.4, 0.2]):
+            q = torch.tensor(values, dtype=torch.float64, device=device, requires_grad=True)
+            expected = loss_fn(q)
+            expected_grad = torch.autograd.grad(expected, q)[0]
+            actual = compiled(q)
+            actual_grad = torch.autograd.grad(actual, q)[0]
+            torch.testing.assert_close(actual, expected)
+            torch.testing.assert_close(actual_grad, expected_grad)
+        assert backend.frame_count >= 2
+        assert backend.op_count >= 3
+        failures = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name.startswith("torch.")
+            and (
+                record.levelno >= logging.ERROR
+                or "Backend compiler exception" in record.getMessage()
+            )
+        ]
+        assert not failures, "\n".join(failures)
+        assert not any("Dynamo does not know how to trace" in str(w.message) for w in recwarn)
+        torch._dynamo.reset()
 
     def test_compile_forward(self, simple_qp_setup, device):
         """Compiled forward produces same result as eager."""
