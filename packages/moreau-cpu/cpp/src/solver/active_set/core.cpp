@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <limits>
 
 namespace moreau {
 
@@ -387,7 +388,10 @@ int daqp_ldp(DaqpWorkspace* work) {
                 if (!daqp_add_infeasible(work)) {
                     // All KKT conditions satisfied -> optimum
 
-                    double min_D = work->D[0];
+                    // With no constraints D has no storage. Its minimum is
+                    // only used for a nonempty active set below.
+                    double min_D = work->n_active > 0
+                        ? work->D[0] : std::numeric_limits<double>::infinity();
                     for (int i = 1; i < work->n_active; i++)
                         if (work->D[i] < min_D) min_D = work->D[i];
 
