@@ -68,7 +68,8 @@ elif command == 'python':
         sys.stdin.read()
         sys.exit(1 if failure == 'import' else 0)
     if args[:1] == ['-c']:
-        print({'cvxpy': '1.9.2', 'cvxpylayers': '1.2.0'}[args[-1]])
+        # Synthetic installed versions: QA must use these, not fixed release tags.
+        print({'cvxpy': '91.2.3', 'cvxpylayers': '82.3.4'}[args[-1]])
     if failure and any(failure in arg for arg in args):
         sys.exit(int(os.environ.get('QA_EXIT_CODE', '1')))
 elif command == 'git' and args[0] == 'clone':
@@ -149,8 +150,8 @@ def test_success_including_optional_empty_module(run_qa, optional_module):
     assert "python3.14/bin/python" in commands
     assert "test_conic_solvers.py" in commands
     assert "test_moreau_dual_variables.py" in commands
-    assert '["git", "clone", "--depth=1", "--branch", "v1.9.2",' in commands
-    assert '["git", "clone", "--depth=1", "--branch", "v1.2.0",' in commands
+    assert '["git", "clone", "--depth=1", "--branch", "v91.2.3",' in commands
+    assert '["git", "clone", "--depth=1", "--branch", "v82.3.4",' in commands
 
 
 @pytest.mark.parametrize(
