@@ -1,10 +1,8 @@
 # Moreau Julia binary packaging
 
 The recipes under `yggdrasil/M/Moreau/` build the CPU and CUDA C interfaces.
-For each release, first commit the version bump, then run
-`python scripts/julia_release.py prepare --output /tmp/moreau-julia-handoff`.
-This writes recipe copies pinned to that exact source commit. Copy the generated
-`yggdrasil/M/Moreau/` directories into the same paths in a Yggdrasil checkout.
+After building the release, run `scripts/release.sh jll-prs X.Y.Z` to prepare
+recipes pinned to the release commit and open their Yggdrasil PRs.
 The CUDA recipe uses Yggdrasil's shared
 `platforms/cuda.jl`, `C/CUDA/common.jl`, and `fancy_toys.jl` helpers.
 
@@ -67,14 +65,13 @@ do not require the CUDA package.
 See [the release runbook](../RELEASE.md). Moreau.jl is registered directly from
 `packages/moreau-julia/Moreau.jl` in the monorepo. No frontend repository sync is
 needed. `bump_version.py` updates the frontend, JLL bounds, and recipe versions;
-`julia_release.py prepare` pins both recipes to the exact release commit.
+`prepare_julia_jll_pr.sh` pins both recipes to the exact release commit.
 
 The release workflow prepares recipe branches in the organization's Yggdrasil
 fork through `julia-release.yml`, using a write-enabled repository deploy key
-limited to that fork. A maintainer opens the upstream PRs from the generated
-comparison links and PR text. After JLL registration, release QA runs the shared
-Julia platform matrix. A maintainer posts the prepared Registrator comment on
-the verified monorepo commit. Stable publication requires
+limited to that fork. The local release command opens the upstream PRs and posts
+the prepared Registrator comment using the maintainer's `gh` login. After JLL
+registration, release QA runs the shared Julia platform matrix. Stable publication requires
 General to contain that exact package tree and both matching JLL versions.
 
 Local source builds passed BinaryBuilder audits for all five non-macOS CPU

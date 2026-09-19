@@ -22,7 +22,7 @@ import tarfile
 import tomllib
 
 import bump_version
-import julia_release as release
+import check_julia_registry as release
 import pytest
 
 
@@ -45,7 +45,7 @@ def source(release_tree):
 @pytest.fixture
 def registry(source, tmp_path):
     registry = tmp_path / "registry"
-    tree = release.release_info(source)["julia_tree"]
+    tree = release.git(source, "rev-parse", f"HEAD:{release.PACKAGE}")
     for name, uuid in {"Moreau": release.UUID, **release.JLLS}.items():
         directory = registry / ("M/Moreau" if name == "Moreau" else f"jll/M/{name}")
         directory.mkdir(parents=True)
@@ -56,39 +56,6 @@ def registry(source, tmp_path):
         version = "1.2.3" if name == "Moreau" else "1.2.3+2"
         (directory / "Versions.toml").write_text(f'["{version}"]\ngit-tree-sha1 = "{tree}"\n')
     return registry
-
-
-def test_recipes_are_pinned_to_the_release_commit(source, tmp_path):
-    output = tmp_path / "handoff"
-    junk = source / "packaging/yggdrasil/M/Moreau/Moreau_CPU/build.log"
-    junk.write_text("untracked build output must not be submitted")
-    info = release.prepare(source, output)
-    assert info["source_commit"] == release.git(source, "rev-parse", "HEAD")
-    assert info["julia_tree"] == release.git(source, "rev-parse", f"HEAD:{release.PACKAGE}")
-    with tarfile.open(output / "moreau-yggdrasil.tar.gz") as archive:
-        assert not any(name.endswith("build.log") for name in archive.getnames())
-        for backend in ("CPU", "CUDA"):
-            text = (
-                archive.extractfile(f"M/Moreau/Moreau_{backend}/build_tarballs.jl").read().decode()
-            )
-            assert info["source_commit"] in text
-            assert f'version = v"{info["version"]}"' in text
-            assert "atomic_patch" not in text
-    assert (output / "register-julia.txt").read_text() == release.registration_body()
-
-
-def test_dirty_native_source_cannot_be_submitted(source, tmp_path):
-    native = source / "packages/moreau-cpu/Cargo.toml"
-    native.write_text(native.read_text() + "\n# uncommitted change\n")
-    with pytest.raises(ValueError, match="Commit the release sources"):
-        release.prepare(source, tmp_path / "handoff")
-
-
-def test_version_mismatch_is_caught_before_builds(source):
-    native = source / "packages/moreau-cpu/Cargo.toml"
-    native.write_text(native.read_text().replace('version = "1.2.3"', 'version = "0.5.0"', 1))
-    with pytest.raises(ValueError, match="versions disagree"):
-        release.release_info(source)
 
 
 def test_general_requires_both_jlls(source, registry):
@@ -110,7 +77,11 @@ def test_yanked_jll_does_not_satisfy_release(source, registry):
 def test_registered_source_tree_must_match_the_tested_frontend(source, registry):
     release.check_registry(source, registry, frontend=True)
     path = registry / "M/Moreau/Versions.toml"
-    path.write_text(path.read_text().replace(release.release_info(source)["julia_tree"], "b" * 40))
+    path.write_text(
+        path.read_text().replace(
+            release.git(source, "rev-parse", f"HEAD:{release.PACKAGE}"), "b" * 40
+        )
+    )
     with pytest.raises(ValueError, match="tested Moreau"):
         release.check_registry(source, registry, frontend=True)
 
@@ -131,26 +102,11 @@ def test_registry_location_and_identity_are_preserved(source, registry, field, v
         release.check_registry(source, registry, frontend=True)
 
 
-def test_prerelease_is_not_submitted_to_general(source):
+def test_prerelease_is_not_submitted_to_general(source, registry):
     path = source / release.PACKAGE / "Project.toml"
     path.write_text(path.read_text().replace('version = "1.2.3"', 'version = "0.4.1-dev123"'))
     with pytest.raises(ValueError, match="stable"):
-        release.release_info(source)
-
-
-def test_latest_matching_qa_is_required():
-    good = {
-        "displayTitle": "Test Release v0.4.0",
-        "status": "completed",
-        "conclusion": "success",
-    }
-    release.check_qa([good], "v0.4.0")
-    with pytest.raises(ValueError, match="latest QA"):
-        release.check_qa([dict(good, conclusion="failure"), good], "v0.4.0")
-    with pytest.raises(ValueError, match="latest QA"):
-        release.check_qa([good], "v0.4.1")
-    with pytest.raises(ValueError, match="latest QA"):
-        release.check_qa([dict(good, status="in_progress")], "v0.4.0")
+        release.check_registry(source, registry)
 
 
 def test_source_archive_must_be_the_tagged_subtree(source, tmp_path):
@@ -163,34 +119,21 @@ def test_source_archive_must_be_the_tagged_subtree(source, tmp_path):
         f"HEAD:{release.PACKAGE}",
         f"--output={archive}",
     )
-    release.check_source(source, archive)
+    command = ["bash", str(release.ROOT / "scripts/check_julia_source.sh"), str(archive)]
+    subprocess.run(command, cwd=source, check=True)
     with tarfile.open(archive, "w:gz") as output:
         entry = tarfile.TarInfo("Moreau.jl/Project.toml")
         data = b'version = "0.4.0"\n'
         entry.size = len(data)
         output.addfile(entry, io.BytesIO(data))
-    with pytest.raises(ValueError, match="tagged package tree"):
-        release.check_source(source, archive)
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(command, cwd=source, check=True)
 
 
-def test_native_prerelease_qa_uses_exact_binary_without_general(source, tmp_path):
-    package = source / release.PACKAGE
-    path = package / "Project.toml"
-    path.write_text(path.read_text().replace('version = "1.2.3"', 'version = "0.5.0-dev123"'))
-    library = tmp_path / "libmoreau_cpu.so"
-    library.touch()
-    output = tmp_path / "native-qa"
-    release.native_fixture(package, output, library)
-    project = tomllib.loads((output / "Project.toml").read_text())
-    assert project["uuid"] == release.JLLS["Moreau_CPU_jll"]
-    assert project["version"] == "0.5.0+0"
-    assert str(library) in (output / "src/Moreau_CPU_jll.jl").read_text()
-    with pytest.raises(FileNotFoundError):
-        release.native_fixture(package, output, tmp_path / "missing.so")
-
-
-def test_yggdrasil_pr_preparation_only_pushes_to_fork(source, tmp_path, monkeypatch):
-    release.prepare(source, source / "julia-handoff")
+@pytest.mark.parametrize("backend", ["CPU", "CUDA"])
+def test_yggdrasil_pr_preparation(source, tmp_path, monkeypatch, backend):
+    recipe_dir = f"M/Moreau/Moreau_{backend}"
+    (source / "packaging/yggdrasil" / recipe_dir / "build.log").touch()
     fork = tmp_path / "fork.git"
     release.git(tmp_path, "init", "--bare", "--initial-branch=master", "-q", str(fork))
     release.git(source, "push", str(fork), "HEAD:refs/heads/master")
@@ -210,7 +153,7 @@ def test_yggdrasil_pr_preparation_only_pushes_to_fork(source, tmp_path, monkeypa
     (fake_bin / "gh").write_text("#!/bin/sh\nexit 1\n")
     (fake_bin / "gh").chmod(0o755)
     monkeypatch.setenv("PATH", str(fake_bin) + os.pathsep + os.environ["PATH"])
-    monkeypatch.setenv("BACKEND", "CPU")
+    monkeypatch.setenv("BACKEND", backend)
     monkeypatch.setenv("YGGDRASIL_FORK", "example/Yggdrasil")
     command = ["bash", str(release.ROOT / "scripts/prepare_julia_jll_pr.sh")]
     subprocess.run(command, cwd=source, check=True, capture_output=True)
@@ -221,5 +164,12 @@ def test_yggdrasil_pr_preparation_only_pushes_to_fork(source, tmp_path, monkeypa
     assert release.git(fork, "rev-parse", branch) == first
     request = (source / "jll-pr-request.md").read_text()
     assert f"JuliaPackaging/Yggdrasil/compare/master...example:{branch}?expand=1" in request
-    recipe = source / "yggdrasil/M/Moreau/Moreau_CPU/build_tarballs.jl"
+    recipe = source / "yggdrasil" / recipe_dir / "build_tarballs.jl"
     assert release.git(source, "rev-parse", "HEAD") in recipe.read_text()
+    assert 'version = v"1.2.3"' in recipe.read_text()
+    assert not (recipe.parent / "build.log").exists()
+    native = source / "packages/moreau-cpu/Cargo.toml"
+    native.write_text(native.read_text() + "\n# uncommitted change\n")
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(command, cwd=source, check=True, capture_output=True)
+    assert release.git(fork, "rev-parse", branch) == first

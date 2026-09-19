@@ -51,8 +51,6 @@ jobs:
           test -n "$YGGDRASIL_FORK" || { echo '::error::Set YGGDRASIL_FORK to your JuliaPackaging/Yggdrasil fork'; exit 1; }
           test "${YGGDRASIL_FORK%%/*}" = "$REPO_OWNER" || { echo '::error::The fork must belong to the Moreau organization'; exit 1; }
           test "$(gh api "repos/$YGGDRASIL_FORK" --jq '.parent.full_name')" = JuliaPackaging/Yggdrasil
-      - name: Prepare recipes for this exact source commit
-        run: python scripts/julia_release.py prepare --output julia-handoff
       - uses: actions/checkout@v4
         with:
           repository: ${{ vars.YGGDRASIL_FORK }}
@@ -92,7 +90,7 @@ jobs:
             jll/M/Moreau_CUDA_jll
             M/Moreau
       - name: Require both matching JLL registrations
-        run: python scripts/julia_release.py check-registry general-registry
+        run: python scripts/check_julia_registry.py general-registry
       - name: Run release QA
         if: inputs.stage == 'test'
         env:
@@ -109,16 +107,17 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
-            --limit 100 --json displayTitle,conclusion,status,url > qa-runs.json
-          python scripts/julia_release.py check-qa qa-runs.json "$RELEASE_TAG"
+            --limit 100 --json displayTitle,conclusion,status | \
+            jq -e --arg title "Test Release $RELEASE_TAG" \
+              '[.[] | select(.displayTitle == $title)][0] | .status == "completed" and .conclusion == "success"'
           gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir julia-assets
-          python scripts/julia_release.py check-source julia-assets/moreau-julia-src.tar.gz
+          bash scripts/check_julia_source.sh julia-assets/moreau-julia-src.tar.gz
       - name: Prepare registration comment for the verified commit
         if: inputs.stage == 'prepare-registration'
         env:
           GH_REPO: ${{ github.repository }}
         run: |
-          python scripts/julia_release.py registration-body > registration-body.txt
+          echo '@JuliaRegistrator register subdir=packages/moreau-julia/Moreau.jl' > registration-body.txt
           {
             echo "Post the following comment on https://github.com/$GH_REPO/commit/$(git rev-parse HEAD)."
             echo 'An eligible Moreau maintainer must post it from their own account.'

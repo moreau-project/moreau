@@ -74,8 +74,8 @@ jobs:
           LIBRARY: ${{ matrix.library }}
         run: |
           cargo build --manifest-path packages/moreau-cpu/Cargo.toml --locked --release --lib --features c-api
-          python scripts/julia_release.py native-fixture --output native-qa/Moreau_CPU_jll \
-            --library "packages/moreau-cpu/target/release/$LIBRARY"
+          julia scripts/julia_native_fixture.jl "$JULIA_PROJECT" native-qa/Moreau_CPU_jll \
+            "packages/moreau-cpu/target/release/$LIBRARY"
           julia --project="$JULIA_PROJECT" -e 'using Pkg; Pkg.develop(path="native-qa/Moreau_CPU_jll")'
       - name: Test package and internal integration suite
         shell: bash

@@ -3,8 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 
-version=$(python -c 'import json; print(json.load(open("julia-handoff/moreau-julia-release.json"))["version"])')
-commit=$(python -c 'import json; print(json.load(open("julia-handoff/moreau-julia-release.json"))["source_commit"])')
+version=$(python -c 'import tomllib; print(tomllib.load(open("packages/moreau-julia/Moreau.jl/Project.toml", "rb"))["version"])')
+[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+git diff --exit-code -- packages packaging/yggdrasil
+commit=$(git rev-parse HEAD)
 branch="ptn/moreau-${BACKEND,,}-${version}-${commit:0:8}"
 recipe="M/Moreau/Moreau_${BACKEND}"
 fork_owner="${YGGDRASIL_FORK%%/*}"
@@ -19,7 +21,8 @@ else
     git -C yggdrasil checkout -b "$branch" FETCH_HEAD
 fi
 mkdir -p "yggdrasil/$recipe"
-cp -a "julia-handoff/yggdrasil/$recipe/." "yggdrasil/$recipe/"
+git show "HEAD:packaging/yggdrasil/$recipe/build_tarballs.jl" |
+    sed -E "s/\"[0-9a-f]{40}\"/\"$commit\"/" > "yggdrasil/$recipe/build_tarballs.jl"
 git -C yggdrasil add "$recipe"
 if ! git -C yggdrasil diff --cached --quiet; then
     git -C yggdrasil commit -m "Build Moreau_${BACKEND} ${version}"

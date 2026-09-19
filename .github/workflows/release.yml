@@ -49,13 +49,13 @@ jobs:
             BASE=$(grep '^version = ' packages/moreau/pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
             VERSION="${BASE}.dev$(date -u +%Y%m%d%H%M%S)"
           fi
-          python3 scripts/julia_release.py check-version "$VERSION"
+          python3 scripts/bump_version.py "$VERSION" --pin-dependencies
           if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            git diff --exit-code
             echo "stable=true" >> "$GITHUB_OUTPUT"
           else
             echo "stable=false" >> "$GITHUB_OUTPUT"
           fi
-          python3 scripts/bump_version.py "$VERSION" --pin-dependencies
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Resolved version: $VERSION"
 
@@ -551,10 +551,6 @@ jobs:
           fi
           echo "Release name: $(grep name= $GITHUB_OUTPUT | cut -d= -f2)"
 
-      - name: Prepare Yggdrasil recipes for the committed stable release
-        if: needs.resolve-version.outputs.stable == 'true'
-        run: python3 scripts/julia_release.py prepare --output julia-handoff
-
       - name: Set Julia source release version
         env:
           VERSION: ${{ needs.resolve-version.outputs.version }}
@@ -574,9 +570,6 @@ jobs:
           cp dist-wheels/*.whl dist-release/
           cp dist-clibs/*.tar.gz dist-release/
           cp moreau-julia-src.tar.gz dist-release/
-          if [ -d julia-handoff ]; then
-            cp julia-handoff/*.tar.gz julia-handoff/*.json julia-handoff/*.txt dist-release/
-          fi
           echo "=== Release assets ==="
           ls -la dist-release/
           du -h dist-release/*
