@@ -168,6 +168,37 @@ TEST_F(ActiveSetTest, UnconstrainedQP) {
     EXPECT_NEAR(solver.x_sol[1], 1.0, TOL);
 }
 
+TEST_F(ActiveSetTest, ZeroConstraintsForwardBackward) {
+    int64_t P_ro[] = {0, 1, 2}, P_ci[] = {0, 1}, A_ro[] = {0};
+    double P_vals[] = {2.0, 4.0};
+    for (const int64_t batch : {1, 3}) {
+        SCOPED_TRACE(batch);
+        ActiveSetSolver solver(2, 0, batch, P_ro, P_ci, 2, A_ro, nullptr, 0,
+                               Cones{}, ActiveSetSettings{}, true);
+        solver.setup(P_vals, nullptr);
+        std::vector<double> q(batch * 2), dx(batch * 2, 1.0);
+        for (int64_t i = 0; i < batch; ++i) {
+            q[2 * i] = 1.0 + i;
+            q[2 * i + 1] = -2.0 - i;
+        }
+        solver.solve(q.data(), nullptr);
+        solver.backward(dx.data(), nullptr, nullptr);
+        for (int64_t i = 0; i < batch; ++i) {
+            ASSERT_EQ(solver.status_vec[i], static_cast<int32_t>(SolverStatus::Solved));
+            for (int j = 0; j < 2; ++j) {
+                const auto k = 2 * i + j;
+                EXPECT_NEAR(solver.x_sol[k], -q[k] / P_vals[j], TOL);
+                EXPECT_NEAR(solver.dq[k], -1.0 / P_vals[j], TOL);
+                EXPECT_NEAR(solver.dP_values[k], q[k] / (P_vals[j] * P_vals[j]), TOL);
+            }
+        }
+        EXPECT_TRUE(solver.z_sol.empty());
+        EXPECT_TRUE(solver.s_sol.empty());
+        EXPECT_TRUE(solver.db.empty());
+        EXPECT_TRUE(solver.dA_values.empty());
+    }
+}
+
 TEST_F(ActiveSetTest, ActiveBound) {
     const int64_t n = 1, m = 1, batch = 1;
 
