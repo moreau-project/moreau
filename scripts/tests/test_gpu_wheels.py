@@ -15,6 +15,7 @@ limitations under the License.
 Exercise GPU QA's failure handling without downloading packages or requiring CUDA.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -33,6 +34,7 @@ def run_qa(tmp_path):
         "moreau-0.4.1-py3-none-any.whl",
         "moreau_cpu-0.4.1-cp39-abi3-manylinux_2_28_x86_64.whl",
         "moreau_cuda12-0.4.1-cp312-abi3-manylinux_2_28_x86_64.whl",
+        "moreau_cuda13-0.4.1-cp312-abi3-manylinux_2_28_x86_64.whl",
     ):
         (wheels / name).touch()
     source = tmp_path / "source"
@@ -47,7 +49,7 @@ def run_qa(tmp_path):
     commands.mkdir()
     shim = commands / "shim"
     shim.write_text(f"#!{sys.executable}\n" + r"""
-import json, os, pathlib, sys
+import json, os, pathlib, shutil, sys
 command = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 with open(os.environ['QA_LOG'], 'a') as log:
@@ -67,31 +69,42 @@ elif command == 'python':
         sys.exit(1 if failure == 'import' else 0)
     if failure and any(failure in arg for arg in args):
         sys.exit(int(os.environ.get('QA_EXIT_CODE', '1')))
-elif command == 'git':
+elif command == 'git' and args[0] == 'clone':
     pathlib.Path(args[-1], 'cvxpy/tests').mkdir(parents=True)
+elif command == 'gh':
+    if args[:2] == ['release', 'download']:
+        shutil.copytree(os.environ['QA_WHEELS'], 'wheels')
+    elif args[0] == 'api' and '/commits/' in args[1]:
+        print('a' * 40)
+elif command == 'julia' and failure == 'julia':
+    sys.exit(1)
 """)
     shim.chmod(0o755)
-    for command in ("uv", "git", "uname"):
+    for command in ("uv", "git", "uname", "gh", "julia"):
         (commands / command).symlink_to(shim)
     log = tmp_path / "commands.jsonl"
 
-    def run(failure="", exit_code=1):
-        result = subprocess.run(
-            [
+    def run(failure="", exit_code=1, release_suite=None, cuda="12"):
+        command = ["bash", str(SCRIPT), str(wheels), "--source-dir", str(source)]
+        if release_suite is not None:
+            command = [
                 "bash",
-                str(SCRIPT),
-                str(wheels),
-                "--source-dir",
-                str(source),
-                "--work-dir",
-                str(tmp_path / "work"),
-            ],
+                str(SCRIPT.with_name("test_release_gpu.sh")),
+                "v0.4.1",
+                "--suite",
+                release_suite,
+                "--cuda",
+                cuda,
+            ]
+        result = subprocess.run(
+            [*command, "--work-dir", str(tmp_path / "work")],
             env={
                 **os.environ,
                 "PATH": f"{commands}:{os.environ['PATH']}",
                 "QA_LOG": str(log),
                 "QA_FAILURE": failure,
                 "QA_EXIT_CODE": str(exit_code),
+                "QA_WHEELS": str(wheels),
             },
             capture_output=True,
             text=True,
@@ -134,3 +147,41 @@ def test_success_including_optional_empty_module(run_qa, optional_module):
     assert "python3.14/bin/python" in commands
     assert "test_conic_solvers.py" in commands
     assert "test_moreau_dual_variables.py" in commands
+
+
+@pytest.mark.parametrize(
+    "cuda,suite,failure",
+    [
+        ("12", "all", ""),
+        ("13", "all", ""),
+        ("12", "python", ""),
+        ("12", "julia", ""),
+        ("12", "all", "import"),
+        ("12", "all", "julia"),
+    ],
+)
+def test_release_statuses_follow_each_suite_on_tagged_commit(run_qa, cuda, suite, failure):
+    _, run = run_qa
+    result, commands = run(failure, release_suite=suite, cuda=cuda)
+    assert result.returncode == bool(failure), result.stderr
+    calls = [json.loads(line) for line in commands.splitlines()]
+    updates = [call for call in calls if call[0] == "gh" and "POST" in call]
+    expected = []
+    for name in ("python", "julia"):
+        if suite not in ("all", name):
+            continue
+        failed = failure == ("import" if name == "python" else "julia")
+        expected.extend(
+            [
+                (f"release-gpu/cuda{cuda}/{name}", "pending"),
+                (f"release-gpu/cuda{cuda}/{name}", "failure" if failed else "success"),
+            ]
+        )
+        if failed:
+            break
+    actual = []
+    for call in updates:
+        assert f"repos/moreau-project/moreau/statuses/{'a' * 40}" in call
+        fields = dict(arg.split("=", 1) for arg in call if "=" in arg)
+        actual.append((fields["context"], fields["state"]))
+    assert actual == expected

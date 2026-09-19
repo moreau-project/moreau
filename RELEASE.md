@@ -25,3 +25,6 @@ scripts/release.sh gpu X.Y.Z --cuda 13
 Local GPU tests require Linux, `uv`, Julia 1.12, and an NVIDIA GPU. They do not
 replace the required Actions checks. Use `--suite python` or `--suite julia` to
 run one suite.
+
+Local and Actions release GPU runs record `release-gpu/cuda{12,13}/{python,julia}` statuses
+on the release tag's commit. A single-suite run updates only that suite's status.
