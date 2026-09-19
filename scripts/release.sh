@@ -24,7 +24,20 @@ workflow() {
 
 case "$stage" in
     prepare)
+        cd "$root"
+        if [[ -n $(git status --porcelain) ]]; then
+            echo 'Commit or stash local changes before preparing a release.' >&2
+            exit 1
+        fi
+        branch="release-$version"
+        git fetch origin main
+        git switch -c "$branch" FETCH_HEAD
         python "$root/scripts/bump_version.py" "$version" --pin-dependencies
+        git add -u
+        git commit -m "Prepare release $tag" \
+            -m "Synchronize package versions and pin backend dependencies for $tag."
+        git push -u origin "$branch"
+        gh pr create --repo "$repo" --base main --head "$branch" --fill
         ;;
     build)
         workflow release.yml main -f "inputs[version]=$version" -f "inputs[release_name]=$tag"
@@ -52,7 +65,7 @@ case "$stage" in
             fork=$(gh variable get YGGDRASIL_FORK --repo "$repo")
             for backend in CPU CUDA; do
                 gh run download "$run_id" --repo "$repo" --name "julia-jll-pr-$backend" --dir "$release_tmp/$backend"
-                branch="ptn/moreau-${backend,,}-${version}-${commit:0:8}"
+                branch="moreau-${backend,,}-${version}-${commit:0:8}"
                 head="${fork%%/*}:$branch"
                 existing=$(gh pr list --repo JuliaPackaging/Yggdrasil --head "$head" \
                     --state all --json url --jq '.[0].url // empty')
