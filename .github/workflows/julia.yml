@@ -132,31 +132,9 @@ jobs:
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
-      - name: Select CUDA runtime and resolve matching JLL
+      - name: Test CUDA extensions and integration
         env:
           CUDA_VERSION: ${{ matrix.cuda }}
-        shell: julia {0}
+          REQUIRE_GPU: ${{ inputs.run_gpu_tests && 'true' || 'false' }}
         run: |
-          using Pkg, TOML
-          package = abspath(ENV["JULIA_PROJECT"])
-          env = joinpath(package, "test", "cuda")
-          open(joinpath(env, "LocalPreferences.toml"), "w") do io
-              TOML.print(io, Dict("CUDA_Runtime_jll" => Dict("version" => ENV["CUDA_VERSION"], "local" => "false")))
-          end
-          Pkg.activate(env)
-          Pkg.develop(path=package)
-          Pkg.instantiate()
-      - name: Test CUDA extensions and ownership
-        env:
-          MOREAU_TEST_CUDA: ${{ inputs.run_gpu_tests && '1' || '0' }}
-        run: julia --project=packages/moreau-julia/Moreau.jl/test/cuda packages/moreau-julia/Moreau.jl/test/cuda/runtests.jl
-      - name: Run CUDA JuMP/MOI conformance suite
-        if: inputs.run_gpu_tests
-        env:
-          MOREAU_TEST_CUDA: '1'
-        run: |
-          julia --project=packages/moreau-julia/Moreau.jl/test/cuda -e '
-            using Pkg
-            Pkg.add("JuMP")
-            include("packages/moreau-julia/MoreauTests.jl/test/test_cuda.jl")
-          '
+          julia --startup-file=no scripts/test_release_gpu_julia.jl "$PWD" "$CUDA_VERSION" "$REQUIRE_GPU"

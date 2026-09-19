@@ -1,37 +1,27 @@
 # Releases
 
-Replace `X.Y.Z` with the stable release version.
+Run these stages with the release version, using your own `gh` login:
 
-1. Run `python scripts/bump_version.py X.Y.Z --pin-dependencies` and merge the
-   version bump into `main`.
-2. Build the release:
+```sh
+scripts/release.sh prepare X.Y.Z
+# Commit and merge the version bump into main.
+scripts/release.sh build X.Y.Z
+scripts/release.sh jll-prs X.Y.Z
+# Wait for both JLLs to register in General.
+scripts/release.sh test X.Y.Z
+scripts/release.sh register X.Y.Z
+# Wait for General to merge the Moreau registration.
+scripts/release.sh publish X.Y.Z
+```
 
-   ```sh
-   gh workflow run release.yml --repo moreau-project/moreau --ref main \
-     -f version=X.Y.Z -f release_name=vX.Y.Z
-   ```
+The script waits for Actions checks and handles the Yggdrasil PRs and Registrator
+comment. Add `--run-gpu-tests` to `test` to use CI GPU runners. For local GPU tests:
 
-3. Open the CPU and CUDA Yggdrasil PRs using the links in the Julia Release
-   workflow summary. Wait for both JLLs to be registered.
-4. Run release QA (add `-f run_gpu_tests=true` for GPU runtime tests):
+```sh
+scripts/release.sh gpu X.Y.Z --cuda 12
+scripts/release.sh gpu X.Y.Z --cuda 13
+```
 
-   ```sh
-   gh workflow run julia-release.yml --repo moreau-project/moreau --ref vX.Y.Z \
-     -f release_tag=vX.Y.Z -f stage=test
-   ```
-
-5. After QA passes, prepare Julia registration:
-
-   ```sh
-   gh workflow run julia-release.yml --repo moreau-project/moreau --ref vX.Y.Z \
-     -f release_tag=vX.Y.Z -f stage=prepare-registration
-   ```
-
-   Post the generated Registrator comment on the linked commit. Wait for General
-   to merge the registration.
-6. Publish:
-
-   ```sh
-   gh workflow run publish.yml --repo moreau-project/moreau --ref vX.Y.Z \
-     -f release_tag=vX.Y.Z
-   ```
+Local GPU tests require Linux, `uv`, Julia 1.12, and an NVIDIA GPU. They do not
+replace the required Actions checks. Use `--suite python` or `--suite julia` to
+run one suite.
