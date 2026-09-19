@@ -29,7 +29,9 @@ def _preload_nvidia_libs():
     two copies of one soname via RTLD_GLOBAL leaves two versions of libraries
     like cuBLAS and cuSOLVER mapped in the process, and their per-process
     internal state ends up split between the copies, producing silent
-    numerical failures.
+    numerical failures. cuDSS is the exception: its configuration enum values
+    change between minor versions despite keeping the same soname, so use the
+    package dependency matching the wheel's build.
     """
     try:
         import nvidia
@@ -64,11 +66,12 @@ def _preload_nvidia_libs():
                     by_soname.setdefault(m.group(1), so_file)
 
         for soname, so_file in by_soname.items():
-            try:
-                ctypes.CDLL(soname)
-                continue
-            except OSError:
-                pass
+            if lib_name != "libcudss.so":
+                try:
+                    ctypes.CDLL(soname)
+                    continue
+                except OSError:
+                    pass
             try:
                 ctypes.CDLL(so_file, mode=os.RTLD_GLOBAL)
             except OSError:
