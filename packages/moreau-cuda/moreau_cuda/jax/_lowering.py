@@ -597,6 +597,9 @@ def _make_ffi_solve_fn(
         This is the main entry point. Returns a tuple of NamedTuples
         which are pytree-compatible and work with jax.vmap/jax.grad.
         """
+        dtype = jnp.result_type(P_data, A_data, q, b, jnp.float32)
+        # Cast outside custom_vjp so JAX restores each input's cotangent dtype.
+        P_data, A_data, q, b = (jnp.asarray(v, dtype=jnp.float64) for v in (P_data, A_data, q, b))
         (
             x,
             z,
@@ -608,7 +611,7 @@ def _make_ffi_solve_fn(
             solve_time,
             setup_time,
             _ffi_construction_time,
-        ) = _solve_with_grad(P_data, A_data, q, b)
+        ) = (v.astype(dtype) for v in _solve_with_grad(P_data, A_data, q, b))
         solution = JaxSolution(x=x, z=z, s=s, z_x=z_x)
         # Use wrapper construction time instead of FFI-returned value (which is 0.0)
         info = JaxSolveInfo(
@@ -617,7 +620,7 @@ def _make_ffi_solve_fn(
             iterations=iterations,
             solve_time=solve_time,
             setup_time=setup_time,
-            construction_time=jnp.asarray(wrapper_construction_time, dtype=jnp.float64),
+            construction_time=jnp.asarray(wrapper_construction_time, dtype=x.dtype),
         )
         return solution, info
 
@@ -964,6 +967,11 @@ def _make_ffi_solve_warm_fn(
     # Final wrapper returning (JaxSolution, JaxSolveInfo)
     def _solve_warm_with_solution(P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x):
         """Warm-start solve returning (JaxSolution, JaxSolveInfo)."""
+        dtype = jnp.result_type(P_data, A_data, q, b, jnp.float32)
+        P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x = (
+            jnp.asarray(v, dtype=jnp.float64)
+            for v in (P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x)
+        )
         (
             x,
             z,
@@ -975,7 +983,10 @@ def _make_ffi_solve_warm_fn(
             solve_time,
             setup_time,
             _ffi_construction_time,
-        ) = _solve_warm_with_grad(P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x)
+        ) = (
+            v.astype(dtype)
+            for v in _solve_warm_with_grad(P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x)
+        )
         solution = JaxSolution(x=x, z=z, s=s, z_x=z_x)
         info = JaxSolveInfo(
             status=status,
@@ -983,7 +994,7 @@ def _make_ffi_solve_warm_fn(
             iterations=iterations,
             solve_time=solve_time,
             setup_time=setup_time,
-            construction_time=jnp.asarray(wrapper_construction_time, dtype=jnp.float64),
+            construction_time=jnp.asarray(wrapper_construction_time, dtype=x.dtype),
         )
         return solution, info
 

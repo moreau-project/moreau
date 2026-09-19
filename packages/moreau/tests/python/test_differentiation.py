@@ -547,7 +547,6 @@ def test_equality_qp_symmetric_P_gradient(method, storage, interface):
         jax = pytest.importorskip("jax")
         jnp = pytest.importorskip("jax.numpy")
         jax_solver = pytest.importorskip("moreau.jax").Solver
-        jax.config.update("jax_enable_x64", True)
         solver = jax_solver(
             n=2,
             m=1,

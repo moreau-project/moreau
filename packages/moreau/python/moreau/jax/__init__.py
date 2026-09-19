@@ -268,8 +268,8 @@ class Solver:
         """
         import jax.numpy as jnp
 
-        self._P_values = jnp.asarray(P_values, dtype=jnp.float64)
-        self._A_values = jnp.asarray(A_values, dtype=jnp.float64)
+        self._P_values = jnp.asarray(P_values)
+        self._A_values = jnp.asarray(A_values)
 
     def _needs_auto_tune(self) -> bool:
         return _needs_auto_tune_shared(
@@ -441,18 +441,18 @@ class Solver:
 
             solve_warm_fn = self._impl.solve_warm
             if solve_warm_fn is not None:
-                warm_x = jnp.asarray(warm_start.x, dtype=jnp.float64)
-                warm_z = jnp.asarray(warm_start.z, dtype=jnp.float64)
-                warm_s = jnp.asarray(warm_start.s, dtype=jnp.float64)
+                warm_x = jnp.asarray(warm_start.x)
+                warm_z = jnp.asarray(warm_start.z)
+                warm_s = jnp.asarray(warm_start.s)
                 # Direct dual: pass through if present, else zero-length
                 # placeholder (the FFI handler ignores it when total_xn==0).
                 total_xn = getattr(self._impl, "_total_xn", 0)
                 if warm_start.z_x is not None:
-                    warm_z_x = jnp.asarray(warm_start.z_x, dtype=jnp.float64)
+                    warm_z_x = jnp.asarray(warm_start.z_x)
                 elif warm_x.ndim == 1:
-                    warm_z_x = jnp.zeros((total_xn,), dtype=jnp.float64)
+                    warm_z_x = jnp.zeros((total_xn,), dtype=warm_x.dtype)
                 else:
-                    warm_z_x = jnp.zeros((warm_x.shape[0], total_xn), dtype=jnp.float64)
+                    warm_z_x = jnp.zeros((warm_x.shape[0], total_xn), dtype=warm_x.dtype)
                 solution, info = solve_warm_fn(
                     P_values, A_values, q, b, warm_x, warm_z, warm_s, warm_z_x
                 )
