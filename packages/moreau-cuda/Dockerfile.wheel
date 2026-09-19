@@ -7,9 +7,7 @@
 #   # Specific CUDA version:
 #   docker build -f packages/moreau-cuda/Dockerfile.wheel \
 #     --build-arg CUDA_VERSION=12.2 \
-#     --build-arg CUDA_SHORT=cu122 \
 #     --build-arg CUDSS_SUFFIX=cuda12 \
-#     --build-arg PYTORCH_INDEX=cu121 \
 #     -t moreau-cuda-wheel .
 #
 #   docker run --rm -v $(pwd)/dist:/output moreau-cuda-wheel bash -c "cp /workspace/packages/moreau-cuda/dist/*.whl /output/"
@@ -35,10 +33,7 @@ ARG PYTHON_VERSION=3.12
 ARG CUDSS_VERSION=0.7.1.4
 # CUDA version parameters
 ARG CUDA_VERSION=12.2
-ARG CUDA_SHORT=cu122
-ARG CUDA_MAJOR=12
 ARG CUDSS_SUFFIX=cuda12
-ARG PYTORCH_INDEX=cu121
 # GCC toolset version: CUDA 12.2 requires GCC <=12, CUDA 13+ supports GCC 13
 ARG GCC_TOOLSET=12
 
@@ -62,17 +57,6 @@ ENV PATH="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/lib64:/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/lib:${LD_LIBRARY_PATH}"
 ENV CC="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/bin/gcc"
 ENV CXX="/opt/rh/gcc-toolset-${GCC_TOOLSET}/root/usr/bin/g++"
-
-# Install GTest (required for CMake build)
-WORKDIR /tmp
-RUN curl -sL -o googletest-1.14.0.tar.gz https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz && \
-    echo "8ad598c73ad796e0d8280b082cebd82a630d73e73cd3c70057938a6501bba5d7  googletest-1.14.0.tar.gz" | sha256sum -c - && \
-    tar -xzf googletest-1.14.0.tar.gz && \
-    cd googletest-1.14.0 && \
-    cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local && \
-    cmake --build build -j4 && \
-    cmake --install build && \
-    cd / && rm -rf /tmp/googletest-1.14.0 /tmp/googletest-1.14.0.tar.gz
 
 # Set CUDA paths - use symlink /usr/local/cuda which points to installed version
 ENV PATH="/usr/local/cuda/bin:${PATH}"
@@ -118,20 +102,18 @@ RUN python --version && pip --version
 RUN pip install --upgrade pip setuptools wheel && \
     pip install "nanobind>=2.11.0" scikit-build-core numpy auditwheel cmake
 
-# Install PyTorch with CUDA support for torch bindings
-# PYTORCH_INDEX is the PyTorch wheel index suffix (e.g., cu121, cu124)
-RUN pip install torch --index-url https://download.pytorch.org/whl/${PYTORCH_INDEX}
-
-# Install JAX with CUDA support for JAX FFI bindings
-# CUDA_MAJOR is 12 or 13, giving jax[cuda12] or jax[cuda13]
-RUN pip install "jax[cuda${CUDA_MAJOR}]"
+# JAX supplies the XLA FFI headers; CUDA plugins and PyTorch are runtime-only.
+RUN pip install jax && \
+    python -c "from jax._src import ffi; from pathlib import Path; assert (Path(ffi.include_dir()) / 'xla/ffi/api/ffi.h').is_file()"
 
 WORKDIR /workspace
 COPY . .
 
 # Build the wheel from packages/moreau-cuda (without build isolation to use installed dependencies)
 WORKDIR /workspace/packages/moreau-cuda
-RUN pip wheel . -w dist_raw/ --no-deps --no-build-isolation
+RUN pip wheel . -w dist_raw/ --no-deps --no-build-isolation \
+    --config-settings=cmake.define.MOREAU_BUILD_TESTS=OFF \
+    --config-settings=cmake.define.MOREAU_BUILD_EXAMPLES=OFF
 
 # Tag wheel as manylinux_2_28.
 # libsodium is statically linked (see CMakeLists.txt), and all NVIDIA/CUDA libs

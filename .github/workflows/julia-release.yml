@@ -98,7 +98,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
           RUN_GPU_TESTS: ${{ inputs.run_gpu_tests }}
         run: |
-          gh workflow run test-release.yml --ref "$RELEASE_TAG" \
+          gh workflow run test-release.yml --ref main \
             -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"
       - name: Require successful QA before preparing registration
         if: inputs.stage == 'prepare-registration'
@@ -106,7 +106,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
+          gh run list --workflow test-release.yml --event workflow_dispatch \
             --limit 100 --json displayTitle,conclusion,status | \
             jq -e --arg title "Test Release $RELEASE_TAG" \
               '[.[] | select(.displayTitle == $title)][0] | .status == "completed" and .conclusion == "success"'
