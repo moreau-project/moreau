@@ -2,8 +2,8 @@
 #
 # Stable release pipeline (see RELEASE.md):
 #   release.yml -> julia-release.yml prepare-jll-prs -> manual Yggdrasil PRs/registration
-#   -> julia-release.yml test -> test-release.yml -> julia-release.yml register
-#   -> external General registration -> publish.yml.
+#   -> julia-release.yml test -> test-release.yml -> julia-release.yml prepare-registration
+#   -> manual Registrator comment / General registration -> publish.yml.
 # Development/prerelease builds go directly to test-release.yml.
 #
 # Usage:

@@ -14,17 +14,18 @@ parallel source repositories for them.
 - Enable the Registrator GitHub app on `moreau-project/moreau`.
 - Create a fork of `JuliaPackaging/Yggdrasil` under `moreau-project`, and set
   `YGGDRASIL_FORK` to its full name, such as `moreau-project/Yggdrasil`.
-- Create a **fine-grained** personal access token with resource owner
-  `moreau-project`, repository access limited to `moreau` and that fork, and
-  **Contents: Read and write**. Save it as `JULIA_RELEASE_TOKEN`. This permits
-  pushing recipe branches to the fork and commenting on Moreau commits; it does
-  not grant write access to other repositories. No classic token or `public_repo`
-  scope is needed. Approve the token in the organization if its policy requires it.
-  The Registrator caller must be an eligible Moreau collaborator or public
-  organization member.
+- Generate a dedicated SSH key pair. Add the public key to the fork's **Settings
+  > Deploy keys**, with **Allow write access** enabled. Store the private key in
+  the Moreau monorepo's **Settings > Secrets and variables > Actions** as the
+  repository secret `YGGDRASIL_DEPLOY_KEY`. It grants Git access only to the fork.
+  No personal access token is required. The workflow uses its automatically
+  generated, repository-scoped `GITHUB_TOKEN` for QA dispatch and read-only API
+  checks.
 - A maintainer opens the upstream Yggdrasil PRs using the comparison links and
-  prepared text from the workflow. The token cannot write to
-  `JuliaPackaging/Yggdrasil`, and the workflow never attempts that operation.
+  prepared text from the workflow, and posts the prepared Registrator comment
+  after QA passes. The Registrator caller must be an eligible Moreau collaborator
+  or public organization member. These actions use that maintainer's own account;
+  no personal login or API credential is stored in the workflow.
 - Keep the existing PyPI trusted-publishing configuration. Optional CUDA runtime
   tests use the existing `gpu-t4` and `gpu-instance` runners. CPU and CUDA loading
   tests run on hosted runners.
@@ -32,6 +33,21 @@ parallel source repositories for them.
 No settings, tokens, repository permissions, or external repositories are changed
 by preparing this branch. The configuration above is required when running the
 publication workflows.
+
+### Revocation and rotation
+
+The deploy key is attached to the fork, not its creator's account. Maintainers
+responsible for releases must be able to administer the fork's deploy keys and
+manage Actions secrets on the Moreau monorepo.
+
+- **Revoke:** delete the public deploy key from the fork. This disables that
+  private key even if a workflow already has a copy. Remove its Actions secret
+  as well to prevent new jobs from attempting to use it.
+- **Replace:** another authorized maintainer generates a fresh key pair, adds
+  the new public key to the fork, and replaces `YGGDRASIL_DEPLOY_KEY` with the
+  new private key. After a successful recipe-branch push, remove the old public
+  key. Neither the creator's login nor the old private key is needed. For a
+  suspected compromise, revoke the old key first.
 
 ## Stable release sequence
 
@@ -69,17 +85,19 @@ publication workflows.
    ownership and JuMP/MOI conformance also run on GPU runners and require working
    devices. Python QA remains part of the same release gate. Without GPU runners,
    runtime coverage is explicitly reported as not run; loading checks still run.
-4. After the exact tag/commit's QA run succeeds, request frontend registration:
+4. After the exact tag/commit's QA run succeeds, prepare frontend registration:
 
    ```sh
    gh workflow run julia-release.yml --repo moreau-project/moreau --ref vX.Y.Z \
-     -f release_tag=vX.Y.Z -f stage=register
+     -f release_tag=vX.Y.Z -f stage=prepare-registration
    ```
 
-   The workflow verifies the JLLs and latest matching QA, then requests
-   `@JuliaRegistrator register subdir=packages/moreau-julia/Moreau.jl` on the
-   monorepo release commit. The package remains named **Moreau**. The existing
-   native release workflow owns the shared tag; a second TagBot release is not
+   The workflow verifies the JLLs, latest matching QA, and source archive, then
+   provides the exact commit link and registration comment in its summary and
+   artifact. An eligible maintainer posts that comment on the linked commit:
+   `@JuliaRegistrator register subdir=packages/moreau-julia/Moreau.jl`.
+   Preparing the comment does not submit it. The package remains named **Moreau**.
+   The existing native release workflow owns the shared tag; a second TagBot release is not
    required. General/Yggdrasil review and merge remain external stages.
 5. After General merges the frontend registration, publish normally:
 
