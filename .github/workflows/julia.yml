@@ -27,6 +27,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: julia-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   JULIA_PROJECT: packages/moreau-julia/Moreau.jl
 
@@ -62,6 +66,9 @@ jobs:
         with:
           version: '1.12'
           arch: ${{ matrix.arch }}
+      - uses: julia-actions/cache@v3
+        with:
+          delete-old-caches: 'false'
       - uses: dtolnay/rust-toolchain@stable
         if: inputs.release_tag == ''
       - name: Build native CPU for source CI
@@ -129,6 +136,9 @@ jobs:
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
+      - uses: julia-actions/cache@v3
+        with:
+          delete-old-caches: 'false'
       - name: Test CUDA extensions and integration
         env:
           CUDA_VERSION: ${{ matrix.cuda }}
