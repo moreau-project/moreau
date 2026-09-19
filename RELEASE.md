@@ -86,18 +86,24 @@ publication workflows.
 All stages can be rerun after an external dependency becomes ready. Do not move an
 existing release tag or overwrite a registered package version.
 
-## Initial 0.4.0 registration
+## Initial Julia registration
 
-General PR #167256 is still an open initial registration. Retain version 0.4.0 and
-UUID `c8b129f6-74e5-4f0d-b2d8-2ea10d91a548`, and register the corrected monorepo
-subdirectory. The pending metadata must point to `moreau-project/moreau` and set
+[General PR #167256](https://github.com/JuliaRegistries/General/pull/167256) is
+still an open initial registration for 0.4.0 from the standalone repository.
+Retain the name and UUID `c8b129f6-74e5-4f0d-b2d8-2ea10d91a548`, but register the
+monorepo subdirectory with the next shared native release, 0.4.1, using the
+sequence above. General must point to `moreau-project/moreau` and record
 `subdir = "packages/moreau-julia/Moreau.jl"`.
 
-The existing native 0.4.0 tag and PyPI packages are already published. For this
-bootstrap, use a distinct candidate tag such as `julia-v0.4.0` on the corrected
-commit for the build/JLL/QA/registration stages. Do not move `v0.4.0`, and do not
-rerun PyPI publication for the already published native version. Subsequent
-releases use the single normal version/tag sequence above.
+The changed repository and version require a new registration PR. Once that
+replacement exists, coordinate closing the old registration with General's
+reviewers. Preparing or merging this packaging change does not submit either
+registration request.
+
+The native 0.4.0 tag and PyPI packages are already published, and current source
+includes later solver fixes. Do not rebuild those changes as 0.4.0, move its tag,
+or rerun its PyPI publication. Commit the shared 0.4.1 version bump before
+building or registering the next release.
 
 ## Development and prerelease builds
 

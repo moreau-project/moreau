@@ -261,7 +261,9 @@ def test_julia_and_jll_versions_follow_native_release(release_tree):
 def test_recipe_versions_follow_the_native_release(release_tree):
     bump.bump_version(release_tree, "0.5.1", pin_dependencies=True)
     for backend in ("CPU", "CUDA"):
-        text = (release_tree / f"packaging/yggdrasil/M/Moreau/Moreau_{backend}/build_tarballs.jl").read_text()
+        text = (
+            release_tree / f"packaging/yggdrasil/M/Moreau/Moreau_{backend}/build_tarballs.jl"
+        ).read_text()
         assert 'version = v"0.5.1"' in text
         if backend == "CUDA":
             assert "-DMOREAU_VERSION=0.5.1" in text

@@ -28,9 +28,7 @@ import tomllib
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location(
-    "julia_release", ROOT / "scripts/julia_release.py"
-)
+spec = importlib.util.spec_from_file_location("julia_release", ROOT / "scripts/julia_release.py")
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 
@@ -112,16 +110,12 @@ def test_recipes_are_pinned_to_the_release_commit(source, tmp_path):
     junk.write_text("untracked build output must not be submitted")
     info = release.prepare(source, output)
     assert info["source_commit"] == release.git(source, "rev-parse", "HEAD")
-    assert info["julia_tree"] == release.git(
-        source, "rev-parse", f"HEAD:{release.PACKAGE}"
-    )
+    assert info["julia_tree"] == release.git(source, "rev-parse", f"HEAD:{release.PACKAGE}")
     with tarfile.open(output / "moreau-yggdrasil.tar.gz") as archive:
         assert not any(name.endswith("build.log") for name in archive.getnames())
         for backend in ("CPU", "CUDA"):
             text = (
-                archive.extractfile(f"M/Moreau/Moreau_{backend}/build_tarballs.jl")
-                .read()
-                .decode()
+                archive.extractfile(f"M/Moreau/Moreau_{backend}/build_tarballs.jl").read().decode()
             )
             assert info["source_commit"] in text
             assert f'version = v"{info["version"]}"' in text
@@ -138,9 +132,7 @@ def test_dirty_native_source_cannot_be_submitted(source, tmp_path):
 
 def test_version_mismatch_is_caught_before_builds(source):
     native = source / "packages/moreau-cpu/Cargo.toml"
-    native.write_text(
-        native.read_text().replace('version = "0.4.0"', 'version = "0.5.0"', 1)
-    )
+    native.write_text(native.read_text().replace('version = "0.4.0"', 'version = "0.5.0"', 1))
     with pytest.raises(ValueError, match="versions disagree"):
         release.release_info(source)
 
@@ -164,9 +156,7 @@ def test_yanked_jll_does_not_satisfy_release(source, registry):
 def test_registered_source_tree_must_match_the_tested_frontend(source, registry):
     release.check_registry(source, registry, frontend=True)
     path = registry / "M/Moreau/Versions.toml"
-    path.write_text(
-        path.read_text().replace(release.release_info(source)["julia_tree"], "b" * 40)
-    )
+    path.write_text(path.read_text().replace(release.release_info(source)["julia_tree"], "b" * 40))
     with pytest.raises(ValueError, match="tested Moreau"):
         release.check_registry(source, registry, frontend=True)
 
@@ -179,23 +169,17 @@ def test_registered_source_tree_must_match_the_tested_frontend(source, registry)
         ("uuid", "wrong-uuid", "identity"),
     ],
 )
-def test_registry_location_and_identity_are_preserved(
-    source, registry, field, value, message
-):
+def test_registry_location_and_identity_are_preserved(source, registry, field, value, message):
     path = registry / "M/Moreau/Package.toml"
     info = tomllib.loads(path.read_text())
-    path.write_text(
-        path.read_text().replace(json.dumps(info[field]), json.dumps(value))
-    )
+    path.write_text(path.read_text().replace(json.dumps(info[field]), json.dumps(value)))
     with pytest.raises(ValueError, match=message):
         release.check_registry(source, registry, frontend=True)
 
 
 def test_prerelease_is_not_submitted_to_general(source):
     path = source / release.PACKAGE / "Project.toml"
-    path.write_text(
-        path.read_text().replace('version = "0.4.0"', 'version = "0.4.1-dev123"')
-    )
+    path.write_text(path.read_text().replace('version = "0.4.0"', 'version = "0.4.1-dev123"'))
     with pytest.raises(ValueError, match="stable"):
         release.release_info(source)
 
@@ -244,9 +228,7 @@ def test_source_archive_must_be_the_tagged_subtree(source, tmp_path):
 def test_native_prerelease_qa_uses_exact_binary_without_general(source, tmp_path):
     package = source / release.PACKAGE
     path = package / "Project.toml"
-    path.write_text(
-        path.read_text().replace('version = "0.4.0"', 'version = "0.5.0-dev123"')
-    )
+    path.write_text(path.read_text().replace('version = "0.4.0"', 'version = "0.5.0-dev123"'))
     library = tmp_path / "libmoreau_cpu.so"
     library.touch()
     output = tmp_path / "native-qa"
@@ -259,9 +241,7 @@ def test_native_prerelease_qa_uses_exact_binary_without_general(source, tmp_path
         release.native_fixture(package, output, tmp_path / "missing.so")
 
 
-def test_yggdrasil_submission_is_repeatable_without_network(
-    source, tmp_path, monkeypatch
-):
+def test_yggdrasil_submission_is_repeatable_without_network(source, tmp_path, monkeypatch):
     release.prepare(source, source / "julia-handoff")
     fork = tmp_path / "fork.git"
     subprocess.run(
@@ -269,9 +249,7 @@ def test_yggdrasil_submission_is_repeatable_without_network(
         check=True,
     )
     release.git(source, "push", str(fork), "HEAD:refs/heads/master")
-    subprocess.run(
-        ["git", "clone", "-q", str(fork), str(source / "yggdrasil")], check=True
-    )
+    subprocess.run(["git", "clone", "-q", str(fork), str(source / "yggdrasil")], check=True)
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     real_git = shutil.which("git")

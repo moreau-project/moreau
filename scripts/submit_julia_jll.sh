@@ -5,7 +5,7 @@ set -euo pipefail
 
 version=$(python -c 'import json; print(json.load(open("julia-handoff/moreau-julia-release.json"))["version"])')
 commit=$(python -c 'import json; print(json.load(open("julia-handoff/moreau-julia-release.json"))["source_commit"])')
-branch="codex/moreau-${BACKEND,,}-${version}-${commit:0:8}"
+branch="ptn/moreau-${BACKEND,,}-${version}-${commit:0:8}"
 recipe="M/Moreau/Moreau_${BACKEND}"
 fork_owner="${YGGDRASIL_FORK%%/*}"
 
@@ -40,5 +40,5 @@ is prepared by the monorepo release workflow; Yggdrasil supplies the source
 builds, audits, generated JLL package, and registration.
 EOF
     gh pr create --repo JuliaPackaging/Yggdrasil --base master --head "$fork_owner:$branch" \
-        --title "ChatGPT generated: Moreau_${BACKEND} v${version}" --body-file jll-pr-body.md
+        --title "Moreau_${BACKEND} v${version}" --body-file jll-pr-body.md
 fi
