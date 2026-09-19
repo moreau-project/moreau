@@ -122,7 +122,6 @@ jobs:
     - name: Record CUDA runtime coverage
       if: vars.MOREAU_GPU_RUNNERS_ENABLED != 'true'
       run: |
-        echo "ChatGPT generated:" >> "$GITHUB_STEP_SUMMARY"
         echo "CUDA compilation and wheel build passed. CUDA runtime tests were not run: GPU runners are disabled." >> "$GITHUB_STEP_SUMMARY"
         echo "Set the repository variable MOREAU_GPU_RUNNERS_ENABLED=true when GPU runners are available." >> "$GITHUB_STEP_SUMMARY"
 

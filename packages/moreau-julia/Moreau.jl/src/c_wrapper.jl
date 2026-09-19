@@ -454,9 +454,9 @@ function _get_lib(device::Symbol)
     if device == :cpu
         return libmoreau
     elseif device == :cuda
-        if !_load_cuda_library(; allow_fallback=true)
+        if !_load_cuda_library()
             error("CUDA device requested but Moreau CUDA library is not available. " *
-                  "Set MOREAU_CUDA_LIB or install the CUDA artifact.")
+                  "Load Moreau_CUDA_jll or set MOREAU_CUDA_LIB to a matching local library.")
         end
         return libmoreau_cuda
     else
@@ -633,10 +633,9 @@ function _moreau_solve_cuda(
     _init_cudart() || error("Failed to load CUDA runtime (libcudart). Is CUDA installed?")
 
     solver = C_NULL
-    # Track device pointers for cleanup
-    device_ptrs = Ptr{Float64}[]
+    inputs = Tuple{Ptr{Float64},AbstractVector{Float64}}[]
     try
-        GC.@preserve P_ro P_ci P_vals A_ro A_ci A_vals q b soc_dims_i64 power_alphas begin
+        GC.@preserve inputs P_ro P_ci A_ro A_ci soc_dims_i64 power_alphas begin
             # create() always takes host pointers for structure
             solver = c_moreau_solver_create(
                 Int64(n), Int64(m),
@@ -646,25 +645,18 @@ function _moreau_solve_cuda(
             )
 
             # setup() needs device pointers for values
-            d_P_vals = _to_device(P_vals)
-            push!(device_ptrs, d_P_vals)
-            d_A_vals = _to_device(A_vals)
-            push!(device_ptrs, d_A_vals)
+            d_P_vals = _device_input!(inputs, P_vals)
+            d_A_vals = _device_input!(inputs, A_vals)
             c_moreau_solver_setup(solver, d_P_vals, nnz_P, d_A_vals, nnz_A; lib=lib)
 
             # solve() needs device pointers for q, b
-            d_q = _to_device(q)
-            push!(device_ptrs, d_q)
-            d_b = _to_device(b)
-            push!(device_ptrs, d_b)
+            d_q = _device_input!(inputs, q)
+            d_b = _device_input!(inputs, b)
 
             if warm_x !== nothing && warm_z !== nothing && warm_s !== nothing
-                d_wx = _to_device(warm_x)
-                push!(device_ptrs, d_wx)
-                d_wz = _to_device(warm_z)
-                push!(device_ptrs, d_wz)
-                d_ws = _to_device(warm_s)
-                push!(device_ptrs, d_ws)
+                d_wx = _device_input!(inputs, warm_x)
+                d_wz = _device_input!(inputs, warm_z)
+                d_ws = _device_input!(inputs, warm_s)
                 c_moreau_solver_solve_warm(solver, d_q, d_b, d_wx, d_wz, d_ws; lib=lib)
             else
                 c_moreau_solver_solve(solver, d_q, d_b; lib=lib)
@@ -691,9 +683,8 @@ function _moreau_solve_cuda(
             )
         end
     finally
-        # Free all device allocations
-        for dptr in device_ptrs
-            cuda_free(dptr)
+        for (ptr, owner) in inputs
+            _maybe_free_ptr(ptr, owner)
         end
         if solver != C_NULL
             c_moreau_solver_destroy(solver; lib=lib)
@@ -987,14 +978,18 @@ function setup!(solver::CompiledSolver, P_values::AbstractVector{Float64}, A_val
     solver.handle == C_NULL && error("CompiledSolver has been destroyed")
     if solver.device == :cuda
         _init_cudart() || error("Failed to load CUDA runtime (libcudart)")
-        d_P = _to_device(P_values)
-        d_A = _to_device(A_values)
+        inputs = Tuple{Ptr{Float64},AbstractVector{Float64}}[]
         try
-            c_moreau_solver_setup(solver, d_P, Int64(length(P_values)),
-                                  d_A, Int64(length(A_values)))
+            d_P = _device_input!(inputs, P_values)
+            d_A = _device_input!(inputs, A_values)
+            GC.@preserve inputs begin
+                c_moreau_solver_setup(solver, d_P, Int64(length(P_values)),
+                                      d_A, Int64(length(A_values)))
+            end
         finally
-            _maybe_free_ptr(d_P, P_values)
-            _maybe_free_ptr(d_A, A_values)
+            for (ptr, owner) in inputs
+                _maybe_free_ptr(ptr, owner)
+            end
         end
     else
         c_moreau_solver_setup(solver, Vector{Float64}(P_values),
@@ -1003,9 +998,15 @@ function setup!(solver::CompiledSolver, P_values::AbstractVector{Float64}, A_val
     return solver
 end
 
-# Free device pointer only if we allocated it (i.e., input was a Vector, not CuVector)
-_maybe_free_ptr(dptr::Ptr{Float64}, ::Vector{Float64}) = cuda_free(dptr)
-_maybe_free_ptr(::Ptr{Float64}, ::AbstractVector{Float64}) = nothing  # CuVector: no-op
+# Host arrays, including views, are copied by _to_device. The CUDA extension
+# specializes cleanup for borrowed CuVector storage.
+_maybe_free_ptr(dptr::Ptr{Float64}, ::AbstractVector{Float64}) = cuda_free(dptr)
+
+function _device_input!(inputs, values::AbstractVector{Float64})
+    ptr = _to_device(values)
+    push!(inputs, (ptr, values))
+    return ptr
+end
 
 """
     solve!(solver::CompiledSolver, q, b; warm_start=nothing) -> Solution
@@ -1053,23 +1054,18 @@ end
 function _compiled_solve_cuda(solver::CompiledSolver, q::AbstractVector{Float64},
                               b::AbstractVector{Float64}, warm_start)
     _init_cudart() || error("Failed to load CUDA runtime (libcudart)")
-    device_ptrs = Ptr{Float64}[]
+    inputs = Tuple{Ptr{Float64},AbstractVector{Float64}}[]
     try
-        d_q = _to_device(q)
-        push!(device_ptrs, d_q)
-        d_b = _to_device(b)
-        push!(device_ptrs, d_b)
+        d_q = _device_input!(inputs, q)
+        d_b = _device_input!(inputs, b)
 
         if warm_start !== nothing
-            d_wx = _to_device(warm_start.x)
-            push!(device_ptrs, d_wx)
-            d_wz = _to_device(warm_start.z)
-            push!(device_ptrs, d_wz)
-            d_ws = _to_device(warm_start.s)
-            push!(device_ptrs, d_ws)
-            c_moreau_solver_solve_warm(solver, d_q, d_b, d_wx, d_wz, d_ws)
+            d_wx = _device_input!(inputs, warm_start.x)
+            d_wz = _device_input!(inputs, warm_start.z)
+            d_ws = _device_input!(inputs, warm_start.s)
+            GC.@preserve inputs c_moreau_solver_solve_warm(solver, d_q, d_b, d_wx, d_wz, d_ws)
         else
-            c_moreau_solver_solve(solver, d_q, d_b)
+            GC.@preserve inputs c_moreau_solver_solve(solver, d_q, d_b)
         end
 
         sol_t = c_moreau_solver_get_solution(solver, Int64(0))
@@ -1079,8 +1075,8 @@ function _compiled_solve_cuda(solver::CompiledSolver, q::AbstractVector{Float64}
         return Solution(x, z, s, MoreauStatus(sol_t.status), sol_t.obj_val, sol_t.obj_val_dual,
                         sol_t.solve_time, Int(sol_t.iterations), sol_t.r_prim, sol_t.r_dual)
     finally
-        for dptr in device_ptrs
-            _maybe_free_ptr(dptr, q)
+        for (ptr, owner) in inputs
+            _maybe_free_ptr(ptr, owner)
         end
     end
 end
@@ -1263,13 +1259,11 @@ function _backward_cuda(solver::CompiledSolver, dx, dz, ds)
     _init_cudart() || error("Failed to load CUDA runtime (libcudart)")
     n, m, nnz_P, nnz_A = solver.n, solver.m, solver.nnz_P, solver.nnz_A
     device_ptrs = Ptr{Float64}[]
+    inputs = Tuple{Ptr{Float64},AbstractVector{Float64}}[]
     try
-        d_dx = _to_device(dx)
-        push!(device_ptrs, d_dx)
-        d_dz = dz === nothing ? Ptr{Float64}(C_NULL) : _to_device(dz)
-        if dz !== nothing; push!(device_ptrs, d_dz); end
-        d_ds = ds === nothing ? Ptr{Float64}(C_NULL) : _to_device(ds)
-        if ds !== nothing; push!(device_ptrs, d_ds); end
+        d_dx = _device_input!(inputs, dx)
+        d_dz = dz === nothing ? Ptr{Float64}(C_NULL) : _device_input!(inputs, dz)
+        d_ds = ds === nothing ? Ptr{Float64}(C_NULL) : _device_input!(inputs, ds)
 
         # Allocate device output buffers
         d_dP = Ptr{Float64}(cuda_malloc(nnz_P * sizeof(Float64)))
@@ -1281,7 +1275,8 @@ function _backward_cuda(solver::CompiledSolver, dx, dz, ds)
         d_db = Ptr{Float64}(cuda_malloc(m * sizeof(Float64)))
         push!(device_ptrs, d_db)
 
-        c_moreau_solver_backward(solver, d_dx, d_dz, d_ds, d_dP, d_dA, d_dq, d_db)
+        GC.@preserve inputs c_moreau_solver_backward(
+            solver, d_dx, d_dz, d_ds, d_dP, d_dA, d_dq, d_db)
 
         # Copy results back to host
         dP = _from_device(d_dP, nnz_P)
@@ -1290,6 +1285,9 @@ function _backward_cuda(solver::CompiledSolver, dx, dz, ds)
         db = _from_device(d_db, m)
         return (dP_values=dP, dA_values=dA, dq=dq, db=db)
     finally
+        for (ptr, owner) in inputs
+            _maybe_free_ptr(ptr, owner)
+        end
         for dptr in device_ptrs
             cuda_free(dptr)
         end

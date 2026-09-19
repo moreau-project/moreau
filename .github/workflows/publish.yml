@@ -42,15 +42,9 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
-            --limit 100 --json displayTitle,conclusion,status,url > qa-runs.json
-          python3 - <<'PYQA'
-          import json, os
-          title = "Test Release " + os.environ["RELEASE_TAG"]
-          runs = [run for run in json.load(open("qa-runs.json")) if run["displayTitle"] == title]
-          if not runs or runs[0]["status"] != "completed" or runs[0]["conclusion"] != "success":
-              raise SystemExit("The latest QA run for this release commit must pass before publishing")
-          print("QA passed:", runs[0]["url"])
-          PYQA
+            --limit 100 --json displayTitle,conclusion,status | \
+            jq -e --arg title "Test Release $RELEASE_TAG" \
+              '[.[] | select(.displayTitle == $title)][0] | .status == "completed" and .conclusion == "success"'
 
       - name: Download release assets
         env:
@@ -80,6 +74,25 @@ jobs:
           if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "stable=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - uses: actions/checkout@v4
+        if: steps.version.outputs.stable == 'true'
+        with:
+          repository: JuliaRegistries/General
+          path: general-registry
+          sparse-checkout: |
+            jll/M/Moreau_CPU_jll
+            jll/M/Moreau_CUDA_jll
+            M/Moreau
+      - name: Require the same Julia release in General
+        if: steps.version.outputs.stable == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 scripts/bump_version.py "$VERSION" --pin-dependencies
+          git diff --exit-code
+          bash scripts/check_julia_source.sh dist/moreau-julia-src.tar.gz
+          python3 scripts/check_julia_registry.py general-registry --frontend
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

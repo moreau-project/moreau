@@ -1,0 +1,12 @@
+[deps]
+CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+Moreau = "c8b129f6-74e5-4f0d-b2d8-2ea10d91a548"
+Moreau_CUDA_jll = "c77365f8-1b8a-5c63-97c9-c9362ae64116"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[compat]
+CUDA = "5"
+Moreau_CUDA_jll = "=0.4.0"
+julia = "1.12"

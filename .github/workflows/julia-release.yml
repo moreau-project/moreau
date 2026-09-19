@@ -1,0 +1,134 @@
+name: Julia Release
+run-name: Julia Release ${{ inputs.stage }} ${{ inputs.release_tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Stable Moreau release tag
+        required: true
+        type: string
+      stage:
+        description: 'Prepare JLL PR branches, resume QA, or prepare frontend registration'
+        required: true
+        type: choice
+        options: [prepare-jll-prs, test, prepare-registration]
+      run_gpu_tests:
+        description: Run CUDA 12/13 runtime QA using the configured GPU runners
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: julia-release-${{ inputs.release_tag }}-${{ inputs.stage }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-jll-prs:
+    if: inputs.stage == 'prepare-jll-prs'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [CPU, CUDA]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check submission configuration
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          YGGDRASIL_DEPLOY_KEY: ${{ secrets.YGGDRASIL_DEPLOY_KEY }}
+          YGGDRASIL_FORK: ${{ vars.YGGDRASIL_FORK }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          test -n "$YGGDRASIL_DEPLOY_KEY" || { echo '::error::Set YGGDRASIL_DEPLOY_KEY to the fork repository deploy key'; exit 1; }
+          test -n "$YGGDRASIL_FORK" || { echo '::error::Set YGGDRASIL_FORK to your JuliaPackaging/Yggdrasil fork'; exit 1; }
+          test "${YGGDRASIL_FORK%%/*}" = "$REPO_OWNER" || { echo '::error::The fork must belong to the Moreau organization'; exit 1; }
+          test "$(gh api "repos/$YGGDRASIL_FORK" --jq '.parent.full_name')" = JuliaPackaging/Yggdrasil
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.YGGDRASIL_FORK }}
+          ssh-key: ${{ secrets.YGGDRASIL_DEPLOY_KEY }}
+          path: yggdrasil
+      - name: Push recipe branch and prepare upstream PR link
+        env:
+          YGGDRASIL_FORK: ${{ vars.YGGDRASIL_FORK }}
+          BACKEND: ${{ matrix.backend }}
+        run: bash scripts/prepare_julia_jll_pr.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: julia-jll-pr-${{ matrix.backend }}
+          path: |
+            jll-pr-body.md
+            jll-pr-request.md
+
+  advance:
+    if: inputs.stage != 'prepare-jll-prs'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/checkout@v4
+        with:
+          repository: JuliaRegistries/General
+          path: general-registry
+          sparse-checkout: |
+            jll/M/Moreau_CPU_jll
+            jll/M/Moreau_CUDA_jll
+            M/Moreau
+      - name: Require both matching JLL registrations
+        run: python scripts/check_julia_registry.py general-registry
+      - name: Run release QA
+        if: inputs.stage == 'test'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RUN_GPU_TESTS: ${{ inputs.run_gpu_tests }}
+        run: |
+          gh workflow run test-release.yml --ref "$RELEASE_TAG" \
+            -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"
+      - name: Require successful QA before preparing registration
+        if: inputs.stage == 'prepare-registration'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
+            --limit 100 --json displayTitle,conclusion,status | \
+            jq -e --arg title "Test Release $RELEASE_TAG" \
+              '[.[] | select(.displayTitle == $title)][0] | .status == "completed" and .conclusion == "success"'
+          gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir julia-assets
+          bash scripts/check_julia_source.sh julia-assets/moreau-julia-src.tar.gz
+      - name: Prepare registration comment for the verified commit
+        if: inputs.stage == 'prepare-registration'
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          echo '@JuliaRegistrator register subdir=packages/moreau-julia/Moreau.jl' > registration-body.txt
+          {
+            echo "Post the following comment on https://github.com/$GH_REPO/commit/$(git rev-parse HEAD)."
+            echo 'An eligible Moreau maintainer must post it from their own account.'
+            echo 'This workflow has checked the JLLs, QA, and source archive; it has not requested registration.'
+            echo
+            echo '```text'
+            cat registration-body.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: inputs.stage == 'prepare-registration'
+        with:
+          name: julia-registration-request
+          path: registration-body.txt

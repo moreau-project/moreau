@@ -112,6 +112,16 @@ destroy!(solver)
 
 ## CUDA Support
 
+Install and load `Moreau_CUDA_jll` to enable the packaged CUDA backend.
+It uses the runtime selected by CUDA.jl and requires the same native release
+version as Moreau.jl. CPU-only installations use `Moreau_CPU_jll`.
+
+```julia
+import Pkg
+Pkg.add("Moreau_CUDA_jll")
+using Moreau, Moreau_CUDA_jll
+```
+
 Moreau automatically selects the best device when `device=:auto` (default). You can also force a specific device:
 
 ```julia

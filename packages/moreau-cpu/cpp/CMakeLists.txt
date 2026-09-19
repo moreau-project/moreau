@@ -22,6 +22,10 @@ target_include_directories(moreau_active_set PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+if(MSVC)
+    target_compile_options(moreau_active_set PRIVATE /EHsc)
+endif()
+
 find_package(Threads REQUIRED)
 target_link_libraries(moreau_active_set PUBLIC Threads::Threads)
 

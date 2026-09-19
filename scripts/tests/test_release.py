@@ -14,53 +14,13 @@ limitations under the License.
 
 Regression tests for release versioning and wheel metadata validation."""
 
-import importlib.util
 import io
-import pathlib
-import shutil
 import tarfile
 import zipfile
 
+import bump_version as bump
 import pytest
-
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-
-
-def load_script(name):
-    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-bump = load_script("bump_version")
-validate = load_script("validate_release_wheels")
-
-
-@pytest.fixture
-def release_tree(tmp_path):
-    paths = [
-        "pyproject.toml",
-        "uv.lock",
-        "packages/moreau-cpu/Cargo.toml",
-        "packages/moreau-cpu/Cargo.lock",
-        "packages/moreau-cuda/bindings/moreau_bindings.cpp",
-        "packages/moreau-cuda/src/solver/info.cpp",
-        "packages/moreau-cuda/src/solver/solver.cpp",
-        "docs/conf.py",
-        "docs/_static/custom.css",
-        "docs/installation.md",
-        "docs/guide/testing-diagnostics.md",
-    ]
-    for package in ["moreau", "moreau-cpu", "moreau-cuda"]:
-        paths.append(f"packages/{package}/pyproject.toml")
-        prefix = "" if package == "moreau-cuda" else "python/"
-        paths.append(f"packages/{package}/{prefix}{package.replace('-', '_')}/__init__.py")
-    for path in paths:
-        dest = tmp_path / path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ROOT / path, dest)
-    return tmp_path
+import validate_release_wheels as validate
 
 
 def snapshot(root):
@@ -75,23 +35,42 @@ def test_beta_to_stable_and_idempotence(release_tree):
     bump.bump_version(release_tree, "0.4.0")
     stable = snapshot(release_tree)
     assert all("0.4.0-beta.1" not in text and "0.4.0b1" not in text for text in stable.values())
+    for package in ("Moreau.jl", "MoreauTests.jl"):
+        assert 'version = "0.4.0"' in stable[f"packages/moreau-julia/{package}/Project.toml"]
     assert 'content: "v0.4.0"' in stable["docs/_static/custom.css"]
     assert 'moreau-cpu>=0.4.0"' in stable["packages/moreau/pyproject.toml"]
     bump.bump_version(release_tree, "0.4.0")
     assert snapshot(release_tree) == stable
 
 
-@pytest.mark.parametrize("version", ["0.4.0.dev20260904", "0.4.0-beta.2.dev20260904"])
-def test_dev_versions_and_exact_dependencies(release_tree, version):
+@pytest.mark.parametrize("version", ["1.2.3", "1.2.3-beta.4", "1.2.3.dev1", "1.2.3-beta.4.dev1"])
+def test_versions_and_exact_dependencies(release_tree, version):
     bump.bump_version(release_tree, version, pin_dependencies=True)
     files = snapshot(release_tree)
-    assert (
-        f'version = "{version.replace(".dev", "-dev")}"' in files["packages/moreau-cpu/Cargo.toml"]
-    )
+    native_version = version.replace(".dev", "-dev")
+    for path in (
+        "packages/moreau-cpu/Cargo.toml",
+        "packages/moreau-julia/Moreau.jl/Project.toml",
+        "packages/moreau-julia/MoreauTests.jl/Project.toml",
+    ):
+        assert f'version = "{native_version}"' in files[path]
     assert f'moreau-cpu=={version}"' in files["packages/moreau/pyproject.toml"]
     assert f'moreau=={version}"' in files["packages/moreau-cuda/pyproject.toml"]
     assert f'__version__ = "{version}"' in files["packages/moreau-cuda/moreau_cuda/__init__.py"]
     assert f'MOREAU_VERSION = "{version}"' in files["packages/moreau-cuda/src/solver/info.cpp"]
+    for backend in ("CPU", "CUDA"):
+        assert (
+            f'Moreau_{backend}_jll = "=1.2.3"'
+            in files["packages/moreau-julia/Moreau.jl/Project.toml"]
+        )
+        recipe = files[f"packaging/yggdrasil/M/Moreau/Moreau_{backend}/build_tarballs.jl"]
+        assert f'version = v"{native_version}"' in recipe
+        if backend == "CUDA":
+            assert f"-DMOREAU_VERSION={version}" in recipe
+    assert (
+        'Moreau_CUDA_jll = "=1.2.3"'
+        in files["packages/moreau-julia/Moreau.jl/test/cuda/Project.toml"]
+    )
 
 
 def test_invalid_version_does_not_modify_files(release_tree):
@@ -144,7 +123,8 @@ def test_incomplete_release_matrix_is_rejected(tmp_path):
         validate.release_version([wheel(tmp_path, "moreau", "0.4.0")], require_complete=True)
 
 
-def complete_matrix(tmp_path):
+@pytest.fixture
+def wheels(tmp_path):
     wheels = [wheel(tmp_path, "moreau", "0.4.0")]
     for platform in ["manylinux_2_28_x86_64", "manylinux_2_28_aarch64", "macosx_11_0_arm64"]:
         wheels.append(wheel(tmp_path, "moreau_cpu", "0.4.0", platform))
@@ -154,8 +134,8 @@ def complete_matrix(tmp_path):
     return wheels
 
 
-def test_complete_release_matrix_is_accepted(tmp_path):
-    assert validate.release_version(complete_matrix(tmp_path), require_complete=True) == "0.4.0"
+def test_complete_release_matrix_is_accepted(wheels):
+    assert validate.release_version(wheels, require_complete=True) == "0.4.0"
 
 
 def test_wheel_filename_metadata_mismatch_is_rejected(tmp_path):
@@ -166,24 +146,21 @@ def test_wheel_filename_metadata_mismatch_is_rejected(tmp_path):
 
 
 @pytest.mark.parametrize("abi", [("cp312", "cp312"), ("cp310", "abi3")])
-def test_incorrect_cpu_abi_is_rejected(tmp_path, abi):
-    wheels = complete_matrix(tmp_path)
+def test_incorrect_cpu_abi_is_rejected(tmp_path, wheels, abi):
     wheels[1].unlink()
     wheels[1] = wheel(tmp_path, "moreau_cpu", "0.4.0", "manylinux_2_28_x86_64", abi=abi)
     with pytest.raises(ValueError, match="platform/ABI"):
         validate.release_version(wheels, require_complete=True)
 
 
-def test_duplicate_architecture_cannot_mask_missing_wheel(tmp_path):
-    wheels = complete_matrix(tmp_path)
+def test_duplicate_architecture_cannot_mask_missing_wheel(wheels):
     # Keep eight wheels, but replace the macOS CPU wheel with another Linux wheel.
     wheels[-1] = wheels[1]
     with pytest.raises(ValueError, match="platform/ABI"):
         validate.release_version(wheels, require_complete=True)
 
 
-def test_release_backend_dependencies_must_be_exact(tmp_path):
-    wheels = complete_matrix(tmp_path)
+def test_release_backend_dependencies_must_be_exact(tmp_path, wheels):
     wheels[0] = wheel(tmp_path, "moreau", "0.4.0", pinned=False)
     with pytest.raises(ValueError, match="must be pinned"):
         validate.release_version(wheels, require_complete=True)
@@ -227,8 +204,7 @@ def test_c_archive_requires_header(c_archives):
         validate.validate_c_libraries(c_archives)
 
 
-def test_wheel_tag_metadata_must_match_filename(tmp_path):
-    wheels = complete_matrix(tmp_path)
+def test_wheel_tag_metadata_must_match_filename(tmp_path, wheels):
     wheels[1] = wheels[1].rename(tmp_path / "moreau_cpu-0.4.0-cp310-abi3-manylinux_2_28_x86_64.whl")
     with pytest.raises(ValueError, match="WHEEL tags disagree"):
         validate.release_version(wheels, require_complete=True)

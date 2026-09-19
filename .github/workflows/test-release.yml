@@ -184,7 +184,7 @@ jobs:
   qa-coverage:
     name: QA coverage
     if: always()
-    needs: [test-gpu, test-cpu-macos, test-cpu-linux, test-julia]
+    needs: [test-gpu, test-cpu-macos, test-cpu-linux, julia-release-info, test-julia, test-julia-native]
     runs-on: ubuntu-latest
     steps:
       - name: Record tested platforms
@@ -194,13 +194,14 @@ jobs:
           MACOS_RESULT: ${{ needs.test-cpu-macos.result }}
           LINUX_RESULT: ${{ needs.test-cpu-linux.result }}
           JULIA_RESULT: ${{ needs.test-julia.result }}
+          JULIA_NATIVE_RESULT: ${{ needs.test-julia-native.result }}
         run: |
-          echo "ChatGPT generated:" >> "$GITHUB_STEP_SUMMARY"
           echo "| Validation | Result |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Linux CPU wheels | $LINUX_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           echo "| macOS CPU wheels | $MACOS_RESULT |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Julia CPU artifacts | $JULIA_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Julia registered JLL matrix | $JULIA_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Julia prerelease native CPU | $JULIA_NATIVE_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           if [ "$GPU_REQUESTED" = "true" ]; then
             echo "| CUDA 12/13 runtime | $GPU_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -322,8 +323,60 @@ jobs:
           pytest packages/moreau/tests/python/ packages/moreau-cpu/tests/python/ \
             --device=cpu -v --tb=short -rs
 
-  # Julia tests: resolve native libraries through the release artifact manifest.
+  julia-release-info:
+    runs-on: ubuntu-latest
+    outputs:
+      stable: ${{ steps.version.outputs.stable }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read and validate released Julia source
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir julia-assets
+          python - <<'PYINFO'
+          import os, re, tarfile, tomllib
+          with tarfile.open("julia-assets/moreau-julia-src.tar.gz") as archive:
+              version = tomllib.loads(archive.extractfile("Moreau.jl/Project.toml").read().decode())["version"]
+          stable = bool(re.fullmatch(r"\d+\.\d+\.\d+", version))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"stable={str(stable).lower()}\n")
+          PYINFO
+      - name: Require exact tagged Julia source for stable releases
+        if: steps.version.outputs.stable == 'true'
+        run: bash scripts/check_julia_source.sh julia-assets/moreau-julia-src.tar.gz
+      - uses: actions/checkout@v4
+        if: steps.version.outputs.stable == 'true'
+        with:
+          repository: JuliaRegistries/General
+          path: general-registry
+          sparse-checkout: |
+            jll/M/Moreau_CPU_jll
+            jll/M/Moreau_CUDA_jll
+      - name: Require registered release dependencies
+        if: steps.version.outputs.stable == 'true'
+        run: python scripts/check_julia_registry.py general-registry
+
   test-julia:
+    needs: julia-release-info
+    if: needs.julia-release-info.outputs.stable == 'true'
+    uses: ./.github/workflows/julia.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+      run_gpu_tests: ${{ inputs.run_gpu_tests }}
+
+  # Prereleases use their real native C artifact; temporary dependency shims
+  # avoid trying to register development versions in General.
+  test-julia-native:
+    needs: julia-release-info
+    if: needs.julia-release-info.outputs.stable != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -354,21 +407,28 @@ jobs:
         with:
           version: '1.12'
 
+      - name: Prepare prerelease native dependency
+        run: |
+          mkdir native-lib
+          tar xzf dist-all/moreau-cpu-linux-x86_64.tar.gz -C native-lib
+          julia scripts/julia_native_fixture.jl julia-src/Moreau.jl \
+            native-qa/Moreau_CPU_jll native-lib/lib/libmoreau_cpu.so
+
       - name: Run Julia tests
         run: |
-          # Run Moreau.jl tests using its own Project.toml as the environment
-          # and let Artifacts.toml resolve the released CPU binary.
+          # Test the actual prerelease CPU artifact, including its native version check.
           julia --project=julia-src/Moreau.jl -e '
             using Pkg
             Pkg.Registry.add("General")
+            Pkg.develop(path="native-qa/Moreau_CPU_jll")
             Pkg.resolve()
-            Pkg.test()
+            Pkg.test(julia_args=["--compile=min"])
           '
 
           # Use the same released package for the internal integration tests.
           julia --project=packages/moreau-julia/MoreauTests.jl -e '
             using Pkg
-            Pkg.develop(path="julia-src/Moreau.jl")
+            Pkg.develop([PackageSpec(path="julia-src/Moreau.jl"), PackageSpec(path="native-qa/Moreau_CPU_jll")])
             Pkg.resolve()
-            Pkg.test()
+            Pkg.test(julia_args=["--compile=min"])
           '

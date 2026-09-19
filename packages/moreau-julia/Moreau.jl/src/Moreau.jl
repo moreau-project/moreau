@@ -1,13 +1,12 @@
 module Moreau
 
-import Artifacts
-import LazyArtifacts
+import Moreau_CPU_jll
 import MathOptInterface as MOI
 import SparseArrays: SparseMatrixCSC, sparse, findnz, nnz, spzeros
 import LinearAlgebra: Diagonal, diag, dot
 import Libdl
 
-include("artifacts.jl")
+include("libraries.jl")
 include("cuda_mem.jl")
 include("c_wrapper.jl")
 include("MOI_wrapper.jl")
