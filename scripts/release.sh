@@ -36,7 +36,7 @@ case "$stage" in
             -F "inputs[run_gpu_tests]=$gpu_tests"
         ;;
     gpu)
-        python "$root/scripts/test_release_gpu.py" "$tag" "$@"
+        bash "$root/scripts/test_release_gpu.sh" "$tag" "$@"
         ;;
     jll-prs|register)
         if [[ $stage == jll-prs ]]; then action=prepare-jll-prs; else action=prepare-registration; fi
