@@ -8,5 +8,5 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 CUDA = "5"
-Moreau_CUDA_jll = "=0.4.0"
+Moreau_CUDA_jll = "=0.4.1"
 julia = "1.12"
