@@ -111,6 +111,9 @@ jobs:
 
   cuda:
     if: inputs.release_tag != ''
+    permissions:
+      contents: read
+      statuses: write
     name: CUDA ${{ matrix.cuda }} / ${{ inputs.run_gpu_tests && 'runtime' || 'load' }}
     runs-on: ${{ inputs.run_gpu_tests && matrix.gpu_runner || 'ubuntu-latest' }}
     strategy:
@@ -137,3 +140,23 @@ jobs:
           REQUIRE_GPU: ${{ inputs.run_gpu_tests && 'true' || 'false' }}
         run: |
           julia --startup-file=no scripts/test_release_gpu_julia.jl "$PWD" "$CUDA_VERSION" "$REQUIRE_GPU"
+      - name: Record GPU result on the release commit
+        if: always() && inputs.run_gpu_tests
+        uses: actions/github-script@v9
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CUDA_VERSION: ${{ matrix.cuda }}
+          RESULT: ${{ job.status }}
+        with:
+          script: |
+            const {data: {sha}} = await github.rest.repos.getCommit({
+              ...context.repo, ref: process.env.RELEASE_TAG,
+            });
+            const cuda = process.env.CUDA_VERSION.split('.')[0];
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha,
+              state: process.env.RESULT === 'cancelled' ? 'error' : process.env.RESULT,
+              context: `release-gpu/cuda${cuda}/julia`,
+              description: `Actions x86_64 CUDA ${cuda} Julia tests: ${process.env.RESULT}`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });

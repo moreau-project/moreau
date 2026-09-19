@@ -29,6 +29,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      statuses: write
     uses: ./.github/workflows/test-gpu-wheels.yml
     with:
       release_tag: ${{ inputs.release_tag }}
@@ -215,6 +216,9 @@ jobs:
   test-julia:
     needs: julia-release-info
     if: needs.julia-release-info.outputs.stable == 'true'
+    permissions:
+      contents: read
+      statuses: write
     uses: ./.github/workflows/julia.yml
     with:
       release_tag: ${{ inputs.release_tag }}

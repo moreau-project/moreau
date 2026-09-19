@@ -12,10 +12,6 @@ on:
         type: string
         default: ''
 
-permissions:
-  contents: read
-  actions: read
-
 jobs:
   test:
     runs-on: ${{ matrix.runner }}
@@ -106,3 +102,23 @@ jobs:
               bash /source/scripts/test_gpu_wheels.sh /source/wheels \
                 --cuda "$CUDA_MAJOR" --work-dir /tmp/wheel-qa
             '
+
+      - name: Record GPU result on the release commit
+        if: always() && inputs.release_tag != ''
+        uses: actions/github-script@v9
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CUDA_MAJOR: ${{ matrix.cuda }}
+          RESULT: ${{ job.status }}
+        with:
+          script: |
+            const {data: {sha}} = await github.rest.repos.getCommit({
+              ...context.repo, ref: process.env.RELEASE_TAG,
+            });
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha,
+              state: process.env.RESULT === 'cancelled' ? 'error' : process.env.RESULT,
+              context: `release-gpu/cuda${process.env.CUDA_MAJOR}/python`,
+              description: `Actions x86_64 CUDA ${process.env.CUDA_MAJOR} Python tests: ${process.env.RESULT}`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
