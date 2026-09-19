@@ -64,7 +64,7 @@ jobs:
 
     # Cache ccache directory for faster incremental builds
     - name: Cache ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ github.workspace }}/.ccache
         key: ccache-cuda-${{ hashFiles('packages/moreau-cuda/src/**', 'packages/moreau-cuda/include/**', 'packages/moreau-cuda/CMakeLists.txt') }}
@@ -160,7 +160,7 @@ jobs:
 
     # Cache Rust/Cargo for faster CPU package builds
     - name: Cache Cargo
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           .cargo-cache/registry
