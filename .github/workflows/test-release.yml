@@ -39,6 +39,9 @@ jobs:
     if: always()
     needs: [test-gpu, test-cpu-macos, test-cpu-linux]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
     steps:
       - name: Record tested platforms
         env:
@@ -56,6 +59,29 @@ jobs:
           else
             echo "| CUDA 12/13 runtime | Not run (GPU testing not requested) |" >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Record Python QA result on the release commit
+        if: always()
+        uses: actions/github-script@v9
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GPU_REQUESTED: ${{ inputs.run_gpu_tests }}
+          NEEDS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const needs = JSON.parse(process.env.NEEDS);
+            const results = [needs['test-cpu-macos'].result, needs['test-cpu-linux'].result];
+            if (process.env.GPU_REQUESTED === 'true') results.push(needs['test-gpu'].result);
+            const state = results.every(result => result === 'success') ? 'success'
+              : results.includes('cancelled') ? 'error' : 'failure';
+            const {data: {sha}} = await github.rest.repos.getCommit({
+              ...context.repo, ref: process.env.RELEASE_TAG,
+            });
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha, state,
+              context: 'release-qa/python',
+              description: `Python release QA: ${state}`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
 
   # macOS CPU tests
   test-cpu-macos:
