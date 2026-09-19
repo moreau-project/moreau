@@ -71,6 +71,8 @@ uv pip install --python "$python" "jax[cuda$cuda]" pytest numpy scipy hypothesis
 import moreau
 import torch
 import jax
+import numpy as np
+from scipy import sparse
 from moreau.torch import Solver
 from moreau_cuda.jax import ffi_available
 
@@ -78,6 +80,12 @@ assert moreau.device_available("cuda"), moreau.device_error("cuda")
 assert torch.cuda.is_available(), "PyTorch CUDA is unavailable"
 assert jax.default_backend() == "gpu", "JAX CUDA is unavailable"
 assert ffi_available(), "Moreau JAX FFI extension is unavailable"
+solver = moreau.Solver(
+    sparse.eye(1, format="csr"), q=np.array([-1.0]),
+    A=sparse.eye(1, format="csr"), b=np.array([2.0]),
+    cones=moreau.Cones(num_nonneg_cones=1), settings=moreau.Settings(device="cuda"),
+)
+np.testing.assert_allclose(solver.solve().x, [1.0], atol=1e-5)
 PY
 
 # Separate processes release GPU memory between files. Run every file even if
