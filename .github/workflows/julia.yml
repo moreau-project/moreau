@@ -44,7 +44,8 @@ jobs:
           - os: ubuntu-24.04-arm
             arch: aarch64
             library: libmoreau.so
-          - os: windows-latest
+          # Cargo.lock's cmake crate supports Visual Studio 2022, not 2026.
+          - os: windows-2022
             arch: x64
             library: moreau.dll
           - os: macos-15-intel
