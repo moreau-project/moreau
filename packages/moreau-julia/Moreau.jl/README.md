@@ -15,7 +15,7 @@ Pkg.add("Moreau")
 
 The CPU library is provided by `Moreau_CPU_jll`, built from source through
 Yggdrasil. Its build matrix includes 64-bit glibc and musl Linux (x86-64 and
-ARM64), macOS (Intel and Apple Silicon), and x86-64 Windows.
+ARM64), macOS (Apple Silicon), and x86-64 Windows.
 
 Moreau.jl and the native solver use the same release version. Moreau.jl 0.4.0
 requires native Moreau 0.4.0. The JLL compatibility bounds pin that version;

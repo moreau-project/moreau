@@ -22,7 +22,7 @@ the former hand-maintained JLL repositories. A JLL suffix such as `+0` is a
 binary rebuild number for the same native release. Moreau.jl pins the native
 release in its JLL compatibility bounds and checks the loaded library's version.
 
-The CPU recipe targets x86-64 and ARM64 glibc/musl Linux, Intel/Apple Silicon
+The CPU recipe targets x86-64 and ARM64 glibc/musl Linux, Apple Silicon
 macOS, and x86-64 Windows. It retains the native default features, including
 FAER and the active-set solver. The native build selects the C++ runtime for the **target** platform when
 cross-compiling.

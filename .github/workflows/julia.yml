@@ -48,9 +48,6 @@ jobs:
           - os: windows-2022
             arch: x64
             library: moreau.dll
-          - os: macos-15-intel
-            arch: x64
-            library: libmoreau.dylib
           - os: macos-14
             arch: aarch64
             library: libmoreau.dylib
