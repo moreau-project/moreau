@@ -354,7 +354,6 @@ class TestChainedSolveFiniteDiff:
 try:
     import jax
 
-    jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
     from moreau.jax import Solver as JaxSolver
 

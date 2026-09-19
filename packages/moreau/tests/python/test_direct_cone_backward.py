@@ -434,7 +434,6 @@ def test_cuda_jax_fallback_duals_and_gradients(monkeypatch, direct, batched):
         pytest.skip("CUDA not available")
     from moreau.jax import Solver
 
-    jax.config.update("jax_enable_x64", True)
     monkeypatch.setattr(cuda_solver, "_get_ffi_lib", lambda: None)
     monkeypatch.setattr(cuda_solver, "ffi_available", lambda: False)
     cones = moreau.Cones(

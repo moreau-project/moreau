@@ -13,10 +13,6 @@ import pytest
 import numpy as np
 
 jax = pytest.importorskip("jax")
-
-# Enable 64-bit mode for JAX (required for the solver)
-jax.config.update("jax_enable_x64", True)
-
 jnp = pytest.importorskip("jax.numpy")
 
 import moreau
@@ -100,6 +96,82 @@ def make_simple_qp():
     cones = moreau.Cones(num_zero_cones=1)
 
     return n, m, P_row_offsets, P_col_indices, A_row_offsets, A_col_indices, cones
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize(
+    "dtypes",
+    [
+        (jnp.float32,) * 4,
+        (jnp.float64,) * 4,
+        (jnp.float32, jnp.float64, jnp.float32, jnp.float64),
+        (jnp.float64, jnp.float32, jnp.float64, jnp.float32),
+    ],
+    ids=["float32", "float64", "mixed-Pq32", "mixed-Ab32"],
+)
+@pytest.mark.parametrize("mode", ["eager", "jit", "vmap"])
+def test_cpu_gradient_input_dtypes(dtypes, mode):
+    """Cotangents match input dtypes, including when another path contributes."""
+    solver = Solver(*make_simple_qp(), moreau.Settings(device="cpu", solver="ipm"))
+    solve = solver._impl.solve
+
+    def loss(P, A, q, b):
+        solution, _ = solve(P, A, q, b)
+        # Accumulate native cotangents with ordinary JAX cotangents of each
+        # input's dtype, as happens in a composed differentiable model.
+        return solution.x @ jnp.array([0.7, -1.2]) + 0.1 * sum(jnp.sum(v * v) for v in (P, A, q, b))
+
+    def reference(P, A, q, b):
+        regularizer = 0.1 * sum(jnp.sum(v * v) for v in (P, A, q, b))
+        P, A, q, b = (jnp.asarray(v, dtype=jnp.float64) for v in (P, A, q, b))
+        free = -q / P
+        dual = (A @ free - b[0]) / jnp.sum(A * A / P)
+        x = free - A / P * dual
+        return x @ jnp.array([0.7, -1.2]) + regularizer
+
+    inputs = tuple(
+        jnp.array(values, dtype=dtype)
+        for values, dtype in zip(([2.0, 3.0], [1.0, 2.0], [0.4, -0.2], [0.8]), dtypes)
+    )
+    actual_fn = jax.value_and_grad(loss, argnums=(0, 1, 2, 3))
+    expected_fn = jax.value_and_grad(reference, argnums=(0, 1, 2, 3))
+    if mode == "jit":
+        actual_fn = jax.jit(actual_fn)
+    elif mode == "vmap":
+        actual_fn = jax.jit(jax.vmap(actual_fn))
+        expected_fn = jax.vmap(expected_fn)
+        inputs = tuple(jnp.stack([v, 1.2 * v]) for v in inputs)
+
+    value, grads = actual_fn(*inputs)
+    expected_value, expected_grads = expected_fn(*inputs)
+    np.testing.assert_allclose(value, expected_value, rtol=2e-5, atol=2e-6)
+    for arg, grad, expected in zip(inputs, grads, expected_grads):
+        assert grad.dtype == arg.dtype
+        assert grad.shape == arg.shape
+        np.testing.assert_allclose(grad, expected, rtol=2e-5, atol=2e-6)
+
+
+@pytest.mark.cpu_only
+def test_cpu_inputs_created_before_solver():
+    """Default-precision arrays remain differentiable after solver construction."""
+    previous_x64 = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", False)
+    try:
+        P = jnp.array([2.0, 2.0])
+        A = jnp.array([1.0, 1.0])
+        q = jnp.array([0.4, -0.2])
+        b = jnp.array([0.8])
+        assert q.dtype == jnp.float32
+        solver = Solver(*make_simple_qp(), moreau.Settings(device="cpu", solver="ipm"))
+
+        def loss(q):
+            return solver.solve(P, A, q, b).x[0] + jnp.sum(q * q)
+
+        grad = jax.jit(jax.grad(loss))(q)
+        assert grad.dtype == q.dtype
+        np.testing.assert_allclose(grad, jnp.array([-0.25, 0.25]) + 2 * q, atol=1e-6)
+    finally:
+        jax.config.update("jax_enable_x64", previous_x64)
 
 
 def make_inequality_qp():

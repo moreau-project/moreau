@@ -639,6 +639,12 @@ def _solve_cpu(
     b: jnp.ndarray,
 ) -> Tuple[JaxSolution, JaxSolveInfo]:
     """Solve conic QP on CPU. Returns (JaxSolution, JaxSolveInfo) tuple."""
+    # The native VJP computes float64 cotangents. Cast outside custom_vjp so
+    # JAX transposes these conversions back to each caller input's dtype.
+    P_data = jnp.asarray(P_data, dtype=jnp.float64)
+    A_data = jnp.asarray(A_data, dtype=jnp.float64)
+    q = jnp.asarray(q, dtype=jnp.float64)
+    b = jnp.asarray(b, dtype=jnp.float64)
     x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time = (
         _solve_cpu_raw(solver_id, P_data, A_data, q, b)
     )

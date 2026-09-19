@@ -2349,7 +2349,6 @@ class TestMixedConesWithSOCBackward:
 try:
     import jax
 
-    jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
     from moreau.jax import Solver as JaxSolver
     from moreau._backend import jax_available as _jax_available
