@@ -216,7 +216,7 @@ jobs:
         with:
           ref: ${{ inputs.release_tag }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -240,7 +240,7 @@ jobs:
           echo "=== Wrapper wheels ===" && ls -la dist-wrapper/
 
       - name: Set up Python 3.9, 3.13, and 3.14 for abi3 tests
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: |
             3.9
@@ -294,7 +294,7 @@ jobs:
         with:
           ref: ${{ inputs.release_tag }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 
@@ -331,7 +331,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Read and validate released Julia source
