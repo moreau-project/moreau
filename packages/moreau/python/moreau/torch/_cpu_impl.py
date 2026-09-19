@@ -655,6 +655,7 @@ class _TorchSolverCpu:
                 "r_prim": result["r_prim"].unsqueeze(0),
                 "r_dual": result["r_dual"].unsqueeze(0),
                 "solve_time": result["solve_time"],
+                "_backward_state": result.get("_backward_state"),
             }
 
         # Use shared P/A optimization when matrices are 1D
