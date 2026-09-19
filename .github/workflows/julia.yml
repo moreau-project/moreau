@@ -84,22 +84,14 @@ jobs:
       - name: Test package and internal integration suite
         shell: bash
         run: |
-          julia --project="$JULIA_PROJECT" -e 'using Pkg; Pkg.instantiate(); Pkg.test(coverage=true)'
+          julia --project="$JULIA_PROJECT" -e 'using Pkg; Pkg.instantiate(); Pkg.test(julia_args=["--compile=min"])'
           julia --project=packages/moreau-julia/MoreauTests.jl -e '
             using Pkg
             specs = [PackageSpec(path=ENV["JULIA_PROJECT"])]
             isdir("native-qa/Moreau_CPU_jll") && push!(specs, PackageSpec(path="native-qa/Moreau_CPU_jll"))
             Pkg.develop(specs)
-            Pkg.test()
+            Pkg.test(julia_args=["--compile=min"])
           '
-      - uses: julia-actions/julia-processcoverage@v1
-        with:
-          directories: packages/moreau-julia/Moreau.jl/src,packages/moreau-julia/Moreau.jl/ext
-      - uses: actions/upload-artifact@v4
-        with:
-          name: julia-coverage-${{ matrix.os }}
-          path: lcov.info
-          if-no-files-found: error
 
   musl:
     if: inputs.release_tag != ''
@@ -115,7 +107,7 @@ jobs:
       - name: Test registered musl CPU JLL
         run: |
           docker run --rm -v "$PWD:/work" -w /work julia:1.12-alpine \
-            julia --project=packages/moreau-julia/Moreau.jl -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+            julia --project=packages/moreau-julia/Moreau.jl -e 'using Pkg; Pkg.instantiate(); Pkg.test(julia_args=["--compile=min"])'
 
   cuda:
     if: inputs.release_tag != ''

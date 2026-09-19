@@ -422,7 +422,7 @@ jobs:
             Pkg.Registry.add("General")
             Pkg.develop(path="native-qa/Moreau_CPU_jll")
             Pkg.resolve()
-            Pkg.test()
+            Pkg.test(julia_args=["--compile=min"])
           '
 
           # Use the same released package for the internal integration tests.
@@ -430,5 +430,5 @@ jobs:
             using Pkg
             Pkg.develop([PackageSpec(path="julia-src/Moreau.jl"), PackageSpec(path="native-qa/Moreau_CPU_jll")])
             Pkg.resolve()
-            Pkg.test()
+            Pkg.test(julia_args=["--compile=min"])
           '
