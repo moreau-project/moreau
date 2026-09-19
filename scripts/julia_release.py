@@ -141,7 +141,7 @@ def check_qa(runs: list[dict], tag: str) -> None:
 
 
 def registration_body() -> str:
-    return f"ChatGPT generated:\n\n@JuliaRegistrator register subdir={PACKAGE.as_posix()}\n"
+    return f"@JuliaRegistrator register subdir={PACKAGE.as_posix()}\n"
 
 
 def check_source(root: pathlib.Path, archive_path: pathlib.Path) -> None:

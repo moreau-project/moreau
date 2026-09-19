@@ -283,6 +283,6 @@ def test_yggdrasil_pr_preparation_only_pushes_to_fork(source, tmp_path, monkeypa
     assert f"JuliaPackaging/Yggdrasil/compare/master...example:{branch}?expand=1" in request
     assert "it did not open an upstream PR" in request
     assert summary.read_text() == request * 2
-    assert (source / "jll-pr-body.md").read_text().startswith("ChatGPT generated:\n")
+    assert (source / "jll-pr-body.md").read_text().startswith("Build Moreau_CPU ")
     recipe = source / "yggdrasil/M/Moreau/Moreau_CPU/build_tarballs.jl"
     assert release.git(source, "rev-parse", "HEAD") in recipe.read_text()

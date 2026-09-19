@@ -22,13 +22,11 @@ mkdir -p "yggdrasil/$recipe"
 cp -a "julia-handoff/yggdrasil/$recipe/." "yggdrasil/$recipe/"
 git -C yggdrasil add "$recipe"
 if ! git -C yggdrasil diff --cached --quiet; then
-    git -C yggdrasil commit -m "ChatGPT generated: build Moreau_${BACKEND} ${version}"
+    git -C yggdrasil commit -m "Build Moreau_${BACKEND} ${version}"
     git -C yggdrasil push origin "HEAD:refs/heads/$branch"
 fi
 
 cat > jll-pr-body.md <<EOF
-ChatGPT generated:
-
 Build Moreau_${BACKEND} ${version} from moreau-project/moreau commit ${commit}.
 The native solver and Julia frontend share this release version. The recipe
 is prepared by the monorepo release workflow; Yggdrasil supplies the source
@@ -36,8 +34,6 @@ builds, audits, generated JLL package, and registration.
 EOF
 compare="https://github.com/JuliaPackaging/Yggdrasil/compare/master...${fork_owner}:${branch}?expand=1"
 cat > jll-pr-request.md <<EOF
-ChatGPT generated:
-
 Open the [Moreau_${BACKEND} ${version} pull request](${compare}) in your browser.
 Use the title **Moreau_${BACKEND} v${version}** and the body below.
 If a pull request already exists for this branch, use that existing request.

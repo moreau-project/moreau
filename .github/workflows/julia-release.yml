@@ -120,8 +120,6 @@ jobs:
         run: |
           python scripts/julia_release.py registration-body > registration-body.txt
           {
-            echo 'ChatGPT generated:'
-            echo
             echo "Post the following comment on https://github.com/$GH_REPO/commit/$(git rev-parse HEAD)."
             echo 'An eligible Moreau maintainer must post it from their own account.'
             echo 'This workflow has checked the JLLs, QA, and source archive; it has not requested registration.'

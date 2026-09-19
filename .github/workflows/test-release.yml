@@ -196,7 +196,6 @@ jobs:
           JULIA_RESULT: ${{ needs.test-julia.result }}
           JULIA_NATIVE_RESULT: ${{ needs.test-julia-native.result }}
         run: |
-          echo "ChatGPT generated:" >> "$GITHUB_STEP_SUMMARY"
           echo "| Validation | Result |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Linux CPU wheels | $LINUX_RESULT |" >> "$GITHUB_STEP_SUMMARY"

@@ -333,8 +333,6 @@ jobs:
             dist/*.tar.gz
             dist/moreau-manifest.json
           body: |
-            ChatGPT generated:
-
             ## Moreau C API Libraries v${{ needs.resolve-version.outputs.version }}
 
             ### Artifacts

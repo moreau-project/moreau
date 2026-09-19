@@ -589,8 +589,6 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: dist-release/*
           body: |
-            ChatGPT generated:
-
             ## Release from commit ${{ github.sha }}
 
             ### Python Wheels
@@ -651,7 +649,7 @@ jobs:
           if [ "$STABLE" = true ]; then
             gh workflow run julia-release.yml --ref "$RELEASE_TAG" \
               -f "release_tag=$RELEASE_TAG" -f stage=prepare-jll-prs
-            echo 'ChatGPT generated: JLL branch preparation dispatched. Open the upstream PRs using its summary links. After both JLLs register, run Julia Release with stage=test.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'JLL branch preparation dispatched. Open the upstream PRs using its summary links. After both JLLs register, run Julia Release with stage=test.' >> "$GITHUB_STEP_SUMMARY"
           else
             gh workflow run test-release.yml --ref "$RELEASE_TAG" \
               -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"
