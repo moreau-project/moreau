@@ -12,12 +12,19 @@ parallel source repositories for them.
 ## One-time GitHub configuration
 
 - Enable the Registrator GitHub app on `moreau-project/moreau`.
-- Set `YGGDRASIL_FORK` to a writable fork of `JuliaPackaging/Yggdrasil`, for example
-  `moreau-project/Yggdrasil` if that fork has been created.
-- Set the `JULIA_RELEASE_TOKEN` secret to a release maintainer's token with access
-  to push branches in that fork, open Yggdrasil PRs, and comment on Moreau commits.
+- Create a fork of `JuliaPackaging/Yggdrasil` under `moreau-project`, and set
+  `YGGDRASIL_FORK` to its full name, such as `moreau-project/Yggdrasil`.
+- Create a **fine-grained** personal access token with resource owner
+  `moreau-project`, repository access limited to `moreau` and that fork, and
+  **Contents: Read and write**. Save it as `JULIA_RELEASE_TOKEN`. This permits
+  pushing recipe branches to the fork and commenting on Moreau commits; it does
+  not grant write access to other repositories. No classic token or `public_repo`
+  scope is needed. Approve the token in the organization if its policy requires it.
   The Registrator caller must be an eligible Moreau collaborator or public
-  organization member. The workflow never replies to the General review PR.
+  organization member.
+- A maintainer opens the upstream Yggdrasil PRs using the comparison links and
+  prepared text from the workflow. The token cannot write to
+  `JuliaPackaging/Yggdrasil`, and the workflow never attempts that operation.
 - Keep the existing PyPI trusted-publishing configuration. Optional CUDA runtime
   tests use the existing `gpu-t4` and `gpu-instance` runners. CPU and CUDA loading
   tests run on hosted runners.
@@ -44,8 +51,11 @@ publication workflows.
    and prepares CPU/CUDA Yggdrasil recipes with the full release source commit.
    It attaches `moreau-yggdrasil.tar.gz`, `moreau-julia-release.json`, and the
    registration request text to the candidate release, then dispatches the
-   `submit-jlls` stage of `julia-release.yml`. That stage opens or reuses two
-   Yggdrasil PRs. A dispatch is not evidence that either PR built or merged.
+   `prepare-jll-prs` stage of `julia-release.yml`. That stage pushes one branch
+   per backend to the organization's fork and supplies comparison links, titles,
+   and PR bodies in its summary and artifacts. Open the two Yggdrasil PRs in your
+   browser, or reuse existing PRs for those branches. Preparing the branches is
+   not evidence that either PR has been opened, built, or merged.
 3. After Yggdrasil has built, reviewed, merged, and registered both JLLs, resume:
 
    ```sh

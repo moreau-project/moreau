@@ -69,9 +69,12 @@ See [the release runbook](../RELEASE.md). Moreau.jl is registered directly from
 needed. `bump_version.py` updates the frontend, JLL bounds, and recipe versions;
 `julia_release.py prepare` pins both recipes to the exact release commit.
 
-The release workflow prepares and submits the recipes through `julia-release.yml`.
-After JLL registration, release QA runs the shared Julia platform matrix. Frontend
-registration targets the tested monorepo subdirectory. Stable publication requires
+The release workflow prepares recipe branches in the organization's Yggdrasil
+fork through `julia-release.yml`, using a fine-grained token limited to that fork
+and the Moreau monorepo. A maintainer opens the upstream PRs from the generated
+comparison links and PR text. After JLL registration, release QA runs the shared
+Julia platform matrix. Frontend registration targets the tested monorepo
+subdirectory. Stable publication requires
 General to contain that exact package tree and both matching JLL versions.
 
 Local source builds passed BinaryBuilder audits for all five non-macOS CPU

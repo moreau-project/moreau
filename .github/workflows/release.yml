@@ -1,7 +1,7 @@
 # Build all artifacts and create a GitHub Release for QA.
 #
 # Stable release pipeline (see RELEASE.md):
-#   release.yml -> julia-release.yml submit-jlls -> external Yggdrasil registration
+#   release.yml -> julia-release.yml prepare-jll-prs -> manual Yggdrasil PRs/registration
 #   -> julia-release.yml test -> test-release.yml -> julia-release.yml register
 #   -> external General registration -> publish.yml.
 # Development/prerelease builds go directly to test-release.yml.
@@ -650,8 +650,8 @@ jobs:
         run: |
           if [ "$STABLE" = true ]; then
             gh workflow run julia-release.yml --ref "$RELEASE_TAG" \
-              -f "release_tag=$RELEASE_TAG" -f stage=submit-jlls
-            echo 'ChatGPT generated: JLL submission dispatched. After Yggdrasil registers both JLLs, run Julia Release with stage=test.' >> "$GITHUB_STEP_SUMMARY"
+              -f "release_tag=$RELEASE_TAG" -f stage=prepare-jll-prs
+            echo 'ChatGPT generated: JLL branch preparation dispatched. Open the upstream PRs using its summary links. After both JLLs register, run Julia Release with stage=test.' >> "$GITHUB_STEP_SUMMARY"
           else
             gh workflow run test-release.yml --ref "$RELEASE_TAG" \
               -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"

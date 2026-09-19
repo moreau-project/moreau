@@ -241,7 +241,7 @@ def test_native_prerelease_qa_uses_exact_binary_without_general(source, tmp_path
         release.native_fixture(package, output, tmp_path / "missing.so")
 
 
-def test_yggdrasil_submission_is_repeatable_without_network(source, tmp_path, monkeypatch):
+def test_yggdrasil_pr_preparation_only_pushes_to_fork(source, tmp_path, monkeypatch):
     release.prepare(source, source / "julia-handoff")
     fork = tmp_path / "fork.git"
     subprocess.run(
@@ -258,16 +258,9 @@ def test_yggdrasil_submission_is_repeatable_without_network(source, tmp_path, mo
         f"args = [a.replace('https://github.com/JuliaPackaging/Yggdrasil.git', {str(fork)!r}) for a in sys.argv[1:]]\n"
         f"os.execv({real_git!r}, [{real_git!r}] + args)\n"
     )
-    state = tmp_path / "pr-state"
     (fake_bin / "gh").write_text(
-        "#!/usr/bin/env python3\nimport pathlib, sys\n"
-        f"state = pathlib.Path({str(state)!r})\n"
-        "if sys.argv[1:3] == ['pr', 'list']:\n"
-        "    print('https://example.invalid/pr/1' if state.exists() else '')\n"
-        "elif sys.argv[1:3] == ['pr', 'create']:\n"
-        "    assert not state.exists()\n"
-        "    state.write_text('created')\n"
-        "else:\n    raise SystemExit('Unexpected external command')\n"
+        "#!/usr/bin/env python3\n"
+        "raise SystemExit('PR preparation must not call the GitHub API')\n"
     )
     for script in fake_bin.iterdir():
         script.chmod(0o755)
@@ -277,11 +270,19 @@ def test_yggdrasil_submission_is_repeatable_without_network(source, tmp_path, mo
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "commit.gpgsign")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
-    command = ["bash", str(ROOT / "scripts/submit_julia_jll.sh")]
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    command = ["bash", str(ROOT / "scripts/prepare_julia_jll_pr.sh")]
     subprocess.run(command, cwd=source, check=True, capture_output=True)
     first = release.git(source / "yggdrasil", "rev-parse", "HEAD")
     subprocess.run(command, cwd=source, check=True, capture_output=True)
     assert release.git(source / "yggdrasil", "rev-parse", "HEAD") == first
-    assert state.read_text() == "created"
+    branch = release.git(source / "yggdrasil", "branch", "--show-current")
+    assert release.git(fork, "rev-parse", branch) == first
+    request = (source / "jll-pr-request.md").read_text()
+    assert f"JuliaPackaging/Yggdrasil/compare/master...example:{branch}?expand=1" in request
+    assert "it did not open an upstream PR" in request
+    assert summary.read_text() == request * 2
+    assert (source / "jll-pr-body.md").read_text().startswith("ChatGPT generated:\n")
     recipe = source / "yggdrasil/M/Moreau/Moreau_CPU/build_tarballs.jl"
     assert release.git(source, "rev-parse", "HEAD") in recipe.read_text()
