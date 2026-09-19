@@ -4,7 +4,7 @@ Run these stages with the release version, using your own `gh` login:
 
 ```sh
 scripts/release.sh prepare X.Y.Z
-# Commit and merge the version bump into main.
+# Merge the version-bump PR opened by prepare.
 scripts/release.sh build X.Y.Z
 scripts/release.sh jll-prs X.Y.Z
 # Wait for both JLLs to register in General.

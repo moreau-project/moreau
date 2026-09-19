@@ -7,7 +7,7 @@ version=$(python -c 'import tomllib; print(tomllib.load(open("packages/moreau-ju
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 git diff --exit-code -- packages packaging/yggdrasil
 commit=$(git rev-parse HEAD)
-branch="ptn/moreau-${BACKEND,,}-${version}-${commit:0:8}"
+branch="moreau-${BACKEND,,}-${version}-${commit:0:8}"
 recipe="M/Moreau/Moreau_${BACKEND}"
 fork_owner="${YGGDRASIL_FORK%%/*}"
 
