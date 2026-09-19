@@ -80,7 +80,7 @@ jobs:
           tar czf "dist/moreau-${VERSION}-cpu-macos-arm64.tar.gz" -C dist/c-api .
           echo "Built: moreau-${VERSION}-cpu-macos-arm64.tar.gz"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: c-lib-cpu-macos-arm64
           path: dist/*.tar.gz
@@ -130,7 +130,7 @@ jobs:
           tar czf "dist/moreau-${VERSION}-cpu-linux-${ARCH}.tar.gz" -C dist/c-api .
           echo "Built: moreau-${VERSION}-cpu-linux-${ARCH}.tar.gz"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: c-lib-cpu-linux-${{ matrix.arch }}
           path: dist/*.tar.gz
@@ -236,7 +236,7 @@ jobs:
           tar czf "dist/${TARBALL}" -C staging .
           echo "Built: $TARBALL ($(du -h "dist/$TARBALL" | cut -f1))"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: c-lib-${{ matrix.cuda_label }}-linux-${{ matrix.arch }}
           path: dist/*.tar.gz
@@ -316,7 +316,7 @@ jobs:
           cat dist/moreau-manifest.json
 
       - name: Upload C libraries and manifest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: c-libraries
           path: dist/*

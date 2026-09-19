@@ -120,7 +120,7 @@ jobs:
               chmod -R 777 target/wheels
             '
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-cpu-linux-${{ matrix.arch }}
           path: packages/moreau-cpu/target/wheels/*.whl
@@ -151,7 +151,7 @@ jobs:
           python3 packages/moreau-cpu/scripts/scrub_binary.py packages/moreau-cpu/target/wheels/*.whl
           python3 packages/moreau/scripts/scrub_python_wheel.py packages/moreau-cpu/target/wheels/*.whl
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-cpu-macos
           path: packages/moreau-cpu/target/wheels/*.whl
@@ -260,7 +260,7 @@ jobs:
           echo "Built GPU wheel:"
           ls -la dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-gpu-${{ matrix.cuda_short }}-${{ matrix.arch }}
           path: dist/*.whl
@@ -290,7 +290,7 @@ jobs:
           python scripts/scrub_python_wheel.py dist/*.whl
           ls -la dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-wrapper
           path: packages/moreau/dist/*.whl
@@ -344,7 +344,7 @@ jobs:
           # Package as tarball (Julia Artifacts expects lib/ inside)
           tar czf "moreau-cpu-linux-${ARCH}.tar.gz" -C dist/c-api lib/libmoreau_cpu.so include LICENSE NOTICE
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: c-lib-cpu-linux-${{ matrix.arch }}
           path: moreau-cpu-linux-${{ matrix.arch }}.tar.gz
@@ -371,7 +371,7 @@ jobs:
           python3 packages/moreau-cpu/scripts/scrub_binary.py dist/c-api/lib/libmoreau_cpu.dylib
           tar czf moreau-cpu-macos-arm64.tar.gz -C dist/c-api lib/libmoreau_cpu.dylib include LICENSE NOTICE
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: c-lib-cpu-macos-arm64
           path: moreau-cpu-macos-arm64.tar.gz
@@ -478,7 +478,7 @@ jobs:
           # symlinks (libmoreau_cuda.so -> .so.0 -> .so.X.Y.Z) are all included.
           tar czf "moreau-${CUDA_LABEL}-linux-${ARCH}.tar.gz" -C staging lib/ include/ LICENSE NOTICE
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: c-lib-${{ matrix.cuda_label }}-linux-${{ matrix.arch }}
           path: moreau-${{ matrix.cuda_label }}-linux-${{ matrix.arch }}.tar.gz

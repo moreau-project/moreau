@@ -61,7 +61,7 @@ jobs:
           YGGDRASIL_FORK: ${{ vars.YGGDRASIL_FORK }}
           BACKEND: ${{ matrix.backend }}
         run: bash scripts/prepare_julia_jll_pr.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: julia-jll-pr-${{ matrix.backend }}
           path: |
@@ -127,7 +127,7 @@ jobs:
             cat registration-body.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: inputs.stage == 'prepare-registration'
         with:
           name: julia-registration-request
