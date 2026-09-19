@@ -384,10 +384,10 @@ class TestJaxChainedSolveGradients:
         *_, cones = simple_qp
         solver = self._make_solver(cones)
 
-        P_data = jnp.array([2.0, 2.0], dtype=jnp.float64)
-        A_data = jnp.array([-1.0, -1.0], dtype=jnp.float64)
-        q = jnp.array([-1.0, -0.5], dtype=jnp.float64)
-        b = jnp.array([0.0, 0.0], dtype=jnp.float64)
+        P_data = jnp.array([2.0, 2.0])
+        A_data = jnp.array([-1.0, -1.0])
+        q = jnp.array([-1.0, -0.5])
+        b = jnp.array([0.0, 0.0])
 
         def loss_fn(q_):
             sol = solver.solve(P_data, A_data, q_, b)
@@ -396,12 +396,11 @@ class TestJaxChainedSolveGradients:
         ag_grad = jax.grad(loss_fn)(q)
 
         # Finite differences
-        eps = 1e-5
-        l0 = loss_fn(q)
+        eps = max(1e-5, float(jnp.finfo(q.dtype).eps) ** (1 / 3))
         fd_grad = jnp.zeros_like(q)
         for i in range(2):
-            q_pert = q.at[i].add(eps)
-            fd_grad = fd_grad.at[i].set((loss_fn(q_pert) - l0) / eps)
+            fd = (loss_fn(q.at[i].add(eps)) - loss_fn(q.at[i].add(-eps))) / (2 * eps)
+            fd_grad = fd_grad.at[i].set(fd)
 
         np.testing.assert_allclose(
             np.array(ag_grad),
@@ -425,12 +424,12 @@ class TestJaxChainedSolveGradients:
         *_, cones = simple_qp
         solver = self._make_solver(cones)
 
-        P_data = jnp.array([2.0, 2.0], dtype=jnp.float64)
-        A_data = jnp.array([-1.0, -1.0], dtype=jnp.float64)
-        q1 = jnp.array([-1.0, -0.5], dtype=jnp.float64)
-        q2 = jnp.array([-0.3, -0.8], dtype=jnp.float64)
-        b1 = jnp.array([0.0, 0.0], dtype=jnp.float64)
-        b2 = jnp.array([0.5, 0.5], dtype=jnp.float64)
+        P_data = jnp.array([2.0, 2.0])
+        A_data = jnp.array([-1.0, -1.0])
+        q1 = jnp.array([-1.0, -0.5])
+        q2 = jnp.array([-0.3, -0.8])
+        b1 = jnp.array([0.0, 0.0])
+        b2 = jnp.array([0.5, 0.5])
 
         def loss_fn(q1_):
             sol1 = solver.solve(P_data, A_data, q1_, b1)
@@ -440,12 +439,11 @@ class TestJaxChainedSolveGradients:
         ag_grad = jax.grad(loss_fn)(q1)
 
         # Finite differences
-        eps = 1e-5
-        l0 = loss_fn(q1)
+        eps = max(1e-5, float(jnp.finfo(q1.dtype).eps) ** (1 / 3))
         fd_grad = jnp.zeros_like(q1)
         for i in range(2):
-            q1_pert = q1.at[i].add(eps)
-            fd_grad = fd_grad.at[i].set((loss_fn(q1_pert) - l0) / eps)
+            fd = (loss_fn(q1.at[i].add(eps)) - loss_fn(q1.at[i].add(-eps))) / (2 * eps)
+            fd_grad = fd_grad.at[i].set(fd)
 
         np.testing.assert_allclose(
             np.array(ag_grad),
