@@ -45,7 +45,7 @@ case "$stage" in
     test)
         gpu_tests=false
         if [[ ${1:-} == --run-gpu-tests ]]; then gpu_tests=true; fi
-        workflow test-release.yml "$tag" -f "inputs[release_tag]=$tag" \
+        workflow test-release.yml main -f "inputs[release_tag]=$tag" \
             -F "inputs[run_gpu_tests]=$gpu_tests"
         ;;
     gpu)

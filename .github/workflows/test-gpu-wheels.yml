@@ -1,0 +1,108 @@
+name: GPU wheel QA
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: GitHub release containing the wheels
+        type: string
+        default: ''
+      run_id:
+        description: Release workflow run containing wheel artifacts
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: '12'
+            artifact: cu122
+            image: nvidia/cuda:12.2.0-runtime-ubuntu22.04
+            runner: gpu-t4
+          - cuda: '13'
+            artifact: cu130
+            image: nvidia/cuda:13.0.0-runtime-ubuntu22.04
+            runner: gpu-instance
+    steps:
+      - name: Check artifact source
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          if { [ -z "$RELEASE_TAG" ] && [ -z "$RUN_ID" ]; } ||
+             { [ -n "$RELEASE_TAG" ] && [ -n "$RUN_ID" ]; }; then
+            echo '::error::Provide exactly one of release_tag or run_id'
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - name: Install gh CLI
+        if: inputs.release_tag != ''
+        run: |
+          if ! command -v gh >/dev/null; then
+            GH_VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"].removeprefix("v"))')
+            curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" | sudo tar xz -C /usr/local --strip-components=1
+          fi
+
+      - name: Download release wheels
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CUDA_MAJOR: ${{ matrix.cuda }}
+        run: |
+          gh release download "$RELEASE_TAG" --dir wheels \
+            --pattern 'moreau-*-py3-none-any.whl' \
+            --pattern 'moreau_cpu-*manylinux*x86_64.whl' \
+            --pattern "moreau_cuda${CUDA_MAJOR}-*manylinux*x86_64.whl"
+
+      - name: Download CPU wheel artifact
+        if: inputs.run_id != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: wheel-cpu-linux-x86_64
+          path: wheels
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Download CUDA wheel artifact
+        if: inputs.run_id != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: wheel-gpu-${{ matrix.artifact }}-x86_64
+          path: wheels
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Download wrapper wheel artifact
+        if: inputs.run_id != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: wheel-wrapper
+          path: wheels
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Test installed wheels
+        env:
+          CUDA_MAJOR: ${{ matrix.cuda }}
+          CUDA_RUNTIME: ${{ matrix.image }}
+        run: |
+          docker run --rm --gpus all \
+            -e DEBIAN_FRONTEND=noninteractive -e TZ=UTC -e CUDA_MAJOR \
+            -v "$GITHUB_WORKSPACE:/source:ro" "$CUDA_RUNTIME" bash -euc '
+              apt-get update && apt-get install -y curl ca-certificates git gcc g++
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
+              bash /source/scripts/test_gpu_wheels.sh /source/wheels \
+                --cuda "$CUDA_MAJOR" --work-dir /tmp/wheel-qa
+            '

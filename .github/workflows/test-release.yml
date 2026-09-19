@@ -4,7 +4,7 @@
 # Can be re-triggered for the same release tag.
 #
 # Usage:
-#   gh workflow run test-release.yml --ref v0.4.0 -f release_tag=v0.4.0
+#   gh workflow run test-release.yml --ref main -f release_tag=v0.4.0
 #   gh workflow run test-release.yml -f release_tag=dev-20260313-120000
 # Add -f run_gpu_tests=true when GPU runners are available.
 
@@ -24,162 +24,14 @@ on:
         default: false
 
 jobs:
-  # GPU tests: install wheels in Docker with CUDA runtime, run full test suite
   test-gpu:
     if: inputs.run_gpu_tests
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - cuda_short: "cu122"
-            cuda_major: "12"
-            cuda_runtime: "nvidia/cuda:12.2.0-runtime-ubuntu22.04"
-            pytorch_index: "cu121"
-            jax_cuda: "cuda12"
-            runner: gpu-t4
-          - cuda_short: "cu130"
-            cuda_major: "13"
-            cuda_runtime: "nvidia/cuda:13.0.0-runtime-ubuntu22.04"
-            pytorch_index: "cu130"
-            jax_cuda: "cuda13"
-            runner: gpu-instance
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.release_tag }}
-
-      - name: Install gh CLI
-        run: |
-          if ! command -v gh &>/dev/null; then
-            GH_VERSION=$(curl -s https://api.github.com/repos/cli/cli/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
-            curl -sSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" | sudo tar xz -C /usr/local --strip-components=1
-          fi
-
-      - name: Download release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          mkdir -p dist-cpu dist-gpu dist-wrapper
-          gh release download "$RELEASE_TAG" --dir dist-all
-
-          # Sort wheels by type. GPU test runners are x86_64, so filter CPU
-          # and CUDA wheels to x86_64 to avoid picking up the aarch64 wheel
-          # (which pip would reject with "not supported on this platform").
-          CUDA_MAJOR="${{ matrix.cuda_major }}"
-
-          for whl in dist-all/*.whl; do
-            name="$(basename "$whl")"
-            case "$name" in
-              moreau_cpu-*manylinux*x86_64*)        cp "$whl" dist-cpu/ ;;
-              moreau_cuda${CUDA_MAJOR}-*x86_64*)    cp "$whl" dist-gpu/ ;;
-              moreau-*py3-none-any*)                cp "$whl" dist-wrapper/ ;;
-            esac
-          done
-
-          echo "=== CPU wheels ===" && ls -la dist-cpu/
-          echo "=== GPU wheels ===" && ls -la dist-gpu/
-          echo "=== Wrapper wheels ===" && ls -la dist-wrapper/
-
-      - name: Test wheel installation and run tests (${{ matrix.cuda_short }})
-        run: |
-          echo "Testing wheels with Python 3.12 and ${{ matrix.cuda_short }}..."
-
-          # Create abi3 test script (avoids quoting issues in docker heredoc)
-          cat > /tmp/test_abi3.py << 'PYEOF'
-          import sys
-          pyver = f"{sys.version_info.major}.{sys.version_info.minor}"
-          # Test CPU native extension
-          import moreau_cpu._cpu_solver as mc
-          print(f"Python {pyver}: CPU native extension OK: {mc}")
-          # Test CUDA native extension (via __init__.py which preloads nvidia libs)
-          import moreau_cuda
-          import moreau
-          assert moreau.device_available("cuda"), moreau.device_error("cuda")
-          print(f"Python {pyver}: CUDA native extension OK: {moreau_cuda}")
-          PYEOF
-
-          docker run --rm --gpus all \
-            -e DEBIAN_FRONTEND=noninteractive \
-            -e TZ=UTC \
-            -v ${{ github.workspace }}/dist-cpu:/dist-cpu:ro \
-            -v ${{ github.workspace }}/dist-gpu:/dist-gpu:ro \
-            -v ${{ github.workspace }}/dist-wrapper:/dist-wrapper:ro \
-            -v ${{ github.workspace }}/packages/moreau/tests/python:/tests_py:ro \
-            -v /tmp/test_abi3.py:/test_abi3.py:ro \
-            ${{ matrix.cuda_runtime }} \
-            bash -c '
-              set -e
-              # g++ is needed by torch.compile/Inductor (cvxpylayers test_torch_compile_*)
-              apt-get update && apt-get install -y curl ca-certificates git gcc g++
-
-              # Install uv → standalone Python distributions (no Launchpad/PPA dependency)
-              curl -LsSf https://astral.sh/uv/install.sh | sh
-              export PATH="$HOME/.local/bin:$PATH"
-              uv python install 3.12 3.13 3.14
-
-              uv venv --seed --python 3.12 /test_env
-              source /test_env/bin/activate
-              pip install --upgrade pip
-
-              # Install CPU wheel and moreau wrapper package (built wheels)
-              pip install /dist-cpu/*.whl
-              pip install /dist-wrapper/*.whl
-              python -c "import moreau; print('"'"'CPU package OK:'"'"', moreau.__file__)"
-
-              # Install GPU wheel (pulls nvidia-cudss, nvidia-cusolver, etc. from PyPI)
-              pip install /dist-gpu/*.whl
-              python -c "import moreau; print('"'"'GPU available:'"'"', moreau.device_available('"'"'cuda'"'"')); assert moreau.device_available('"'"'cuda'"'"'), moreau.device_error('"'"'cuda'"'"')"
-
-              # === abi3 import tests (frontloaded - fast check before heavy deps) ===
-              echo ""
-              echo "=== Testing abi3 wheel import on Python 3.13 and 3.14 ==="
-              for PYVER in 3.13 3.14; do
-                uv venv --seed --python ${PYVER} /test_env_${PYVER}
-                /test_env_${PYVER}/bin/pip install --upgrade pip -q
-                /test_env_${PYVER}/bin/pip install numpy scipy -q
-                /test_env_${PYVER}/bin/pip install /dist-cpu/*.whl -q
-                /test_env_${PYVER}/bin/pip install /dist-wrapper/*.whl -q
-                /test_env_${PYVER}/bin/pip install /dist-gpu/*.whl -q
-                /test_env_${PYVER}/bin/python /test_abi3.py
-                echo "Python ${PYVER}: abi3 import test passed"
-              done
-
-              # Install torch and verify torch bindings
-              pip install torch --index-url https://download.pytorch.org/whl/${{ matrix.pytorch_index }}
-              python -c "import torch; assert torch.cuda.is_available(); from moreau.torch import Solver; print('"'"'Torch bindings OK'"'"')"
-
-              # Install JAX with CUDA support
-              pip install jax[${{ matrix.jax_cuda }}]
-              python -c "import jax; print('"'"'JAX backend:'"'"', jax.default_backend()); assert jax.default_backend() == '"'"'gpu'"'"'"
-
-              # Run tests — each file in its own process to prevent GPU OOM on T4 (16GB)
-              pip install pytest numpy scipy hypothesis cvxpy clarabel
-              pip install git+https://github.com/cvxpy/cvxpylayers.git@v1.1.0
-              git clone --depth 1 --branch release/1.8.x https://github.com/cvxpy/cvxpy.git /tmp/cvxpy
-              git clone --depth 1 --branch v1.1.0 https://github.com/cvxpy/cvxpylayers.git /tmp/cvxpylayers
-              cp -r /tmp/cvxpy/cvxpy/tests /tmp/cvxpy-tests
-              FAILED=0
-              FAILED_FILES=""
-              for f in /tests_py/test_*.py; do
-                echo "=== Running $f ==="
-                rc=0; pytest "$f" -v --tb=short || rc=$?
-                if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then
-                  FAILED=1
-                  FAILED_FILES="$FAILED_FILES $f"
-                fi
-              done
-              if [ "$FAILED" -ne 0 ]; then
-                echo "Failed test files:$FAILED_FILES"
-                exit 1
-              fi
-              pytest /tmp/cvxpy-tests/test_conic_solvers.py -v --tb=short -k "Moreau"
-              pytest /tmp/cvxpylayers/tests/test_moreau.py /tmp/cvxpylayers/tests/test_moreau_dual_variables.py -v --tb=short
-            '
-
-          echo "All tests passed for ${{ matrix.cuda_short }}!"
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/test-gpu-wheels.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
 
   qa-coverage:
     name: QA coverage
@@ -213,8 +65,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.release_tag }}
 
       - uses: actions/setup-python@v7
         with:
@@ -291,8 +141,6 @@ jobs:
             python: '3.12'
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.release_tag }}
 
       - uses: actions/setup-python@v7
         with:

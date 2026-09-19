@@ -36,12 +36,12 @@ jobs:
         with:
           ref: ${{ inputs.release_tag }}
 
-      - name: Require successful QA for this release commit
+      - name: Require successful QA for this release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
+          gh run list --workflow test-release.yml --event workflow_dispatch \
             --limit 100 --json displayTitle,conclusion,status | \
             jq -e --arg title "Test Release $RELEASE_TAG" \
               '[.[] | select(.displayTitle == $title)][0] | .status == "completed" and .conclusion == "success"'
