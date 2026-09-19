@@ -46,7 +46,7 @@ jobs:
             runner: gpu-instance
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
 
@@ -212,11 +212,11 @@ jobs:
   test-cpu-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -240,7 +240,7 @@ jobs:
           echo "=== Wrapper wheels ===" && ls -la dist-wrapper/
 
       - name: Set up Python 3.9, 3.13, and 3.14 for abi3 tests
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: |
             3.9
@@ -290,11 +290,11 @@ jobs:
             runner: ubuntu-24.04-arm
             python: '3.12'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 
@@ -328,10 +328,10 @@ jobs:
     outputs:
       stable: ${{ steps.version.outputs.stable }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Read and validate released Julia source
@@ -352,7 +352,7 @@ jobs:
       - name: Require exact tagged Julia source for stable releases
         if: steps.version.outputs.stable == 'true'
         run: bash scripts/check_julia_source.sh julia-assets/moreau-julia-src.tar.gz
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.version.outputs.stable == 'true'
         with:
           repository: JuliaRegistries/General
@@ -372,14 +372,14 @@ jobs:
       release_tag: ${{ inputs.release_tag }}
       run_gpu_tests: ${{ inputs.run_gpu_tests }}
 
-  # Prereleases use their real native C artifact; temporary dependency shims
+  # Prereleases build their native dependency from the release commit; shims
   # avoid trying to register development versions in General.
   test-julia-native:
     needs: julia-release-info
     if: needs.julia-release-info.outputs.stable != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
 
@@ -389,7 +389,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          gh release download "$RELEASE_TAG" --dir dist-all
+          gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir dist-all
 
           echo "=== Release assets ==="
           ls -la dist-all/
@@ -402,6 +402,12 @@ jobs:
           echo "=== Julia source ==="
           find julia-src -type f | head -30
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Setup Julia
         uses: julia-actions/setup-julia@v3
         with:
@@ -409,14 +415,15 @@ jobs:
 
       - name: Prepare prerelease native dependency
         run: |
-          mkdir native-lib
-          tar xzf dist-all/moreau-cpu-linux-x86_64.tar.gz -C native-lib
+          VERSION=$(python -c 'import tomllib; print(tomllib.load(open("julia-src/Moreau.jl/Project.toml", "rb"))["version"].replace("-dev", ".dev"))')
+          python scripts/bump_version.py "$VERSION" --pin-dependencies
+          cargo build --manifest-path packages/moreau-cpu/Cargo.toml --locked --release --lib --features c-api
           julia scripts/julia_native_fixture.jl julia-src/Moreau.jl \
-            native-qa/Moreau_CPU_jll native-lib/lib/libmoreau_cpu.so
+            native-qa/Moreau_CPU_jll packages/moreau-cpu/target/release/libmoreau.so
 
       - name: Run Julia tests
         run: |
-          # Test the actual prerelease CPU artifact, including its native version check.
+          # Check the native build and released Julia package have the same version.
           julia --project=julia-src/Moreau.jl -e '
             using Pkg
             Pkg.Registry.add("General")

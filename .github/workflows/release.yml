@@ -37,7 +37,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       stable: ${{ steps.version.outputs.stable }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Resolve version
         id: version
         env:
@@ -78,7 +78,7 @@ jobs:
             rust_target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set release version
         env:
@@ -120,7 +120,7 @@ jobs:
               chmod -R 777 target/wheels
             '
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-cpu-linux-${{ matrix.arch }}
           path: packages/moreau-cpu/target/wheels/*.whl
@@ -131,7 +131,7 @@ jobs:
     needs: [resolve-version]
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set release version
         env:
@@ -151,7 +151,7 @@ jobs:
           python3 packages/moreau-cpu/scripts/scrub_binary.py packages/moreau-cpu/target/wheels/*.whl
           python3 packages/moreau/scripts/scrub_python_wheel.py packages/moreau-cpu/target/wheels/*.whl
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-cpu-macos
           path: packages/moreau-cpu/target/wheels/*.whl
@@ -211,9 +211,9 @@ jobs:
 
     steps:
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@v1.3.1
+        uses: jlumbroso/free-disk-space@v2.0.0
         with:
-          tool-cache: true
+          preinstalled-runtimes: true
           android: true
           dotnet: true
           haskell: true
@@ -221,7 +221,7 @@ jobs:
           docker-images: true
           swap-storage: false
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Patch version and package name in pyproject.toml
         env:
@@ -260,7 +260,7 @@ jobs:
           echo "Built GPU wheel:"
           ls -la dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-gpu-${{ matrix.cuda_short }}-${{ matrix.arch }}
           path: dist/*.whl
@@ -271,9 +271,9 @@ jobs:
     needs: [resolve-version]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -290,199 +290,11 @@ jobs:
           python scripts/scrub_python_wheel.py dist/*.whl
           ls -la dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-wrapper
           path: packages/moreau/dist/*.whl
           retention-days: 1
-
-  # ===========================================================================
-  # C API libraries
-  # ===========================================================================
-
-  # CPU C library: Linux x86_64 + aarch64 (manylinux_2_28, cargo --features c-api)
-  build-c-lib-cpu-linux:
-    needs: [resolve-version]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-latest
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set release version
-        env:
-          VERSION: ${{ needs.resolve-version.outputs.version }}
-        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
-
-      - name: Build CPU C API in manylinux container
-        env:
-          VERSION: ${{ needs.resolve-version.outputs.version }}
-          ARCH: ${{ matrix.arch }}
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            -e MOREAU_OUT_DIR=/workspace/dist/c-api \
-            -w /workspace \
-            "quay.io/pypa/manylinux_2_28_${ARCH}" \
-            bash -c '
-              set -e
-              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-              source $HOME/.cargo/env
-              packages/moreau-c/build.sh cpu
-              chmod -R 777 dist/
-            '
-
-          # Scrub build paths from binary
-          python3 packages/moreau-cpu/scripts/scrub_binary.py dist/c-api/lib/libmoreau_cpu.so
-
-          # Package as tarball (Julia Artifacts expects lib/ inside)
-          tar czf "moreau-cpu-linux-${ARCH}.tar.gz" -C dist/c-api lib/libmoreau_cpu.so include LICENSE NOTICE
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: c-lib-cpu-linux-${{ matrix.arch }}
-          path: moreau-cpu-linux-${{ matrix.arch }}.tar.gz
-          retention-days: 7
-
-  # CPU C library: macOS ARM64
-  build-c-lib-cpu-macos:
-    needs: [resolve-version]
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Set release version
-        env:
-          VERSION: ${{ needs.resolve-version.outputs.version }}
-        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
-
-      - name: Build CPU C API
-        run: packages/moreau-c/build.sh cpu
-
-      - name: Scrub and package
-        run: |
-          python3 packages/moreau-cpu/scripts/scrub_binary.py dist/c-api/lib/libmoreau_cpu.dylib
-          tar czf moreau-cpu-macos-arm64.tar.gz -C dist/c-api lib/libmoreau_cpu.dylib include LICENSE NOTICE
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: c-lib-cpu-macos-arm64
-          path: moreau-cpu-macos-arm64.tar.gz
-          retention-days: 7
-
-  # CUDA C libraries: Linux x86_64 + aarch64 (Docker, per CUDA version).
-  # aarch64 CUDA_ARCHITECTURES targets ARM server/embedded GPUs: sm_87 (Orin),
-  # sm_90 (Grace Hopper), sm_120 (Blackwell, CUDA 13+). sm_75/80/86/89 are Turing/
-  # Ampere/Ada desktop-x86 parts with no ARM-host equivalent.
-  build-c-lib-cuda:
-    needs: [resolve-version]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - cuda_version: "12.2"
-            cuda_label: "cuda12"
-            cuda_major: "12"
-            cudss_suffix: "cuda12"
-            gcc_toolset: "12"
-            cuda_architectures: "75;80;86;89;90"
-            arch: "x86_64"
-            cuda_arch_label: "x86_64"
-            runner: ubuntu-latest
-          - cuda_version: "12.2"
-            cuda_label: "cuda12"
-            cuda_major: "12"
-            cudss_suffix: "cuda12"
-            gcc_toolset: "12"
-            cuda_architectures: "87;90"
-            arch: "aarch64"
-            cuda_arch_label: "sbsa"
-            runner: ubuntu-24.04-arm
-          - cuda_version: "13.0"
-            cuda_label: "cuda13"
-            cuda_major: "13"
-            cudss_suffix: "cuda13"
-            gcc_toolset: "13"
-            cuda_architectures: "75;80;86;89;90;120"
-            arch: "x86_64"
-            cuda_arch_label: "x86_64"
-            runner: ubuntu-latest
-          - cuda_version: "13.0"
-            cuda_label: "cuda13"
-            cuda_major: "13"
-            cudss_suffix: "cuda13"
-            gcc_toolset: "13"
-            cuda_architectures: "87;90;120"
-            arch: "aarch64"
-            cuda_arch_label: "sbsa"
-            runner: ubuntu-24.04-arm
-
-    steps:
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@v1.3.1
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: false
-
-      - uses: actions/checkout@v4
-
-      - name: Set release version
-        env:
-          VERSION: ${{ needs.resolve-version.outputs.version }}
-        run: python3 scripts/bump_version.py "$VERSION" --pin-dependencies
-
-      - name: Build CUDA C API in Docker
-        env:
-          CUDSS_VER: ${{ env.CUDSS_VERSION }}
-          CUDA_VER: ${{ matrix.cuda_version }}
-          CUDA_MAJ: ${{ matrix.cuda_major }}
-          CUDSS_SUF: ${{ matrix.cudss_suffix }}
-          GCC_TS: ${{ matrix.gcc_toolset }}
-          CUDA_ARCHS: ${{ matrix.cuda_architectures }}
-          CUDA_LABEL: ${{ matrix.cuda_label }}
-          ARCH: ${{ matrix.arch }}
-          CUDA_ARCH_LABEL: ${{ matrix.cuda_arch_label }}
-          VERSION: ${{ needs.resolve-version.outputs.version }}
-        run: |
-          DOCKER_BUILDKIT=1 docker build \
-            --build-arg ARCH="$ARCH" \
-            --build-arg CUDA_ARCH_LABEL="$CUDA_ARCH_LABEL" \
-            --build-arg CUDSS_VERSION="$CUDSS_VER" \
-            --build-arg CUDA_VERSION="$CUDA_VER" \
-            --build-arg CUDA_MAJOR="$CUDA_MAJ" \
-            --build-arg CUDSS_SUFFIX="$CUDSS_SUF" \
-            --build-arg GCC_TOOLSET="$GCC_TS" \
-            --build-arg CUDA_ARCHITECTURES="$CUDA_ARCHS" \
-            -f packages/moreau-cuda/Dockerfile.c-lib \
-            --target output \
-            --output type=local,dest=staging \
-            .
-
-          # Scrub build paths from binary (writes through symlink to the real .so)
-          python3 packages/moreau-cuda/scripts/scrub_binary.py staging/lib/libmoreau_cuda.so
-
-          # Package entire lib/ dir so the real .so.X.Y.Z file and soname
-          # symlinks (libmoreau_cuda.so -> .so.0 -> .so.X.Y.Z) are all included.
-          tar czf "moreau-${CUDA_LABEL}-linux-${ARCH}.tar.gz" -C staging lib/ include/ LICENSE NOTICE
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: c-lib-${{ matrix.cuda_label }}-linux-${{ matrix.arch }}
-          path: moreau-${{ matrix.cuda_label }}-linux-${{ matrix.arch }}.tar.gz
-          retention-days: 7
 
   # ===========================================================================
   # GitHub Release
@@ -494,9 +306,6 @@ jobs:
       - build-cpu-wheel-macos
       - build-gpu-wheel
       - build-wrapper
-      - build-c-lib-cpu-linux
-      - build-c-lib-cpu-macos
-      - build-c-lib-cuda
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.release.outputs.name }}
@@ -505,39 +314,18 @@ jobs:
       actions: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Download all artifacts
       - name: Download all wheel artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist-wheels
           pattern: wheel-*
           merge-multiple: true
 
-      - name: Download all C library artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist-clibs
-          pattern: c-lib-*
-          merge-multiple: true
-
-      - name: Validate wheels and C libraries
-        run: |
-          for whl in dist-wheels/*.whl; do
-            echo "Validating: $whl"
-            python3 -c "import zipfile; assert zipfile.ZipFile('$whl').testzip() is None; print('ZIP OK')"
-            python3 -c "import zipfile, sys; z=zipfile.ZipFile('$whl'); m=[n for n in z.namelist() if n.endswith('/METADATA')]; sys.exit(1) if not m else print('METADATA OK:', m[0])"
-            sha256sum "$whl"
-          done
-          python3 scripts/validate_release_wheels.py dist-wheels --require-complete --c-library-dir dist-clibs
-
-          echo "=== C library tarballs ==="
-          for tb in dist-clibs/*.tar.gz; do
-            echo "Validating: $tb"
-            tar tzf "$tb"
-            sha256sum "$tb"
-          done
+      - name: Validate wheels
+        run: python3 scripts/validate_release_wheels.py dist-wheels --require-complete
 
       - name: Set release name
         id: release
@@ -568,20 +356,21 @@ jobs:
         run: |
           mkdir -p dist-release
           cp dist-wheels/*.whl dist-release/
-          cp dist-clibs/*.tar.gz dist-release/
           cp moreau-julia-src.tar.gz dist-release/
           echo "=== Release assets ==="
           ls -la dist-release/
           du -h dist-release/*
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.release.outputs.name }}
           name: ${{ steps.release.outputs.name }}
           target_commitish: ${{ github.sha }}
           files: dist-release/*
           body: |
+            ChatGPT generated:
+
             ## Release from commit ${{ github.sha }}
 
             ### Python Wheels
@@ -609,19 +398,11 @@ jobs:
             (sm_87), and Blackwell sm_120 on CUDA 13. They are build-validated
             only; run `python -m moreau check` after install to verify.
 
-            ### C API Libraries (tarballs)
+            ### C/C++ source builds
 
-            | Tarball | Platform | Backend |
-            |---------|----------|---------|
-            | `moreau-cpu-linux-x86_64.tar.gz` | Linux x86_64 | CPU |
-            | `moreau-cpu-linux-aarch64.tar.gz` | Linux aarch64 | CPU |
-            | `moreau-cpu-macos-arm64.tar.gz` | macOS ARM64 | CPU |
-            | `moreau-cuda12-linux-x86_64.tar.gz` | Linux x86_64 | CUDA 12 |
-            | `moreau-cuda12-linux-aarch64.tar.gz` | Linux aarch64 | CUDA 12 |
-            | `moreau-cuda13-linux-x86_64.tar.gz` | Linux x86_64 | CUDA 13 |
-            | `moreau-cuda13-linux-aarch64.tar.gz` | Linux aarch64 | CUDA 13 |
-
-            Each tarball contains the shared library, `include/moreau.h`, `LICENSE`, and `NOTICE`.
+            Build the C API with your local toolchain from a source checkout:
+            `packages/moreau-c/build.sh cpu` or `packages/moreau-c/build.sh cuda`.
+            The output in `dist/c-api/` contains the library, header, and licenses.
 
             CUDA artifacts are built and validated on CPU runners. CUDA runtime
             testing is opt-in while GPU runners are unavailable; the release QA

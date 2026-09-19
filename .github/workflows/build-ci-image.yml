@@ -17,9 +17,9 @@ jobs:
     steps:
     # Free up disk space - CUDA image is ~10GB and runner has limited space
     - name: Free disk space
-      uses: jlumbroso/free-disk-space@v1.3.1
+      uses: jlumbroso/free-disk-space@v2.0.0
       with:
-        tool-cache: false  # Keep tool cache for faster builds
+        preinstalled-runtimes: false  # Keep tool cache for faster builds
         android: true      # Free ~9GB
         dotnet: true       # Free ~2GB
         haskell: true      # Free ~5GB
@@ -27,17 +27,17 @@ jobs:
         swap-storage: false   # Keep swap
         docker-images: false  # We need Docker
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Log in to Container Registry
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build and push Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v7
       with:
         context: .github/docker
         file: .github/docker/Dockerfile.cuda-ci

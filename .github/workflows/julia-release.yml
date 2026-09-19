@@ -34,10 +34,10 @@ jobs:
       matrix:
         backend: [CPU, CUDA]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Check submission configuration
@@ -51,7 +51,7 @@ jobs:
           test -n "$YGGDRASIL_FORK" || { echo '::error::Set YGGDRASIL_FORK to your JuliaPackaging/Yggdrasil fork'; exit 1; }
           test "${YGGDRASIL_FORK%%/*}" = "$REPO_OWNER" || { echo '::error::The fork must belong to the Moreau organization'; exit 1; }
           test "$(gh api "repos/$YGGDRASIL_FORK" --jq '.parent.full_name')" = JuliaPackaging/Yggdrasil
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ vars.YGGDRASIL_FORK }}
           ssh-key: ${{ secrets.YGGDRASIL_DEPLOY_KEY }}
@@ -61,7 +61,7 @@ jobs:
           YGGDRASIL_FORK: ${{ vars.YGGDRASIL_FORK }}
           BACKEND: ${{ matrix.backend }}
         run: bash scripts/prepare_julia_jll_pr.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: julia-jll-pr-${{ matrix.backend }}
           path: |
@@ -75,13 +75,13 @@ jobs:
       contents: read
       actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: JuliaRegistries/General
           path: general-registry
@@ -127,7 +127,7 @@ jobs:
             cat registration-body.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: inputs.stage == 'prepare-registration'
         with:
           name: julia-registration-request

@@ -2,7 +2,6 @@ name: CI (CUDA)
 
 env:
   CI_IMAGE: ghcr.io/${{ github.repository }}/cuda-ci:latest
-  PYTORCH_INDEX: "https://download.pytorch.org/whl/cu124"
 
 on:
   push:
@@ -11,16 +10,12 @@ on:
       - 'packages/moreau-cuda/**'
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
-      - 'packages/moreau-cpu/tests/python/**'
-      - 'packages/moreau-cuda/tests/**'
       - '.github/workflows/ci-cuda.yml'
   pull_request:
     paths:
       - 'packages/moreau-cuda/**'
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
-      - 'packages/moreau-cpu/tests/python/**'
-      - 'packages/moreau-cuda/tests/**'
       - '.github/workflows/ci-cuda.yml'
   workflow_dispatch:  # Manual trigger from GitHub UI
 
@@ -43,9 +38,9 @@ jobs:
     steps:
     # Free up disk space - CUDA PyTorch needs ~2.5GB and runner has limited space
     - name: Free disk space
-      uses: jlumbroso/free-disk-space@v1.3.1
+      uses: jlumbroso/free-disk-space@v2.0.0
       with:
-        tool-cache: false  # Keep tool cache for faster builds
+        preinstalled-runtimes: false  # Keep tool cache for faster builds
         android: true      # Free ~9GB
         dotnet: true       # Free ~2GB
         haskell: true      # Free ~5GB
@@ -53,10 +48,10 @@ jobs:
         swap-storage: false    # Keep swap
         docker-images: false   # We need Docker
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Log in to Container Registry
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -64,11 +59,12 @@ jobs:
 
     # Cache ccache directory for faster incremental builds
     - name: Cache ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ github.workspace }}/.ccache
-        key: ccache-cuda-${{ hashFiles('packages/moreau-cuda/src/**', 'packages/moreau-cuda/include/**', 'packages/moreau-cuda/CMakeLists.txt') }}
+        key: ccache-cuda-v2-${{ github.sha }}
         restore-keys: |
+          ccache-cuda-v2-
           ccache-cuda-
 
     - name: Build in Docker (CUDA cross-compilation)
@@ -82,24 +78,23 @@ jobs:
             set -e
             # Install build dependencies not yet in the CI image
             apt-get update && apt-get install -y ccache libsuitesparse-dev >/dev/null 2>&1
-            export PATH="/usr/lib/ccache:$PATH"
             export CCACHE_DIR=/root/.ccache
             export CCACHE_MAXSIZE=2G
+            export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
             ccache --zero-stats
 
-            # Build C++ library and tests (GPU package)
+            # Build the wheel, C++ tests, and examples in one cached CMake build.
+            # Keep the build directory at the paths consumed by the GPU test job.
             cd packages/moreau-cuda
-            cmake -B build -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-              -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
-              -Dnanobind_DIR=$(python3 -c "import nanobind; print(nanobind.cmake_dir())")
-            cmake --build build -j$(nproc)
+            pip wheel . -v -w dist/ --no-deps --no-build-isolation \
+              --config-settings=build-dir=build \
+              --config-settings=cmake.define.CMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              --config-settings=cmake.define.CMAKE_CUDA_COMPILER_LAUNCHER=ccache \
+              --config-settings=cmake.define.MOREAU_BUILD_TESTS=ON \
+              --config-settings=cmake.define.MOREAU_BUILD_EXAMPLES=ON
 
-            # Show ccache stats
+            # Include the wheel build in the cache statistics.
             ccache --show-stats
-
-            # Build Python wheel
-            pip wheel . -w dist/ --no-deps --no-build-isolation
             cd ../..
 
             # Fix permissions for artifacts
@@ -107,7 +102,8 @@ jobs:
           '
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+      if: vars.MOREAU_GPU_RUNNERS_ENABLED == 'true'
+      uses: actions/upload-artifact@v7
       with:
         name: moreau-cuda-build
         path: |
@@ -140,10 +136,10 @@ jobs:
     name: Test (CUDA)
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Download build artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: moreau-cuda-build
         path: packages/moreau-cuda
@@ -152,7 +148,7 @@ jobs:
       run: nvidia-smi
 
     - name: Log in to Container Registry
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -160,7 +156,7 @@ jobs:
 
     # Cache Rust/Cargo for faster CPU package builds
     - name: Cache Cargo
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           .cargo-cache/registry

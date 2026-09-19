@@ -38,10 +38,10 @@ jobs:
             runner: gpu-instance
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download CPU wheel artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wheel-cpu-linux-x86_64
           path: dist-cpu
@@ -49,7 +49,7 @@ jobs:
           run-id: ${{ inputs.run_id }}
 
       - name: Download GPU wheel artifact (${{ matrix.cuda_short }})
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wheel-gpu-${{ matrix.cuda_short }}-x86_64
           path: dist-gpu
@@ -57,7 +57,7 @@ jobs:
           run-id: ${{ inputs.run_id }}
 
       - name: Download wrapper wheel artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wheel-wrapper
           path: dist-wrapper
