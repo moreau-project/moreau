@@ -4,8 +4,8 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-    echo "Usage: $0 {prepare|build|jll-prs|test|gpu|register|publish} X.Y.Z [options]"
-    echo "Options: test --run-gpu-tests; gpu --cuda {12,13} --suite {all,python,julia}"
+    echo "Usage: $0 {prepare|build|test|gpu|publish|jll-prs|test-julia|register} X.Y.Z [options]"
+    echo "Options: test/test-julia --run-gpu-tests; gpu --cuda {12,13} --suite {all,python,julia}"
     exit 0
 fi
 stage=$1 version=$2
@@ -42,10 +42,11 @@ case "$stage" in
     build)
         workflow release.yml main -f "inputs[version]=$version" -f "inputs[release_name]=$tag"
         ;;
-    test)
+    test|test-julia)
         gpu_tests=false
         if [[ ${1:-} == --run-gpu-tests ]]; then gpu_tests=true; fi
-        workflow test-release.yml main -f "inputs[release_tag]=$tag" \
+        if [[ $stage == test ]]; then qa=test-release.yml; else qa=test-julia-release.yml; fi
+        workflow "$qa" main -f "inputs[release_tag]=$tag" \
             -F "inputs[run_gpu_tests]=$gpu_tests"
         ;;
     gpu)
@@ -53,7 +54,7 @@ case "$stage" in
         ;;
     jll-prs|register)
         if [[ $stage == jll-prs ]]; then action=prepare-jll-prs; else action=prepare-registration; fi
-        workflow julia-release.yml "$tag" -f "inputs[release_tag]=$tag" -f "inputs[stage]=$action"
+        workflow julia-release.yml main -f "inputs[release_tag]=$tag" -f "inputs[stage]=$action"
         commit=$(gh api "repos/$repo/commits/$tag" --jq .sha)
         release_tmp=$(mktemp -d)
         trap 'rm -rf "$release_tmp"' EXIT
@@ -79,7 +80,7 @@ case "$stage" in
         fi
         ;;
     publish)
-        workflow publish.yml "$tag" -f "inputs[release_tag]=$tag"
+        workflow publish.yml main -f "inputs[release_tag]=$tag"
         ;;
     *) echo "Unknown stage: $stage" >&2; exit 2 ;;
 esac

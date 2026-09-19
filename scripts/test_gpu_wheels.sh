@@ -66,7 +66,7 @@ python="$work/python3.12/bin/python"
 uv pip install --python "$python" torch \
     --default-index "https://download.pytorch.org/whl/$torch_index"
 uv pip install --python "$python" "jax[cuda$cuda]" pytest numpy scipy hypothesis \
-    cvxpy clarabel git+https://github.com/cvxpy/cvxpylayers.git@v1.1.0
+    cvxpy clarabel cvxpylayers
 "$python" - <<'PY'
 import moreau
 import torch
@@ -105,8 +105,10 @@ if (( ${#failed[@]} )); then
     exit 1
 fi
 
-git clone --depth=1 --branch release/1.8.x https://github.com/cvxpy/cvxpy.git cvxpy
-git clone --depth=1 --branch v1.1.0 https://github.com/cvxpy/cvxpylayers.git cvxpylayers
+for package in cvxpy cvxpylayers; do
+    version=$("$python" -c 'from importlib.metadata import version; import sys; print(version(sys.argv[1]))' "$package")
+    git clone --depth=1 --branch "v$version" "https://github.com/cvxpy/$package.git" "$package"
+done
 # Copy CVXPY tests away from its checkout to use the installed package.
 cp -r cvxpy/cvxpy/tests cvxpy-tests
 "$python" -m pytest cvxpy-tests/test_conic_solvers.py -v --tb=short -rs -k Moreau

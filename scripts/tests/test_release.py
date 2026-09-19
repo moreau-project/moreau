@@ -14,11 +14,57 @@ limitations under the License.
 
 Regression tests for release versioning and wheel metadata validation."""
 
+import os
+import subprocess
 import zipfile
+from pathlib import Path
 
 import bump_version as bump
 import pytest
 import validate_release_wheels as validate
+
+
+@pytest.mark.parametrize(
+    "stage,workflow",
+    [
+        ("test", "test-release.yml"),
+        ("test-julia", "test-julia-release.yml"),
+        ("publish", "publish.yml"),
+    ],
+)
+@pytest.mark.parametrize("qa_result", [0, 1])
+def test_release_dispatch_uses_current_workflow(tmp_path, stage, workflow, qa_result):
+    gh = tmp_path / "gh"
+    gh.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$RELEASE_LOG"\n'
+        'case "$1 $2" in\n'
+        '  "api --method") echo 42 ;;\n'
+        '  "run watch") exit "$QA_RESULT" ;;\n'
+        "  *) exit 2 ;;\n"
+        "esac\n"
+    )
+    gh.chmod(0o755)
+    log = tmp_path / "commands.log"
+    script = Path(__file__).resolve().parents[1] / "release.sh"
+    options = [] if stage == "publish" else ["--run-gpu-tests"]
+    result = subprocess.run(
+        ["bash", str(script), stage, "0.4.1", *options],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "RELEASE_LOG": str(log),
+            "QA_RESULT": str(qa_result),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == qa_result, result.stderr
+    dispatch, watch = log.read_text().splitlines()
+    assert f"/workflows/{workflow}/dispatches" in dispatch
+    assert "ref=main" in dispatch and "inputs[release_tag]=v0.4.1" in dispatch
+    if options:
+        assert "inputs[run_gpu_tests]=true" in dispatch
+    assert watch == "run watch 42 --repo moreau-project/moreau --exit-status"
 
 
 def snapshot(root):
