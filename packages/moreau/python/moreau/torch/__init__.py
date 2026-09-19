@@ -131,6 +131,9 @@ class Solver:
         >>> print(solver.info.status, solver.info.obj_val)
     """
 
+    # Native solver lifecycle operations run eagerly; callers can still compile
+    # the tensor operations on either side, with autograd preserved.
+    @torch.compiler.disable
     def __init__(
         self,
         n: int,
@@ -292,6 +295,7 @@ class Solver:
         # can look it up from a tensor handle.
         self._impl_handle = _register_impl(self._impl)
 
+    @torch.compiler.disable
     def setup(
         self,
         P_values: torch.Tensor,
@@ -458,6 +462,7 @@ class Solver:
 
         self._auto_tuned = True
 
+    @torch.compiler.disable
     def solve(
         self,
         P_values: torch.Tensor,
