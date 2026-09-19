@@ -75,6 +75,12 @@ print(solver.info.obj_val) # objective value
 > On the GPU backend, `P` must be a **full symmetric** matrix (both triangles),
 > not just the upper triangle. The CPU backend accepts either.
 
+## Browser WebAssembly
+
+The Rust CPU core supports single-threaded browser WASM with default features
+disabled, including QDLDL solves and differentiation. Rust consumers can link it
+into their own WASM bindings. See the [WebAssembly guide](docs/guide/webassembly.md).
+
 ## Differentiable optimization
 
 Gradients flow through the solve in both PyTorch and JAX.
