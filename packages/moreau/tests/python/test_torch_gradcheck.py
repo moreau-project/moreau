@@ -18,6 +18,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 import moreau
 import moreau.torch as moreau_torch
 from moreau.torch import Solver
+from moreau.torch._compiled import _solve_cuda
 
 
 def gradcheck_with_device(func, inputs, device, **kwargs):
@@ -1819,3 +1820,112 @@ class TestTorchCompile:
         x_compiled = layer_compiled(q)
 
         torch.testing.assert_close(x_compiled, x_eager)
+
+
+@pytest.mark.cuda
+@pytest.mark.parametrize("batch_shape", [(), (1,), (3,)])
+@pytest.mark.parametrize("shared_matrices", [False, True])
+def test_fullgraph_cuda_solve(simple_qp_setup, batch_shape, shared_matrices):
+    """Capture cold solves, changing data, and delayed backward in one graph."""
+    n, m, P_ro, P_ci, A_ro, A_ci, cones = simple_qp_setup
+    solver = Solver(
+        n, m, P_ro, P_ci, A_ro, A_ci, cones, moreau.Settings(device="cuda", solver="ipm")
+    )
+    torch._dynamo.reset()
+    backend = CompileCounterWithBackend("inductor")
+
+    def solve(P, A, q, b):
+        sol = solver.solve(P, A, q, b)
+        return sol.x.square().sum() + 0.3 * sol.z.sum() + 0.2 * sol.s.sum()
+
+    compiled = torch.compile(solve, backend=backend, fullgraph=True)
+    losses, expected_grads, all_inputs = [], [], []
+    for scale in (1.0, 1.3):
+        values = ([2.0 * scale, 3.0], [1.0, 1.0 * scale], [0.2, -0.3], [1.0])
+        inputs = []
+        for i, val in enumerate(values):
+            t = torch.tensor(val, dtype=torch.float64, device="cuda")
+            if batch_shape and not (shared_matrices and i < 2):
+                t = t.expand(*batch_shape, -1).clone()
+            inputs.append(t.requires_grad_())
+        # The first compiled call must initialize the native solver itself.
+        actual = compiled(*inputs)
+        expected = solve(*inputs)
+        expected_grads.append(torch.autograd.grad(expected, inputs))
+        torch.testing.assert_close(actual, expected, atol=1e-7, rtol=1e-7)
+        losses.append(actual)
+        all_inputs.extend(inputs)
+    gradients = torch.autograd.grad(sum(losses), all_inputs)
+    for actual, expected in zip(gradients, sum(expected_grads, ())):
+        torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-6)
+    assert backend.frame_count == 1
+    assert solver.info is not None
+    torch._dynamo.reset()
+
+
+@pytest.mark.cuda
+@pytest.mark.parametrize("batch_shape", [(), (1,), (3,)])
+def test_fullgraph_cuda_direct_duals(batch_shape):
+    cones = moreau.Cones(dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1])])
+    solver = Solver(
+        2,
+        0,
+        torch.tensor([0, 1, 2]),
+        torch.tensor([0, 1]),
+        torch.tensor([0]),
+        torch.empty(0, dtype=torch.int64),
+        cones,
+        moreau.Settings(device="cuda", solver="ipm"),
+    )
+    P = torch.ones(2, dtype=torch.float64, device="cuda")
+    A = torch.empty(0, dtype=torch.float64, device="cuda")
+    q = torch.tensor([-2.0, 1.0], dtype=torch.float64, device="cuda")
+    q = q.expand(*batch_shape, 2).clone().requires_grad_()
+    if batch_shape == (3,):
+        q = q.T.contiguous().T.detach().requires_grad_()
+        assert not q.is_contiguous()
+    b = torch.empty(*batch_shape, 0, dtype=torch.float64, device="cuda")
+    torch._dynamo.reset()
+
+    def solve(q):
+        sol = solver.solve(P, A, q, b)
+        return sol.x, sol.z_x
+
+    compiled = torch.compile(solve, fullgraph=True)
+    x, zx = compiled(q)
+    torch.testing.assert_close(x, (-q).clamp_min(0), atol=1e-7, rtol=1e-7)
+    torch.testing.assert_close(zx, q.clamp_min(0), atol=1e-7, rtol=1e-7)
+    (grad,) = torch.autograd.grad(x.sum() + 2 * zx.sum(), q)
+    torch.testing.assert_close(
+        grad, torch.where(q < 0, -torch.ones_like(q), 2 * torch.ones_like(q)), atol=1e-6, rtol=1e-6
+    )
+    torch.library.opcheck(
+        _solve_cuda,
+        (P, A, q, b, solver._compile_handle, 2, []),
+    )
+    torch._dynamo.reset()
+
+
+@pytest.mark.cuda
+def test_compiled_handle_lifetime(simple_qp_setup):
+    """Saved storage owns the native solver, even with detached saved tensors."""
+    n, m, P_ro, P_ci, A_ro, A_ci, cones = simple_qp_setup
+    solver = Solver(
+        n, m, P_ro, P_ci, A_ro, A_ci, cones, moreau.Settings(device="cuda", solver="ipm")
+    )
+    P = torch.tensor([2.0, 2.0], dtype=torch.float64, device="cuda")
+    A = torch.ones(2, dtype=torch.float64, device="cuda")
+    q = torch.tensor([0.2, -0.3], dtype=torch.float64, device="cuda", requires_grad=True)
+    b = torch.ones(1, dtype=torch.float64, device="cuda")
+    # Tune before taking the weak reference; tuning can replace the impl.
+    solver.solve(P, A, q, b)
+    impl_ref = weakref.ref(solver._impl)
+    with torch.autograd.graph.saved_tensors_hooks(lambda t: t.detach(), lambda t: t):
+        loss = _solve_cuda(P, A, q, b, solver._compile_handle, 0, [])[0].square().sum()
+    del solver
+    gc.collect()
+    assert impl_ref() is not None
+    loss.backward()
+    assert torch.isfinite(q.grad).all()
+    gc.collect()
+    assert impl_ref() is None

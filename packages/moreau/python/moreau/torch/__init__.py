@@ -82,6 +82,7 @@ def _validate_tensor_dtype(t: torch.Tensor, name: str) -> None:
 # `_solve_backward_op` is re-exported so it remains patchable via
 # `moreau.torch._solve_backward_op` (tests rely on this).
 from ._autograd import _register_impl, _SolveFunction, _solve_backward_op
+from ._compiled import _register_solver, _compiled_solve
 
 
 class Solver:
@@ -294,6 +295,8 @@ class Solver:
         # Register _impl in the backward op's registry so the vmap rule
         # can look it up from a tensor handle.
         self._impl_handle = _register_impl(self._impl)
+        self._compile_handle = _register_solver(self)
+        self._direct_dual_size = sum(len(c.indices) for c in cones.dir_cones)
 
     @torch.compiler.disable
     def setup(
@@ -462,7 +465,6 @@ class Solver:
 
         self._auto_tuned = True
 
-    @torch.compiler.disable
     def solve(
         self,
         P_values: torch.Tensor,
@@ -499,6 +501,14 @@ class Solver:
             >>> loss = solution.x.sum()
             >>> loss.backward()
         """
+        if torch.compiler.is_compiling() and self._device == "cuda":
+            return _compiled_solve(self, P_values, A_values, q, b, warm_start)
+        return self._solve_eager(P_values, A_values, q, b, warm_start=warm_start)
+
+    @torch.compiler.disable
+    def _solve_eager(self, P_values, A_values, q, b, *, warm_start=None):
+        if isinstance(warm_start, (TorchSolution, TorchBatchedSolution)):
+            warm_start = warm_start.to_warm_start()
         self.setup(P_values, A_values)
 
         # Auto-tune on first solve when device or method is 'auto'
