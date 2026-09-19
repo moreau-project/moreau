@@ -1,6 +1,6 @@
 """Moreau CUDA: GPU-accelerated conic optimization solver."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 import ctypes
 import glob

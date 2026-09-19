@@ -4,7 +4,7 @@
 using BinaryBuilder
 
 name = "Moreau_CPU"
-version = v"0.4.0"
+version = v"0.4.1"
 sources = [
     GitSource("https://github.com/moreau-project/moreau.git",
         "de2d7d9ff2221b122a7c7ef5622df8d3c483db86"),
