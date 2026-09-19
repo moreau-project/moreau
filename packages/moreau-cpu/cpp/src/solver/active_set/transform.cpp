@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 namespace moreau {
 
@@ -300,17 +301,54 @@ int daqp_setup_ldp(DaqpWorkspace* work,
     return 0;
 }
 
+std::vector<double> symmetric_csr_gradient_weights(
+    int64_t n, const int64_t* row_offsets, const int64_t* col_indices) {
+    const int64_t nnz = row_offsets[n];
+    std::vector<double> weights(nnz, 1.0);
+
+    // Transpose the pattern once. Counting entries by column works for both
+    // sorted and unsorted CSR and avoids a search for every transposed entry.
+    std::vector<int64_t> transpose_offsets(n + 1, 0);
+    for (int64_t k = 0; k < nnz; k++) {
+        transpose_offsets[col_indices[k] + 1]++;
+    }
+    for (int64_t i = 0; i < n; i++) {
+        transpose_offsets[i + 1] += transpose_offsets[i];
+    }
+    std::vector<int64_t> next = transpose_offsets;
+    std::vector<int64_t> transpose_columns(nnz);
+    for (int64_t i = 0; i < n; i++) {
+        for (int64_t k = row_offsets[i]; k < row_offsets[i + 1]; k++) {
+            transpose_columns[next[col_indices[k]]++] = i;
+        }
+    }
+
+    // A row stamp tests membership in O(1), without clearing n marks per row.
+    std::vector<int64_t> marked(n, -1);
+    for (int64_t i = 0; i < n; i++) {
+        for (int64_t k = transpose_offsets[i]; k < transpose_offsets[i + 1]; k++) {
+            marked[transpose_columns[k]] = i;
+        }
+        for (int64_t k = row_offsets[i]; k < row_offsets[i + 1]; k++) {
+            const int64_t j = col_indices[k];
+            if (i != j && marked[j] == i) weights[k] = 0.5;
+        }
+    }
+    return weights;
+}
+
 void dense_to_csr_values(const double* dense, int64_t rows, int64_t cols,
                          const int64_t* row_offsets, const int64_t* col_indices,
-                         double* values, bool symmetric) {
+                         double* values, const double* symmetric_weights) {
     for (int64_t i = 0; i < rows; i++) {
         for (int64_t k = row_offsets[i]; k < row_offsets[i + 1]; k++) {
             int64_t j = col_indices[k];
-            if (symmetric && i != j) {
-                // dH = -v1 * x' is an asymmetric outer product. Since P is
-                // full symmetric (P[i,j] == P[j,i]), changing one CSR entry
-                // affects both, so the gradient is dH[i,j] + dH[j,i].
-                values[k] = dense[i * cols + j] + dense[j * cols + i];
+            if (symmetric_weights && i != j) {
+                // dH = -v1 * x' is asymmetric. A triangular entry carries
+                // the whole symmetric sensitivity; full CSR shares it between
+                // the two stored entries, as in the IPM gradient convention.
+                values[k] = (dense[i * cols + j] + dense[j * cols + i])
+                          * symmetric_weights[k];
             } else {
                 values[k] = dense[i * cols + j];
             }

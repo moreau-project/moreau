@@ -372,6 +372,9 @@ where
     }
 
     fn smoothing(&mut self, z: &mut [T], _s: &[T], work: &[T], μ: T) {
+        // Keep the initial barrier evaluation away from rounded cone faces.
+        z[0] += μ * (T::one() + self.α).sqrt();
+        z[1] += μ * (T::one() + T::one() - self.α).sqrt();
         // Newton's method to solve: z + μ*∇f*(z) = work
         // where ∇f*(z) is the DUAL barrier gradient
         // This follows Clarabel.jl's newton_smoothing implementation
@@ -444,10 +447,12 @@ where
             let mut delta = [T::zero(); 3];
             chol.cholesky_3x3_explicit_solve(&mut delta, &res);
 
-            // Compute Newton decrement: λ = sqrt(Δ' * H * Δ) = sqrt(res' * Δ)
+            // Squared Newton step norm for the unscaled objective.
             let lambda_sq = res[0] * delta[0] + res[1] * delta[1] + res[2] * delta[2];
+            // Self-concordant damping uses ||z-work||²/(2μ) + F*(z),
+            // whose squared Newton decrement is res.dot(delta)/μ.
             let lambda = if lambda_sq > T::zero() {
-                T::sqrt(lambda_sq)
+                T::sqrt(lambda_sq / μ)
             } else {
                 T::zero()
             };

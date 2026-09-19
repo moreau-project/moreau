@@ -36,7 +36,7 @@ fn assert_vecs_close(a: &[f64], b: &[f64], tol: f64, label: &str) {
 ///   minimize  (1/2) x'Px + q'x
 ///   s.t.      Ax + s = b, s >= 0
 ///
-/// P = [[2, 0], [0, 2]]  (identity scaled by 2)
+/// P = [[2, 0.4], [0.4, 2]] (full symmetric, unsorted CSR rows)
 /// A = [[1, 0], [0, 1], [1, 1]]  (3 constraints)
 /// cones = NonnegativeCone(3)
 fn simple_qp_structure() -> (
@@ -51,9 +51,9 @@ fn simple_qp_structure() -> (
     let n = 2;
     let m = 3;
 
-    // P in CSR: 2x2 diagonal, full symmetric (both triangles — here it's diagonal so same)
-    let P_ro = vec![0, 1, 2];
-    let P_ci = vec![0, 1];
+    // Unsorted full CSR exercises both the value scatter and symmetric gradient gather.
+    let P_ro = vec![0, 2, 4];
+    let P_ci = vec![1, 0, 1, 0];
 
     // A in CSR: 3x2
     // row 0: [1, 0]
@@ -71,7 +71,7 @@ fn simple_qp_structure() -> (
 fn test_backward_with_data_matches_backward_simple_qp() {
     let (n, m, P_ro, P_ci, A_ro, A_ci, cones) = simple_qp_structure();
 
-    let P_values = vec![2.0, 2.0];
+    let P_values = vec![0.4, 2.0, 2.0, 0.4];
     let A_values = vec![1.0, 1.0, 1.0, 1.0];
     let q = vec![-3.0, -2.0];
     let b = vec![1.5, 1.5, 2.0];
@@ -102,9 +102,9 @@ fn test_backward_with_data_matches_backward_simple_qp() {
     let z = results[0].z.clone();
     let s = results[0].s.clone();
 
-    // Upstream gradients: dx = [1, 1], ds = 0, dz = 0
+    // Unequal upstream components keep off-diagonal P sensitivities nonzero.
     let upstream = vec![UpstreamGradients {
-        dx: vec![1.0, 1.0],
+        dx: vec![1.0, -0.5],
         ds: vec![0.0; m],
         dz: vec![0.0; m],
         dz_x: vec![],
@@ -112,6 +112,8 @@ fn test_backward_with_data_matches_backward_simple_qp() {
 
     // Normal backward (uses cached state)
     let normal_grads = solver.backward(&upstream).unwrap();
+    assert!(normal_grads[0].dP_values[0].abs() > 1e-3);
+    assert!((normal_grads[0].dP_values[0] - normal_grads[0].dP_values[3]).abs() < 1e-10);
 
     // backward_with_data (uses externally-provided data)
     let data_grads = solver
@@ -150,7 +152,7 @@ fn test_backward_with_data_matches_backward_simple_qp() {
 fn test_backward_with_data_batch() {
     let (n, m, P_ro, P_ci, A_ro, A_ci, cones) = simple_qp_structure();
 
-    let P_values = vec![2.0, 2.0];
+    let P_values = vec![0.4, 2.0, 2.0, 0.4];
     let A_values = vec![1.0, 1.0, 1.0, 1.0];
 
     // Two slightly different q vectors for batch

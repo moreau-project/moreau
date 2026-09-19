@@ -142,6 +142,8 @@ private:
     // Cached sparsity structure
     std::vector<int64_t> P_ro_, P_ci_;
     std::vector<int64_t> A_ro_, A_ci_;
+    // Fixed-pattern symmetric gradient weights, shared by all batch elements.
+    std::vector<double> P_gradient_weights_;
 
     // Dense host buffers for matrix values (set by setup())
     std::vector<double> H_dense_;   // [n*n] (or [batchSize*n*n] if per-batch)

@@ -838,6 +838,7 @@ class Solver:
         warm_x: Optional[list] = None,
         warm_z: Optional[list] = None,
         warm_s: Optional[list] = None,
+        warm_z_x: Optional[list] = None,
     ) -> Dict[str, Any]:
         """Solve batched problems.
 
@@ -884,12 +885,15 @@ class Solver:
         warm_x_flat = None
         warm_z_flat = None
         warm_s_flat = None
+        warm_z_x_flat = None
         if warm_x is not None:
             warm_x_flat = np.ascontiguousarray(warm_x, dtype=np.float64).ravel()
         if warm_z is not None:
             warm_z_flat = np.ascontiguousarray(warm_z, dtype=np.float64).ravel()
         if warm_s is not None:
             warm_s_flat = np.ascontiguousarray(warm_s, dtype=np.float64).ravel()
+        if warm_z_x is not None:
+            warm_z_x_flat = np.ascontiguousarray(warm_z_x, dtype=np.float64).ravel()
 
         result = self._compiled_solver.solve_flat(
             q_flat,
@@ -898,6 +902,7 @@ class Solver:
             warm_x_flat=warm_x_flat,
             warm_z_flat=warm_z_flat,
             warm_s_flat=warm_s_flat,
+            warm_z_x_flat=warm_z_x_flat,
         )
 
         # Reshape flat arrays to (batch, dim)
@@ -928,6 +933,7 @@ class Solver:
         warm_x: Optional[list] = None,
         warm_z: Optional[list] = None,
         warm_s: Optional[list] = None,
+        warm_z_x: Optional[list] = None,
     ) -> Dict[str, Any]:
         """Solve conic optimization problem(s).
 
@@ -943,6 +949,7 @@ class Solver:
             warm_x: Optional warm start primal variables (list of lists)
             warm_z: Optional warm start dual variables (list of lists)
             warm_s: Optional warm start slack variables (list of lists)
+            warm_z_x: Optional warm start direct-cone dual variables (list of lists)
 
         Returns:
             Dict with keys: x, z, s, status, obj_val, iterations, solve_time
@@ -994,7 +1001,14 @@ class Solver:
 
         # Batched solve (handles both shared and per-problem P/A)
         result = self._solve_batch(
-            P_values, A_values, q, b, warm_x=warm_x, warm_z=warm_z, warm_s=warm_s
+            P_values,
+            A_values,
+            q,
+            b,
+            warm_x=warm_x,
+            warm_z=warm_z,
+            warm_s=warm_s,
+            warm_z_x=warm_z_x,
         )
 
         # If we reshuffled from single to batch, squeeze back

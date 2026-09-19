@@ -201,44 +201,9 @@ where
             }
         }
 
-        // Sort entries within each column by row index (CSC requires sorted rows)
-        // This is needed because CSR order doesn't guarantee sorted column indices
-        for col in 0..self.n {
-            let start = colptr[col];
-            let end = colptr[col + 1];
-            if end > start + 1 {
-                // Get indices that would sort by row
-                let mut indices: Vec<usize> = (start..end).collect();
-                indices.sort_by_key(|&i| rowval[i]);
-
-                // Apply permutation
-                let orig_rowval: Vec<_> = rowval[start..end].to_vec();
-                let orig_nzval: Vec<_> = nzval[start..end].to_vec();
-
-                for (new_pos, &old_pos) in indices.iter().enumerate() {
-                    rowval[start + new_pos] = orig_rowval[old_pos - start];
-                    nzval[start + new_pos] = orig_nzval[old_pos - start];
-                }
-
-                // Update the mapping to reflect the sorted positions
-                // We need to update csr_to_csc_map for all CSR entries that map into this column
-                for row in 0..self.m {
-                    for csr_idx in self.rowptr[row]..self.rowptr[row + 1] {
-                        if self.colval[csr_idx] == col {
-                            // Find the new position of this row in the sorted CSC column
-                            let target_row = row;
-                            for (new_pos, &r) in rowval[start..end].iter().enumerate() {
-                                if r == target_row {
-                                    csr_to_csc_map[csr_idx] = start + new_pos;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
+        // Rows were traversed in increasing order, so each CSC column is
+        // already sorted, even when column indices within a CSR row are not.
+        // The mapping recorded during insertion is final.
         let csc = CscMatrix::new(self.m, self.n, colptr, rowval, nzval);
 
         (csc, csr_to_csc_map)
@@ -290,41 +255,8 @@ where
             }
         }
 
-        // Sort entries within each row by column index (CSR should have sorted columns)
-        for row in 0..csc.m {
-            let start = rowptr[row];
-            let end = rowptr[row + 1];
-            if end > start + 1 {
-                // Get indices that would sort by column
-                let mut indices: Vec<usize> = (start..end).collect();
-                indices.sort_by_key(|&i| colval[i]);
-
-                // Apply permutation
-                let orig_colval: Vec<_> = colval[start..end].to_vec();
-                let orig_nzval: Vec<_> = nzval[start..end].to_vec();
-
-                for (new_pos, &old_pos) in indices.iter().enumerate() {
-                    colval[start + new_pos] = orig_colval[old_pos - start];
-                    nzval[start + new_pos] = orig_nzval[old_pos - start];
-                }
-
-                // Update the mapping
-                for col in 0..csc.n {
-                    for csc_idx in csc.colptr[col]..csc.colptr[col + 1] {
-                        if csc.rowval[csc_idx] == row {
-                            let target_col = col;
-                            for (new_pos, &c) in colval[start..end].iter().enumerate() {
-                                if c == target_col {
-                                    csc_to_csr_map[csc_idx] = start + new_pos;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
+        // Increasing column traversal already sorts each CSR row and leaves
+        // the insertion mapping final, including for unsorted input columns.
         let csr = CsrMatrix::new(csc.m, csc.n, rowptr, colval, nzval);
 
         (csr, csc_to_csr_map)
@@ -494,6 +426,42 @@ mod tests {
         let csc_values = &csc.nzval;
         let mapped_back = map_csc_to_csr_values(csc_values, &csc_to_csr);
         assert_eq!(mapped_back, csr.nzval);
+    }
+
+    #[test]
+    fn test_unsorted_csr_to_csc_mapping_with_empty_rows_and_columns() {
+        let csr = CsrMatrix::new(
+            4,
+            5,
+            vec![0, 3, 3, 5, 7],
+            vec![4, 0, 2, 3, 0, 4, 2],
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+        );
+        let (csc, mapping) = csr.to_csc_with_mapping();
+        assert_eq!(csc.colptr, vec![0, 2, 2, 4, 5, 7]);
+        assert_eq!(csc.rowval, vec![0, 2, 0, 3, 2, 0, 3]);
+        assert_eq!(csc.nzval, vec![2.0, 5.0, 3.0, 7.0, 4.0, 1.0, 6.0]);
+        assert!(csc.check_format().is_ok());
+        for (k, &csc_k) in mapping.iter().enumerate() {
+            assert_eq!(csr.nzval[k], csc.nzval[csc_k]);
+        }
+
+        // The same unsorted arrays represent a CSC matrix of the transpose.
+        // Exercise the opposite conversion with empty rows/columns as well.
+        let transposed = CscMatrix::new(
+            csr.n,
+            csr.m,
+            csr.rowptr.clone(),
+            csr.colval.clone(),
+            csr.nzval.clone(),
+        );
+        let (transposed_csr, reverse) = CsrMatrix::from_csc_with_mapping(&transposed);
+        assert_eq!(transposed_csr.rowptr, csc.colptr);
+        assert_eq!(transposed_csr.colval, csc.rowval);
+        assert_eq!(transposed_csr.nzval, csc.nzval);
+        for (k, &csr_k) in reverse.iter().enumerate() {
+            assert_eq!(transposed.nzval[k], transposed_csr.nzval[csr_k]);
+        }
     }
 
     #[test]

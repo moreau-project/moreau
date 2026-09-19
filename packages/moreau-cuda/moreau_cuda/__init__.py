@@ -320,6 +320,10 @@ def _settings_to_cuda(settings: Settings) -> _CudaSettings:
     cuda_settings.ipm.cudss_ir_steps = settings.ipm_settings.cudss_ir_steps
     cuda_settings.ipm.cudss_pivot_enable = settings.ipm_settings.cudss_pivot_enable
 
+    cuda_settings.ipm.chordal_decomposition_enable = (
+        settings.ipm_settings.chordal_decomposition_enable
+    )
+
     # Chordal decomposition merge strategy (must match CPU to keep CPU/CUDA
     # on the same PSD reformulation). #176
     cuda_settings.ipm.chordal_decomposition_merge_method = (

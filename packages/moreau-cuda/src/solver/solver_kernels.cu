@@ -103,15 +103,15 @@ __device__ double norm_inf_scaled_device(
 }
 
 /**
- * @brief Compute ‖z_x .* d[J]‖_2 where J is gathered through d_xcone_indices.
+ * @brief Compute ‖z_x .* dinv[J]‖_2 where J is gathered through d_xcone_indices.
  *
  * Mirror of `norm_scaled_device` for the direct-x dual: each entry of `z_x`
- * pairs with `x[idx]`, so the natural unscaling factor is `d[idx]`, not `e`.
+ * pairs with `x[idx]`, so the dual unscaling factor is `dinv[idx]`.
  * Returns 0 when totalXConeNumel == 0; result is meaningful only on tid 0.
  */
-__device__ double norm_zx_scaled_d_device(
+__device__ double norm_zx_scaled_dinv_device(
     const double* z_x,                  // [batch * totalXConeNumel + k]
-    const double* d,                    // [batch * n + idx]
+    const double* dinv,                 // [batch * n + idx]
     const int64_t* xcone_indices,       // length totalXConeNumel
     int64_t totalXConeNumel,
     int64_t batch_offset_zx,
@@ -122,7 +122,7 @@ __device__ double norm_zx_scaled_d_device(
 
     for (int64_t k = tid; k < totalXConeNumel; k += blockDim.x) {
         int64_t idx = xcone_indices[k];
-        double val = z_x[batch_offset_zx + k] * d[batch_offset_n + idx];
+        double val = z_x[batch_offset_zx + k] * dinv[batch_offset_n + idx];
         local_sum += val * val;
     }
 
@@ -224,18 +224,18 @@ __global__ void update_info_kernel_impl(
 
     // Direct-x dual `z_x` contributes to the primal-infeasibility certificate
     // `‖A^T z − Σ_J E_J^T z_x‖ → 0` and pairs with `x[J]` (so it unscales by
-    // `d[J]`, not `e`). Without this term in the relative-residual denominator,
+    // `dinv[J]`). Without this term in the relative-residual denominator,
     // a certificate with small `‖z‖` but large `‖z_x‖` can fail the relative
     // test even when the absolute residual is well below tolerance.
-    double norm_zx_d_cinv = 0.0;
+    double norm_zx_dinv_cinv = 0.0;
     if (totalXConeNumel > 0 && z_x != nullptr && d_xcone_indices != nullptr) {
         int64_t batch_offset_zx = batch * totalXConeNumel;
-        norm_zx_d_cinv = norm_zx_scaled_d_device(
-            z_x, d, d_xcone_indices, totalXConeNumel,
+        norm_zx_dinv_cinv = norm_zx_scaled_dinv_device(
+            z_x, dinv, d_xcone_indices, totalXConeNumel,
             batch_offset_zx, batch_offset_n) * c_inv;
     }
 
-    double res_p_inf = rx_inf_norm / fmax(1.0, normz + norm_zx_d_cinv);
+    double res_p_inf = rx_inf_norm / fmax(1.0, normz + norm_zx_dinv_cinv);
     double res_d_inf = fmax(
         Px_norm / fmax(1.0, normx),
         rz_inf_norm / fmax(1.0, normx + norms)

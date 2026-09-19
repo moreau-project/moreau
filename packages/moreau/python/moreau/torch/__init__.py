@@ -30,6 +30,8 @@ import warnings
 import torch
 from typing import Tuple, Optional, Sequence
 
+from moreau._validation import _validate_P_sparsity_pattern_symmetric
+
 # Use centralized backend for device availability
 from moreau._backend import (
     torch_available,
@@ -141,6 +143,20 @@ class Solver:
         settings: Optional[Settings] = None,
         b_sparsity_pattern: Optional[Sequence[bool]] = None,
     ):
+        # Validate the fixed structure once, before choosing a solver backend.
+        _validate_P_sparsity_pattern_symmetric(
+            n,
+            (
+                P_row_offsets.detach().cpu()
+                if isinstance(P_row_offsets, torch.Tensor)
+                else P_row_offsets
+            ),
+            (
+                P_col_indices.detach().cpu()
+                if isinstance(P_col_indices, torch.Tensor)
+                else P_col_indices
+            ),
+        )
         # Check for old CVXPY with SOC cones
         from moreau import _warn_cvxpy_soc_if_needed, _require_dir_cones_compatible
 

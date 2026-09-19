@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "moreau/cones/cones.hpp"
+#include "moreau/diff/diff_kernels.cuh"
 #include "moreau/settings/settings.hpp"
 #include "moreau/solver/solver.hpp"
 
@@ -24,6 +25,53 @@ T* cuda_upload(const std::vector<T>& host) {
     return d;
 }
 }  // namespace
+
+TEST(XConeEndToEndTest, NonnegScaledDualAndExternalWarmStart) {
+    constexpr int n = 3, m = 0, xn = 2, batchSize = 1;
+    const std::vector<int64_t> P_ro = {0, 1, 2, 3}, P_ci = {0, 1, 2}, A_ro = {0};
+    const std::vector<double> P_values = {4.0, 2.0, 0.25}, q = {2.0, -6.0, 3.0};
+    const std::vector<double> optimum = {0.0, 3.0, 0.0}, dual = {3.0, 2.0};
+    Cones cones{};
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {2, 0}});
+    Settings settings;
+    settings.verbose = false;
+    BatchedVector d_P(n, batchSize), d_q(n, batchSize), dummy(1, batchSize);
+    BatchedVector d_optimum(n, batchSize), d_dual(xn, batchSize), d_user_dual(xn, batchSize);
+    d_P.cpuToGpu(P_values.data());
+    d_q.cpuToGpu(q.data());
+    d_optimum.cpuToGpu(optimum.data());
+    d_dual.cpuToGpu(dual.data());
+
+    CompiledSolver cold(n, m, batchSize, P_ro.data(), P_ci.data(), n,
+                        A_ro.data(), nullptr, 0, cones, settings);
+    cold.solveAll(d_P.data(), dummy.data(), d_q.data(), dummy.data());
+    unscale_z_x(d_user_dual.data(), cold.variables.z_x.data(),
+                cold.data.equilibration.dinv.data(), cold.data.equilibration.c.data(),
+                cold.solution.τ_raw.data(), cold.data.cones.d_xcone_indices,
+                n, xn, batchSize);
+    std::vector<double> user_dual(xn);
+    d_user_dual.gpuToCpu(user_dual.data());
+    int32_t status = 0;
+    ASSERT_EQ(cudaMemcpy(&status, cold.solution.status.get(), sizeof(status),
+                         cudaMemcpyDeviceToHost), cudaSuccess);
+    ASSERT_EQ(status, static_cast<int32_t>(SolverStatus::Solved));
+    for (int k = 0; k < xn; ++k) {
+        EXPECT_NEAR(user_dual[k], dual[k], 1e-6);
+    }
+
+    // Supply an independent optimum: inverse bugs cannot cancel as they can
+    // when warming from the solver's own incorrectly unscaled output.
+    settings.maxIter = 0;
+    CompiledSolver warm(n, m, batchSize, P_ro.data(), P_ci.data(), n,
+                        A_ro.data(), nullptr, 0, cones, settings);
+    warm.setup(d_P.data(), dummy.data());
+    warm.solve(d_q.data(), dummy.data(), d_optimum.data(), dummy.data(), dummy.data(),
+               0, d_dual.data());
+    ASSERT_EQ(cudaMemcpy(&status, warm.solution.status.get(), sizeof(status),
+                         cudaMemcpyDeviceToHost), cudaSuccess);
+    EXPECT_EQ(status, static_cast<int32_t>(SolverStatus::Solved));
+    EXPECT_EQ(warm.info.iterations, 0);
+}
 
 // ----------------------------------------------------------------------
 // Direct-x SOC on CUDA (dense, dim=3): min 0.5 x'Px + q'x s.t.

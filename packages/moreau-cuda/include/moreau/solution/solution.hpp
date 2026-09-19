@@ -36,6 +36,8 @@ struct Solution {
     BatchedVector x_raw;    // Raw primal [batchSize][n]
     BatchedVector z_raw;    // Raw dual [batchSize][m]
     BatchedVector s_raw;    // Raw slack [batchSize][m]
+    BatchedVector z_x_raw;  // Raw direct dual paired with the saved primal iterate
+    BatchedVector normalization_scale; // τ for solutions, κ for certificates
     BatchedVector τ_raw;    // Raw τ [batchSize][1]
     BatchedVector κ_raw;    // Raw κ [batchSize][1]
     BatchedVector cost_primal_raw;  // Saved primal cost at convergence [batchSize][1]
@@ -74,6 +76,8 @@ struct Solution {
           x_raw(1, 1),
           z_raw(1, 1),
           s_raw(1, 1),
+          z_x_raw(0, 1),
+          normalization_scale(1, 1),
           τ_raw(1, 1),
           κ_raw(1, 1),
           cost_primal_raw(1, 1),
@@ -102,13 +106,15 @@ struct Solution {
     /**
      * @brief Construct a solution with given problem dimensions
      */
-    Solution(int64_t n, int64_t m, int64_t batchSize)
+    Solution(int64_t n, int64_t m, int64_t batchSize, int64_t xn = 0)
         : x(n, batchSize),
           z(m, batchSize),
           s(m, batchSize),
           x_raw(n, batchSize),
           z_raw(m, batchSize),
           s_raw(m, batchSize),
+          z_x_raw(xn, batchSize),
+          normalization_scale(1, batchSize),
           τ_raw(1, batchSize),
           κ_raw(1, batchSize),
           cost_primal_raw(1, batchSize),

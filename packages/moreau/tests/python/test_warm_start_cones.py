@@ -26,6 +26,30 @@ def _make_solver(prob, device, batch_size=1):
     return solver
 
 
+@pytest.mark.cpu_only
+@pytest.mark.parametrize("batch_size", [1, 2])
+def test_compiled_direct_cone_warm_start(batch_size):
+    solver = moreau.CompiledSolver(
+        n=2,
+        m=0,
+        P_row_offsets=[0, 1, 2],
+        P_col_indices=[0, 1],
+        A_row_offsets=[0],
+        A_col_indices=[],
+        cones=moreau.Cones(dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1])]),
+        settings=moreau.Settings(device="cpu", batch_size=batch_size),
+    )
+    solver.setup([4.0, 0.25], [])
+    q, b = np.tile([-4.0, 2.0], (batch_size, 1)), np.empty((batch_size, 0))
+    cold = solver.solve(q, b)
+    assert np.all(np.asarray(solver.info.iterations) > 0)
+    warm = solver.solve(q, b, warm_start=cold.to_warm_start())
+    assert solver.info.status == [moreau.SolverStatus.Solved] * batch_size
+    assert np.all(np.asarray(solver.info.iterations) == 0)
+    np.testing.assert_allclose(warm.x, np.tile([1.0, 0.0], (batch_size, 1)), atol=1e-6)
+    np.testing.assert_allclose(warm.z_x, np.tile([0.0, 2.0], (batch_size, 1)), atol=1e-6)
+
+
 @pytest.fixture
 def exp_problem():
     """Exponential cone problem.

@@ -356,7 +356,7 @@ void CompiledSolver::warmStart(
                              data.equilibration.e, data.equilibration.c, stream);
 
     // Direct-x: convert user-frame z_x to the equilibrated frame the IPM
-    // operates in. `z_x_eq[b,k] = z_x_user[b,k] * c[b] / d[J[k]]`. Inverse
+    // operates in. `z_x_eq[b,k] = z_x_user[b,k] * c[b] * d[J[k]]`. Inverse
     // of the user-facing unscale. When warm_z_x is omitted we must fall
     // back to the same unit-init point `default_start` uses — otherwise
     // z_x carries stale values from a prior solve (resetState clears only
@@ -384,7 +384,7 @@ void CompiledSolver::warmStart(
     residuals.update(variables, data, cusparse_handle_, cublas_handle_, stream);
     info.update(data, variables, residuals, stream);
 
-    // Step 3: Compute warmness mu = max(rp, rd, min(ga, gr)), floor 1e-6.
+    // Step 3: Compute warmness mu with a positive smoothing floor.
     compute_warmness_mu(
         mu.data(),
         info.res_primal.data(),
@@ -405,15 +405,21 @@ void CompiledSolver::warmStart(
     data.cones.smoothing(variables.z, warm_work, mu, stream);
     waxpby(variables.s, 1.0, variables.z, -1.0, warm_work, stream);
 
-    // Direct-x dual: we use the user-supplied `warm_z_x` as-is (after the
-    // equilibration scaling at step 1). A naïve central-path projection
-    // `z_x = -μ·∇F(x)` would move *away* from the user's z_x for warm
-    // points near optimal — there ∇F(x) blows up at the boundary while
-    // the user's z_x is small, so the projection produces a much worse
-    // initial dual than the user supplied. The slack smoothing avoids
-    // this trap because it preserves the (z − s) gap; the direct-x form
-    // has no analogous preservation invariant, so the safest default is
-    // to trust the user's z_x and let the IPM correct it on iter 0.
+    // Asymmetric direct barriers are undefined on the cone boundary. Add
+    // the same small interior unit point to x[J] and z_x, preserving their
+    // difference and retaining the supplied dual rather than reinitializing it.
+    interiorize_direct_warm_start(
+        variables.x.data(), variables.z_x.data(), mu.data(),
+        info.res_primal.data(), info.res_dual.data(),
+        info.gap_abs.data(), info.gap_rel.data(),
+        settings.ipm.tolFeas, settings.ipm.tolGapAbs, settings.ipm.tolGapRel,
+        data.cones.d_xcone_kinds, data.cones.d_xcone_dims,
+        data.cones.d_xcone_numel_offsets, data.cones.d_xcone_indices,
+        data.cones.d_xcone_pow_idx, data.cones.d_xcone_pow_alpha,
+        data.cones.d_xcone_genpow_idx, data.cones.d_xcone_genpow_dim1s,
+        data.cones.d_xcone_genpow_alpha_offsets, data.cones.d_xcone_genpow_alphas,
+        n, total_xn, data.cones.numXCones, batchSize,
+        m > data.cones.numZeroCones, stream);
 }
 
 void CompiledSolver::init_xcone_start_point(cudaStream_t stream) {
@@ -1555,6 +1561,9 @@ void CompiledSolver::save_best_iterate(
         batchSize,
         stream
     );
+    copy_direct_duals_masked(solution.z_x_raw.data(), variables.z_x.data(),
+                            solution.should_save.get(), data.cones.totalXConeNumel,
+                            batchSize, stream);
     // Also mirror the cost snapshot into the best_cost_* buffers so
     // restore_best_iterate has a complete metric picture (save_best_iterate
     // writes cost into solution.*_raw; restore_best_iterate reads from Info).
@@ -1618,6 +1627,9 @@ void CompiledSolver::save_terminated_solutions(
         batchSize,
         stream
     );
+    copy_direct_duals_masked(solution.z_x_raw.data(), variables.z_x.data(),
+                            solution.should_save.get(), data.cones.totalXConeNumel,
+                            batchSize, stream);
 }
 
 void CompiledSolver::resetState(cudaStream_t stream) {
@@ -1993,6 +2005,9 @@ void CompiledSolver::runIPMLoop(cudaStream_t stream) {
                     solution.τ_raw.data(), solution.κ_raw.data(),
                     solution.solution_saved.get(),
                     data.n, data.m, data.batchSize, stream);
+                copy_direct_duals_masked(variables.z_x.data(), solution.z_x_raw.data(),
+                                        solution.solution_saved.get(), data.cones.totalXConeNumel,
+                                        data.batchSize, stream);
             }
 
         // Check deferred per-batch scaling success from previous iteration.
@@ -2359,6 +2374,14 @@ void CompiledSolver::runIPMLoop(cudaStream_t stream) {
         info.post_process(residuals, settings, stream);
     } else {
         info.sync_status_to_host(stream);
+    }
+
+    // Return every component from the same saved (possibly best) iterate.
+    if (data.cones.totalXConeNumel > 0) {
+        double* dst = yolo_mode ? solution.z_x_raw.data() : variables.z_x.data();
+        const double* src = yolo_mode ? variables.z_x.data() : solution.z_x_raw.data();
+        cudaMemcpyAsync(dst, src, sizeof(double) * data.cones.totalXConeNumel * data.batchSize,
+                        cudaMemcpyDeviceToDevice, stream);
     }
 
     solution.post_process(

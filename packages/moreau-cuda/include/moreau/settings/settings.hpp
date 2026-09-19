@@ -170,6 +170,8 @@ struct IPMSettings {
     // true  = pivoting on (for numerically challenging problems)
     bool cudssPivotEnable = false;
 
+    bool chordalDecompositionEnable = true;
+
     // Chordal decomposition merge strategy for sparse PSD cones.
     // Must match the CPU default to keep CPU/CUDA on the same reformulation
     // for the same problem. Accepted values:

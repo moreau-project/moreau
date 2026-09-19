@@ -430,19 +430,36 @@ class TestPSymmetryValidation:
         solver = moreau.Solver(P, q, A, b, cones, moreau.Settings(device=device))
         assert solver.n == 2
 
-    def test_asymmetric_sparsity_pattern_rejected(self, device):
-        """CompiledSolver should reject asymmetric sparsity pattern for P."""
-        # P has entry at (0,1) but not (1,0) in sparsity pattern
+    @pytest.mark.parametrize("interface", ["compiled", "torch", "jax"])
+    @pytest.mark.parametrize("method", ["auto", "ipm", "active_set"])
+    @pytest.mark.parametrize("triangle", ["upper", "lower"])
+    def test_asymmetric_sparsity_pattern_rejected(self, device, interface, method, triangle):
+        """Every public interface rejects triangular P before backend dispatch."""
+        P = sparse.csr_array([[2.0, 0.5], [0.5, 2.0]])
+        P = (sparse.triu if triangle == "upper" else sparse.tril)(P, format="csr")
+        convert = np.asarray
+        solver_class = moreau.CompiledSolver
+        if interface == "torch":
+            torch = pytest.importorskip("torch")
+            solver_class = pytest.importorskip("moreau.torch").Solver
+
+            # Structural tensors on CUDA must be validated at construction too.
+            def convert(a):
+                return torch.as_tensor(a, device=device)
+
+        elif interface == "jax":
+            convert = pytest.importorskip("jax.numpy").asarray
+            solver_class = pytest.importorskip("moreau.jax").Solver
         with pytest.raises(ValueError, match="sparsity pattern is not symmetric"):
-            moreau.CompiledSolver(
+            solver_class(
                 n=2,
                 m=2,
-                P_row_offsets=[0, 2, 3],  # row 0 has 2 entries, row 1 has 1
-                P_col_indices=[0, 1, 1],  # (0,0), (0,1), (1,1) - missing (1,0)
-                A_row_offsets=[0, 1, 2],
-                A_col_indices=[0, 1],
+                P_row_offsets=convert(P.indptr),
+                P_col_indices=convert(P.indices),
+                A_row_offsets=convert([0, 1, 2]),
+                A_col_indices=convert([0, 1]),
                 cones=moreau.Cones(num_nonneg_cones=2),
-                settings=moreau.Settings(device=device),
+                settings=moreau.Settings(device=device, solver=method),
             )
 
     def test_diagonal_P_accepted(self, device):

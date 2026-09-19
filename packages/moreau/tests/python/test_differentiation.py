@@ -11,6 +11,7 @@ Tests run on both CPU and CUDA (when available).
 
 import numpy as np
 import pytest
+from scipy import sparse
 
 # Check if PyTorch is available
 try:
@@ -479,6 +480,134 @@ class TestBatchedDifferentiation:
         assert torch.all(torch.isfinite(dq))
         assert torch.all(torch.isfinite(dA))
         assert torch.all(torch.isfinite(db))
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize(
+    "method,storage,interface",
+    [
+        (method, storage, interface)
+        for method in ("auto", "active_set", "ipm")
+        for storage in ("full", "full_unsorted")
+        for interface in ("numpy", "torch", "jax")
+    ],
+)
+def test_equality_qp_symmetric_P_gradient(method, storage, interface):
+    """Full symmetric CSR shares each off-diagonal sensitivity across its pair."""
+    P = np.array([[3.0, 0.7], [0.7, 2.0]])
+    q = np.array([-1.0, 0.3])
+    A = sparse.csr_matrix([[1.0, 2.0]])
+    b = np.array([1.4])
+    dx = np.array([0.4, -0.8])
+    cones = moreau.Cones(num_zero_cones=1)
+    settings = moreau.Settings(
+        device="cpu",
+        solver=method,
+        enable_grad=True,
+        verbose=False,
+        ipm_settings=moreau.IPMSettings(
+            diff_method="exact", tol_feas=1e-11, tol_gap_abs=1e-11, tol_gap_rel=1e-11
+        ),
+    )
+    matrix = sparse.csr_matrix(P)
+    if storage == "full_unsorted":
+        for start, end in zip(matrix.indptr[:-1], matrix.indptr[1:]):
+            matrix.indices[start:end] = matrix.indices[start:end][::-1]
+            matrix.data[start:end] = matrix.data[start:end][::-1]
+    if interface == "numpy":
+        solver = moreau.Solver(matrix, q, A, b, cones, settings)
+        sol = solver.solve()
+        x = sol.x
+        gradients = {name: value.reshape(-1) for name, value in solver.backward(dx).items()}
+        grad = gradients["dP_values"]
+    elif interface == "torch":
+        solver = Solver(
+            n=2,
+            m=1,
+            P_row_offsets=torch.tensor(matrix.indptr),
+            P_col_indices=torch.tensor(matrix.indices),
+            A_row_offsets=torch.tensor(A.indptr),
+            A_col_indices=torch.tensor(A.indices),
+            cones=cones,
+            settings=settings,
+        )
+        values, av, qt, bt = [
+            torch.tensor(v, dtype=torch.float64, requires_grad=True)
+            for v in (matrix.data, A.data, q, b)
+        ]
+        sol = solver.solve(values, av, qt, bt)
+        (sol.x @ torch.tensor(dx)).backward()
+        x = sol.x.detach().numpy()
+        gradients = {
+            name: tensor.grad.numpy()
+            for name, tensor in zip(("dP_values", "dA_values", "dq", "db"), (values, av, qt, bt))
+        }
+        grad = gradients["dP_values"]
+    else:
+        jax = pytest.importorskip("jax")
+        jnp = pytest.importorskip("jax.numpy")
+        jax_solver = pytest.importorskip("moreau.jax").Solver
+        jax.config.update("jax_enable_x64", True)
+        solver = jax_solver(
+            n=2,
+            m=1,
+            P_row_offsets=matrix.indptr,
+            P_col_indices=matrix.indices,
+            A_row_offsets=A.indptr,
+            A_col_indices=A.indices,
+            cones=cones,
+            settings=settings,
+        )
+        args = tuple(jnp.asarray(v) for v in (matrix.data, A.data, q, b))
+        x = np.asarray(solver.solve(*args).x)
+        values = jax.jit(
+            jax.grad(lambda *a: solver.solve(*a).x @ jnp.asarray(dx), argnums=(0, 1, 2, 3))
+        )(*args)
+        gradients = dict(zip(("dP_values", "dA_values", "dq", "db"), map(np.asarray, values)))
+        grad = gradients["dP_values"]
+    assert solver._settings.solver == (
+        moreau.SolverType.IPM if method == "ipm" else moreau.SolverType.ACTIVE_SET
+    )
+
+    def analytic_solution(H):
+        K = np.block([[H, A.toarray().T], [A.toarray(), np.zeros((1, 1))]])
+        return np.linalg.solve(K, np.r_[-q, b])[:2]
+
+    np.testing.assert_allclose(x, analytic_solution(P), atol=1e-7)
+    row = np.repeat(np.arange(2), np.diff(matrix.indptr))
+    col = matrix.indices
+    # Compare algorithms explicitly, including the saved-state autograd path.
+    # Keep the independent analytic oracle below: agreement alone is insufficient.
+    ipm_settings = settings.model_copy(deep=True)
+    ipm_settings.solver = moreau.SolverType.IPM
+    reference = moreau.Solver(sparse.csr_matrix(P), q, A, b, cones, ipm_settings)
+    ref_sol = reference.solve()
+    np.testing.assert_allclose(x, ref_sol.x, atol=1e-7)
+    ref_grad = reference.backward(dx)
+    for name in ("dP_values", "dq", "dA_values", "db"):
+        expected = ref_grad[name].reshape(-1)
+        if name == "dP_values":
+            expected = expected.reshape(2, 2)[row, col]
+        np.testing.assert_allclose(
+            gradients[name],
+            expected,
+            atol=1e-7,
+            rtol=1e-6,
+            err_msg=f"{method} vs IPM: {name}",
+        )
+    for direction in (
+        np.diag([1.0, 0.0]),
+        np.diag([0.0, 1.0]),
+        np.array([[0.0, 1.0], [1.0, 0.0]]),
+    ):
+        eps = 1e-5
+        fd = (
+            dx
+            @ (analytic_solution(P + eps * direction) - analytic_solution(P - eps * direction))
+            / (2 * eps)
+        )
+        assert abs(fd) > 1e-3
+        np.testing.assert_allclose(grad @ direction[row, col], fd, atol=1e-7, rtol=1e-6)
 
 
 if __name__ == "__main__":
