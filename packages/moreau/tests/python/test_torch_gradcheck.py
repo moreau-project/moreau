@@ -18,7 +18,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 import moreau
 import moreau.torch as moreau_torch
 from moreau.torch import Solver
-from moreau.torch._compiled import _solve_cuda
+from moreau.torch._compiled import _solve
 
 
 def gradcheck_with_device(func, inputs, device, **kwargs):
@@ -1822,14 +1822,16 @@ class TestTorchCompile:
         torch.testing.assert_close(x_compiled, x_eager)
 
 
-@pytest.mark.cuda
 @pytest.mark.parametrize("batch_shape", [(), (1,), (3,)])
 @pytest.mark.parametrize("shared_matrices", [False, True])
-def test_fullgraph_cuda_solve(simple_qp_setup, batch_shape, shared_matrices):
+@pytest.mark.parametrize(
+    "solver_type", ["ipm", pytest.param("active_set", marks=pytest.mark.cpu_only)]
+)
+def test_fullgraph_solve(simple_qp_setup, batch_shape, shared_matrices, device, solver_type):
     """Capture cold solves, changing data, and delayed backward in one graph."""
     n, m, P_ro, P_ci, A_ro, A_ci, cones = simple_qp_setup
     solver = Solver(
-        n, m, P_ro, P_ci, A_ro, A_ci, cones, moreau.Settings(device="cuda", solver="ipm")
+        n, m, P_ro, P_ci, A_ro, A_ci, cones, moreau.Settings(device=device, solver=solver_type)
     )
     torch._dynamo.reset()
     backend = CompileCounterWithBackend("inductor")
@@ -1844,7 +1846,7 @@ def test_fullgraph_cuda_solve(simple_qp_setup, batch_shape, shared_matrices):
         values = ([2.0 * scale, 3.0], [1.0, 1.0 * scale], [0.2, -0.3], [1.0])
         inputs = []
         for i, val in enumerate(values):
-            t = torch.tensor(val, dtype=torch.float64, device="cuda")
+            t = torch.tensor(val, dtype=torch.float64, device=device)
             if batch_shape and not (shared_matrices and i < 2):
                 t = t.expand(*batch_shape, -1).clone()
             inputs.append(t.requires_grad_())
@@ -1863,9 +1865,8 @@ def test_fullgraph_cuda_solve(simple_qp_setup, batch_shape, shared_matrices):
     torch._dynamo.reset()
 
 
-@pytest.mark.cuda
 @pytest.mark.parametrize("batch_shape", [(), (1,), (3,)])
-def test_fullgraph_cuda_direct_duals(batch_shape):
+def test_fullgraph_direct_duals(batch_shape, device):
     cones = moreau.Cones(dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1])])
     solver = Solver(
         2,
@@ -1875,16 +1876,16 @@ def test_fullgraph_cuda_direct_duals(batch_shape):
         torch.tensor([0]),
         torch.empty(0, dtype=torch.int64),
         cones,
-        moreau.Settings(device="cuda", solver="ipm"),
+        moreau.Settings(device=device, solver="ipm"),
     )
-    P = torch.ones(2, dtype=torch.float64, device="cuda")
-    A = torch.empty(0, dtype=torch.float64, device="cuda")
-    q = torch.tensor([-2.0, 1.0], dtype=torch.float64, device="cuda")
+    P = torch.ones(2, dtype=torch.float64, device=device)
+    A = torch.empty(0, dtype=torch.float64, device=device)
+    q = torch.tensor([-2.0, 1.0], dtype=torch.float64, device=device)
     q = q.expand(*batch_shape, 2).clone().requires_grad_()
     if batch_shape == (3,):
         q = q.T.contiguous().T.detach().requires_grad_()
         assert not q.is_contiguous()
-    b = torch.empty(*batch_shape, 0, dtype=torch.float64, device="cuda")
+    b = torch.empty(*batch_shape, 0, dtype=torch.float64, device=device)
     torch._dynamo.reset()
 
     def solve(q):
@@ -1900,28 +1901,27 @@ def test_fullgraph_cuda_direct_duals(batch_shape):
         grad, torch.where(q < 0, -torch.ones_like(q), 2 * torch.ones_like(q)), atol=1e-6, rtol=1e-6
     )
     torch.library.opcheck(
-        _solve_cuda,
-        (P, A, q, b, solver._compile_handle, 2, []),
+        _solve,
+        (P, A, q, b, solver._compile_handle, 2, False, []),
     )
     torch._dynamo.reset()
 
 
-@pytest.mark.cuda
-def test_compiled_handle_lifetime(simple_qp_setup):
+def test_compiled_handle_lifetime(simple_qp_setup, device):
     """Saved storage owns the native solver, even with detached saved tensors."""
     n, m, P_ro, P_ci, A_ro, A_ci, cones = simple_qp_setup
     solver = Solver(
-        n, m, P_ro, P_ci, A_ro, A_ci, cones, moreau.Settings(device="cuda", solver="ipm")
+        n, m, P_ro, P_ci, A_ro, A_ci, cones, moreau.Settings(device=device, solver="ipm")
     )
-    P = torch.tensor([2.0, 2.0], dtype=torch.float64, device="cuda")
-    A = torch.ones(2, dtype=torch.float64, device="cuda")
-    q = torch.tensor([0.2, -0.3], dtype=torch.float64, device="cuda", requires_grad=True)
-    b = torch.ones(1, dtype=torch.float64, device="cuda")
+    P = torch.tensor([2.0, 2.0], dtype=torch.float64, device=device)
+    A = torch.ones(2, dtype=torch.float64, device=device)
+    q = torch.tensor([0.2, -0.3], dtype=torch.float64, device=device, requires_grad=True)
+    b = torch.ones(1, dtype=torch.float64, device=device)
     # Tune before taking the weak reference; tuning can replace the impl.
     solver.solve(P, A, q, b)
     impl_ref = weakref.ref(solver._impl)
     with torch.autograd.graph.saved_tensors_hooks(lambda t: t.detach(), lambda t: t):
-        loss = _solve_cuda(P, A, q, b, solver._compile_handle, 0, [])[0].square().sum()
+        loss = _solve(P, A, q, b, solver._compile_handle, 0, False, [])[0].square().sum()
     del solver
     gc.collect()
     assert impl_ref() is not None
@@ -1929,3 +1929,50 @@ def test_compiled_handle_lifetime(simple_qp_setup):
     assert torch.isfinite(q.grad).all()
     gc.collect()
     assert impl_ref() is None
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize("batch_shape", [(), (1,), (3,)])
+def test_fullgraph_active_set_snapshot(inequality_qp_setup, batch_shape, monkeypatch):
+    """Delayed backward restores each active set without solving again."""
+    n, m, P_ro, P_ci, A_ro, A_ci, cones = inequality_qp_setup
+    solver = Solver(
+        n,
+        m,
+        P_ro,
+        P_ci,
+        A_ro,
+        A_ci,
+        cones,
+        moreau.Settings(device="cpu", solver="active_set"),
+    )
+    P = torch.full((2,), 2.0, dtype=torch.float64)
+    A = -torch.ones(len(A_ci), dtype=torch.float64)
+    b = torch.zeros(*batch_shape, m, dtype=torch.float64)
+    torch._dynamo.reset()
+
+    def solve(q):
+        return solver.solve(P, A, q, b).x
+
+    compiled = torch.compile(solve, fullgraph=True)
+    inputs, losses = [], []
+    for values in ([1.0, -2.0], [-2.0, 1.0]):
+        q = torch.tensor(values, dtype=torch.float64).expand(*batch_shape, n).clone()
+        q.requires_grad_()
+        x = compiled(q)
+        expected = (-q / 2).clamp_min(0)
+        torch.testing.assert_close(x, expected, atol=1e-7, rtol=1e-7)
+        inputs.append(q)
+        losses.append(x.square().sum())
+
+    def unexpected_solve(*args, **kwargs):
+        raise AssertionError("Backward must use its saved active-set snapshot")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(solver._impl, "solve", unexpected_solve)
+        grads = torch.autograd.grad(sum(losses), inputs)
+    for q, grad in zip(inputs, grads):
+        expected = (q / 2).clamp_max(0)
+        torch.testing.assert_close(grad, expected, atol=1e-7, rtol=1e-7)
+    torch.library.opcheck(_solve, (P, A, inputs[0], b, solver._compile_handle, 0, True, []))
+    torch._dynamo.reset()

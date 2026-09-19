@@ -296,6 +296,7 @@ class Solver:
         # can look it up from a tensor handle.
         self._impl_handle = _register_impl(self._impl)
         self._compile_handle = _register_solver(self)
+        self._compile_active_set = getattr(self._impl, "_use_active_set", False)
         self._direct_dual_size = sum(len(c.indices) for c in cones.dir_cones)
 
     @torch.compiler.disable
@@ -501,7 +502,7 @@ class Solver:
             >>> loss = solution.x.sum()
             >>> loss.backward()
         """
-        if torch.compiler.is_compiling() and self._device == "cuda":
+        if torch.compiler.is_compiling() and self._device in ("cpu", "cuda"):
             return _compiled_solve(self, P_values, A_values, q, b, warm_start)
         return self._solve_eager(P_values, A_values, q, b, warm_start=warm_start)
 
