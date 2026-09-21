@@ -25,7 +25,12 @@ python/moreau/
 │                      # Solution, BatchedSolution, WarmStart, BatchedWarmStart
 ├── _validation.py     # Input shape/dtype/sparsity validation
 ├── testing.py         # Public test helpers
-├── torch/             # torch.Solver — PyTorch autograd integration
+├── torch/             # torch.Solver — PyTorch autograd + torch.compile
+│   ├── __init__.py    # Solver API, eager/compiled dispatch
+│   ├── _autograd.py   # Eager autograd and shared backward custom op
+│   ├── _compiled.py   # Forward custom op, fake kernel, autograd registration
+│   ├── _cpu_impl.py   # CPU backend adapter
+│   └── _types.py      # Torch solution and warm-start containers
 └── jax/               # jax.Solver — jit/vmap/grad-friendly (recently split out)
 
 tests/python/          # Unified API integration tests
@@ -35,6 +40,10 @@ tests/python/bench/    # Decision-gate benchmarks (checked in)
 The public direct cone API uses `DirectConeSpec` entries in `Cones.dir_cones`.
 Both native solver bindings accept the `dir_cones` argument. See
 [`docs/guide/direct-cones.md`](docs/guide/direct-cones.md) for usage.
+
+PyTorch CPU and CUDA solves and backward passes use custom ops under
+`torch.compile`, including with `fullgraph=True`. See the
+[PyTorch guide](docs/guide/pytorch-integration.md#torchcompile).
 
 ## packages/moreau-cpu (Rust solver)
 

@@ -100,7 +100,14 @@ def _solve_backward_op(
         z_x=z_x,
         dz_x=dz_x,
     )
-    return dP, dq, dA, db
+    # Native batched differentiation returns a gradient per problem even when
+    # P or A was shared. Match the input shapes promised by the fake kernel.
+    return (
+        dP.sum_to_size(P_values.shape),
+        dq.sum_to_size(q.shape),
+        dA.sum_to_size(A_values.shape),
+        db.sum_to_size(b.shape),
+    )
 
 
 @_solve_backward_op.register_fake
@@ -128,10 +135,10 @@ def _solve_backward_op_fake(
     dz_x,
 ):
     return (
-        torch.empty_like(P_values),
-        torch.empty_like(q),
-        torch.empty_like(A_values),
-        torch.empty_like(b),
+        P_values.new_empty(P_values.shape),
+        q.new_empty(q.shape),
+        A_values.new_empty(A_values.shape),
+        b.new_empty(b.shape),
     )
 
 
