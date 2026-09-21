@@ -10,7 +10,7 @@ include(joinpath(YGGDRASIL_DIR, "platforms", "cuda.jl"))
 include(joinpath(YGGDRASIL_DIR, "C", "CUDA", "common.jl"))
 
 name = "Moreau_CUDA"
-version = v"0.4.0"
+version = v"0.4.1"
 base_sources = [GitSource("https://github.com/moreau-project/moreau.git",
     "de2d7d9ff2221b122a7c7ef5622df8d3c483db86")]
 script = raw"""
@@ -50,7 +50,7 @@ ${host_bindir}/cmake -S packages/moreau-cuda -B build \
     -DMOREAU_BUILD_PYTHON=OFF \
     -DMOREAU_BUILD_TESTS=OFF \
     -DMOREAU_BUILD_EXAMPLES=OFF \
-    -DMOREAU_VERSION=0.4.0
+    -DMOREAU_VERSION=0.4.1
 ${host_bindir}/cmake --build build --target moreau_cuda_shared -j${nproc}
 mkdir -p ${libdir} ${includedir}
 cp -a build/libmoreau_cuda.so* ${libdir}/

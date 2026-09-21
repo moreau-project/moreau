@@ -18,22 +18,7 @@ import scipy.sparse as sp
 
 import moreau
 
-
-def skip_if_no_gpu():
-    """Skip test if CUDA is not available."""
-    try:
-        settings = moreau.Settings(device="cuda")
-        # Try to create a simple solver to verify CUDA works
-        P = sp.eye(2, format="csr")
-        A = sp.eye(2, format="csr")
-        cones = moreau.Cones(num_nonneg_cones=2)
-        solver = moreau.Solver(P, q=np.zeros(2), A=A, b=np.ones(2), cones=cones, settings=settings)
-        return False
-    except Exception:
-        return True
-
-
-requires_gpu = pytest.mark.skipif(skip_if_no_gpu(), reason="CUDA not available")
+requires_gpu = pytest.mark.skipif(not moreau.device_available("cuda"), reason="CUDA not available")
 
 
 class TestPowerConeBackward:

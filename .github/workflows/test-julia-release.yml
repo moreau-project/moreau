@@ -1,0 +1,170 @@
+# Test Julia release artifacts independently of Python publishing.
+# Stable releases use registered JLLs; prereleases build their native dependency.
+
+name: Test Julia Release
+run-name: Test Julia Release ${{ inputs.release_tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub Release tag to test
+        required: true
+        type: string
+      run_gpu_tests:
+        description: Run CUDA 12/13 runtime tests (requires GPU runners)
+        type: boolean
+        default: false
+
+jobs:
+  qa-result:
+    name: Julia QA result
+    if: always()
+    needs: [julia-release-info, test-julia, test-julia-native]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Record Julia QA result on the release commit
+        uses: actions/github-script@v9
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          NEEDS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const needs = JSON.parse(process.env.NEEDS);
+            const info = needs['julia-release-info'];
+            const tests = info.outputs.stable === 'true' ? 'test-julia' : 'test-julia-native';
+            const results = [info.result, needs[tests].result];
+            const state = results.every(result => result === 'success') ? 'success'
+              : results.includes('cancelled') ? 'error' : 'failure';
+            const {data: {sha}} = await github.rest.repos.getCommit({
+              ...context.repo, ref: process.env.RELEASE_TAG,
+            });
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha, state,
+              context: 'release-qa/julia',
+              description: `Julia release QA: ${state}`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
+  julia-release-info:
+    runs-on: ubuntu-latest
+    outputs:
+      stable: ${{ steps.version.outputs.stable }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Read and validate released Julia source
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir julia-assets
+          python - <<'PYINFO'
+          import os, re, tarfile, tomllib
+          with tarfile.open("julia-assets/moreau-julia-src.tar.gz") as archive:
+              version = tomllib.loads(archive.extractfile("Moreau.jl/Project.toml").read().decode())["version"]
+          stable = bool(re.fullmatch(r"\d+\.\d+\.\d+", version))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"stable={str(stable).lower()}\n")
+          PYINFO
+      - name: Require exact tagged Julia source for stable releases
+        if: steps.version.outputs.stable == 'true'
+        run: bash scripts/check_julia_source.sh julia-assets/moreau-julia-src.tar.gz
+      - uses: actions/checkout@v7
+        if: steps.version.outputs.stable == 'true'
+        with:
+          repository: JuliaRegistries/General
+          path: general-registry
+          sparse-checkout: |
+            jll/M/Moreau_CPU_jll
+            jll/M/Moreau_CUDA_jll
+      - name: Require registered release dependencies
+        if: steps.version.outputs.stable == 'true'
+        run: python scripts/check_julia_registry.py general-registry
+
+  test-julia:
+    needs: julia-release-info
+    if: needs.julia-release-info.outputs.stable == 'true'
+    permissions:
+      contents: read
+      statuses: write
+    uses: ./.github/workflows/julia.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+      run_gpu_tests: ${{ inputs.run_gpu_tests }}
+
+  # Prereleases build their native dependency from the release commit; shims
+  # avoid trying to register development versions in General.
+  test-julia-native:
+    needs: julia-release-info
+    if: needs.julia-release-info.outputs.stable != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir dist-all
+
+          echo "=== Release assets ==="
+          ls -la dist-all/
+
+      - name: Extract Julia source
+        run: |
+          # Extract Julia source tarball
+          mkdir -p julia-src
+          tar xzf dist-all/moreau-julia-src.tar.gz -C julia-src
+          echo "=== Julia source ==="
+          find julia-src -type f | head -30
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Julia
+        uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.12'
+
+      - name: Prepare prerelease native dependency
+        run: |
+          VERSION=$(python -c 'import tomllib; print(tomllib.load(open("julia-src/Moreau.jl/Project.toml", "rb"))["version"].replace("-dev", ".dev"))')
+          python scripts/bump_version.py "$VERSION" --pin-dependencies
+          cargo build --manifest-path packages/moreau-cpu/Cargo.toml --locked --release --lib --features c-api
+          julia scripts/julia_native_fixture.jl julia-src/Moreau.jl \
+            native-qa/Moreau_CPU_jll packages/moreau-cpu/target/release/libmoreau.so
+
+      - name: Run Julia tests
+        run: |
+          # Check the native build and released Julia package have the same version.
+          julia --project=julia-src/Moreau.jl -e '
+            using Pkg
+            Pkg.Registry.add("General")
+            Pkg.develop(path="native-qa/Moreau_CPU_jll")
+            Pkg.resolve()
+            Pkg.test(julia_args=["--compile=min"])
+          '
+
+          # Use the same released package for the internal integration tests.
+          julia --project=packages/moreau-julia/MoreauTests.jl -e '
+            using Pkg
+            Pkg.develop([PackageSpec(path="julia-src/Moreau.jl"), PackageSpec(path="native-qa/Moreau_CPU_jll")])
+            Pkg.resolve()
+            Pkg.test(julia_args=["--compile=min"])
+          '

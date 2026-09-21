@@ -1,10 +1,8 @@
 # Build all artifacts and create a GitHub Release for QA.
 #
-# Stable release pipeline (see RELEASE.md):
-#   release.yml -> julia-release.yml prepare-jll-prs -> manual Yggdrasil PRs/registration
-#   -> julia-release.yml test -> test-release.yml -> julia-release.yml prepare-registration
-#   -> manual Registrator comment / General registration -> publish.yml.
-# Development/prerelease builds go directly to test-release.yml.
+# Python: build -> test-release.yml -> publish.yml.
+# Julia: jll-prs -> JLL registration -> test-julia-release.yml -> register.
+# See RELEASE.md for the independent release stages.
 #
 # Usage:
 #   gh workflow run release.yml
@@ -158,11 +156,13 @@ jobs:
           retention-days: 1
 
   # GPU wheels: CUDA 12.2 and 13.0 × {x86_64, aarch64} (Docker, nanobind abi3-py312).
-  # aarch64 uses PyTorch cu128 (first index with aarch64 CUDA wheels; cu121 is
-  # x86_64-only). CUDA_ARCHITECTURES drops sm_75 on aarch64 (no Turing on ARM
+  # CUDA_ARCHITECTURES drops sm_75 on aarch64 (no Turing on ARM
   # server SoCs) and adds sm_87 for Jetson Orin.
   build-gpu-wheel:
     needs: [resolve-version]
+    permissions:
+      contents: read
+      packages: write
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -172,7 +172,6 @@ jobs:
             cuda_short: "cu122"
             cuda_major: "12"
             cudss_suffix: "cuda12"
-            pytorch_index: "cu121"
             gcc_toolset: "12"
             package_name: "moreau-cuda12"
             arch: "x86_64"
@@ -182,7 +181,6 @@ jobs:
             cuda_short: "cu122"
             cuda_major: "12"
             cudss_suffix: "cuda12"
-            pytorch_index: "cu128"
             gcc_toolset: "12"
             package_name: "moreau-cuda12"
             arch: "aarch64"
@@ -192,7 +190,6 @@ jobs:
             cuda_short: "cu130"
             cuda_major: "13"
             cudss_suffix: "cuda13"
-            pytorch_index: "cu130"
             gcc_toolset: "13"
             package_name: "moreau-cuda13"
             arch: "x86_64"
@@ -202,7 +199,6 @@ jobs:
             cuda_short: "cu130"
             cuda_major: "13"
             cudss_suffix: "cuda13"
-            pytorch_index: "cu130"
             gcc_toolset: "13"
             package_name: "moreau-cuda13"
             arch: "aarch64"
@@ -236,29 +232,32 @@ jobs:
           sed -i "s/==12\.\*/==${CUDA_MAJOR}.\*/g" packages/moreau-cuda/pyproject.toml
           cat packages/moreau-cuda/pyproject.toml
 
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the build cache registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build GPU wheel in Docker
-        run: |
-          echo "Building GPU wheel for CUDA ${{ matrix.cuda_version }} (${{ matrix.cuda_short }}) on ${{ matrix.arch }}..."
-
-          mkdir -p dist
-
-          DOCKER_BUILDKIT=1 docker build \
-            --build-arg ARCH=${{ matrix.arch }} \
-            --build-arg CUDA_ARCH_LABEL=${{ matrix.cuda_arch_label }} \
-            --build-arg CUDSS_VERSION=${{ env.CUDSS_VERSION }} \
-            --build-arg CUDA_VERSION=${{ matrix.cuda_version }} \
-            --build-arg CUDA_SHORT=${{ matrix.cuda_short }} \
-            --build-arg CUDA_MAJOR=${{ matrix.cuda_major }} \
-            --build-arg CUDSS_SUFFIX=${{ matrix.cudss_suffix }} \
-            --build-arg PYTORCH_INDEX=${{ matrix.pytorch_index }} \
-            --build-arg GCC_TOOLSET=${{ matrix.gcc_toolset }} \
-            -f packages/moreau-cuda/Dockerfile.wheel \
-            --target wheel-out \
-            --output type=local,dest=dist \
-            .
-
-          echo "Built GPU wheel:"
-          ls -la dist/
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: packages/moreau-cuda/Dockerfile.wheel
+          target: wheel-out
+          outputs: type=local,dest=dist
+          build-args: |
+            ARCH=${{ matrix.arch }}
+            CUDA_ARCH_LABEL=${{ matrix.cuda_arch_label }}
+            CUDSS_VERSION=${{ env.CUDSS_VERSION }}
+            CUDA_VERSION=${{ matrix.cuda_version }}
+            CUDSS_SUFFIX=${{ matrix.cudss_suffix }}
+            GCC_TOOLSET=${{ matrix.gcc_toolset }}
+          # Registry caches survive infrequent releases. Each platform writes its own tag.
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/wheel-cache:${{ matrix.cuda_short }}-${{ matrix.arch }}
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/wheel-cache:${{ matrix.cuda_short }}-${{ matrix.arch }},mode=max
 
       - uses: actions/upload-artifact@v7
         with:
@@ -413,18 +412,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Start the next release stage
+      - name: Start release QA
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.release.outputs.name }}
           RUN_GPU_TESTS: ${{ vars.MOREAU_GPU_RUNNERS_ENABLED == 'true' }}
           STABLE: ${{ needs.resolve-version.outputs.stable }}
         run: |
-          if [ "$STABLE" = true ]; then
-            gh workflow run julia-release.yml --ref "$RELEASE_TAG" \
-              -f "release_tag=$RELEASE_TAG" -f stage=prepare-jll-prs
-            echo 'JLL branch preparation dispatched. Open the upstream PRs using its summary links. After both JLLs register, run Julia Release with stage=test.' >> "$GITHUB_STEP_SUMMARY"
-          else
-            gh workflow run test-release.yml --ref "$RELEASE_TAG" \
+          gh workflow run test-release.yml --ref main \
+            -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"
+          if [ "$STABLE" != true ]; then
+            gh workflow run test-julia-release.yml --ref main \
               -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"
           fi

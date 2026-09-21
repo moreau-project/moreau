@@ -1,7 +1,7 @@
 # Publish Python artifacts from a GitHub Release to PyPI.
 #
 # Run this AFTER creating a GitHub Release (via release.yml) and completing QA.
-# CPU/Julia QA and artifact validation are required. CUDA runtime QA is opt-in;
+# Python QA and artifact validation are required. CUDA runtime QA is opt-in;
 # its coverage is recorded by test-release.yml, including when it was not run.
 #
 # Usage:
@@ -36,14 +36,14 @@ jobs:
         with:
           ref: ${{ inputs.release_tag }}
 
-      - name: Require successful QA for this release commit
+      - name: Require successful Python QA for this release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
+          gh run list --workflow test-release.yml --event workflow_dispatch \
             --limit 100 --json displayTitle,conclusion,status | \
-            jq -e --arg title "Test Release $RELEASE_TAG" \
+            jq -e --arg title "Test Python Release $RELEASE_TAG" \
               '[.[] | select(.displayTitle == $title)][0] | .status == "completed" and .conclusion == "success"'
 
       - name: Download release assets
@@ -52,7 +52,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          gh release download "$RELEASE_TAG" --dir dist
+          gh release download "$RELEASE_TAG" --pattern '*.whl' --dir dist
 
           echo "=== Release assets ==="
           ls -la dist/
@@ -74,25 +74,6 @@ jobs:
           if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "stable=true" >> "$GITHUB_OUTPUT"
           fi
-
-      - uses: actions/checkout@v7
-        if: steps.version.outputs.stable == 'true'
-        with:
-          repository: JuliaRegistries/General
-          path: general-registry
-          sparse-checkout: |
-            jll/M/Moreau_CPU_jll
-            jll/M/Moreau_CUDA_jll
-            M/Moreau
-      - name: Require the same Julia release in General
-        if: steps.version.outputs.stable == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          python3 scripts/bump_version.py "$VERSION" --pin-dependencies
-          git diff --exit-code
-          bash scripts/check_julia_source.sh dist/moreau-julia-src.tar.gz
-          python3 scripts/check_julia_registry.py general-registry --frontend
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

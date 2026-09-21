@@ -4,12 +4,12 @@
 # Can be re-triggered for the same release tag.
 #
 # Usage:
-#   gh workflow run test-release.yml --ref v0.4.0 -f release_tag=v0.4.0
+#   gh workflow run test-release.yml --ref main -f release_tag=v0.4.0
 #   gh workflow run test-release.yml -f release_tag=dev-20260313-120000
 # Add -f run_gpu_tests=true when GPU runners are available.
 
-name: Test Release
-run-name: Test Release ${{ inputs.release_tag }}
+name: Test Python Release
+run-name: Test Python Release ${{ inputs.release_tag }}
 
 on:
   workflow_dispatch:
@@ -24,168 +24,24 @@ on:
         default: false
 
 jobs:
-  # GPU tests: install wheels in Docker with CUDA runtime, run full test suite
   test-gpu:
     if: inputs.run_gpu_tests
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - cuda_short: "cu122"
-            cuda_major: "12"
-            cuda_runtime: "nvidia/cuda:12.2.0-runtime-ubuntu22.04"
-            pytorch_index: "cu121"
-            jax_cuda: "cuda12"
-            runner: gpu-t4
-          - cuda_short: "cu130"
-            cuda_major: "13"
-            cuda_runtime: "nvidia/cuda:13.0.0-runtime-ubuntu22.04"
-            pytorch_index: "cu130"
-            jax_cuda: "cuda13"
-            runner: gpu-instance
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.release_tag }}
-
-      - name: Install gh CLI
-        run: |
-          if ! command -v gh &>/dev/null; then
-            GH_VERSION=$(curl -s https://api.github.com/repos/cli/cli/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
-            curl -sSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" | sudo tar xz -C /usr/local --strip-components=1
-          fi
-
-      - name: Download release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          mkdir -p dist-cpu dist-gpu dist-wrapper
-          gh release download "$RELEASE_TAG" --dir dist-all
-
-          # Sort wheels by type. GPU test runners are x86_64, so filter CPU
-          # and CUDA wheels to x86_64 to avoid picking up the aarch64 wheel
-          # (which pip would reject with "not supported on this platform").
-          CUDA_MAJOR="${{ matrix.cuda_major }}"
-
-          for whl in dist-all/*.whl; do
-            name="$(basename "$whl")"
-            case "$name" in
-              moreau_cpu-*manylinux*x86_64*)        cp "$whl" dist-cpu/ ;;
-              moreau_cuda${CUDA_MAJOR}-*x86_64*)    cp "$whl" dist-gpu/ ;;
-              moreau-*py3-none-any*)                cp "$whl" dist-wrapper/ ;;
-            esac
-          done
-
-          echo "=== CPU wheels ===" && ls -la dist-cpu/
-          echo "=== GPU wheels ===" && ls -la dist-gpu/
-          echo "=== Wrapper wheels ===" && ls -la dist-wrapper/
-
-      - name: Test wheel installation and run tests (${{ matrix.cuda_short }})
-        run: |
-          echo "Testing wheels with Python 3.12 and ${{ matrix.cuda_short }}..."
-
-          # Create abi3 test script (avoids quoting issues in docker heredoc)
-          cat > /tmp/test_abi3.py << 'PYEOF'
-          import sys
-          pyver = f"{sys.version_info.major}.{sys.version_info.minor}"
-          # Test CPU native extension
-          import moreau_cpu._cpu_solver as mc
-          print(f"Python {pyver}: CPU native extension OK: {mc}")
-          # Test CUDA native extension (via __init__.py which preloads nvidia libs)
-          import moreau_cuda
-          import moreau
-          assert moreau.device_available("cuda"), moreau.device_error("cuda")
-          print(f"Python {pyver}: CUDA native extension OK: {moreau_cuda}")
-          PYEOF
-
-          docker run --rm --gpus all \
-            -e DEBIAN_FRONTEND=noninteractive \
-            -e TZ=UTC \
-            -v ${{ github.workspace }}/dist-cpu:/dist-cpu:ro \
-            -v ${{ github.workspace }}/dist-gpu:/dist-gpu:ro \
-            -v ${{ github.workspace }}/dist-wrapper:/dist-wrapper:ro \
-            -v ${{ github.workspace }}/packages/moreau/tests/python:/tests_py:ro \
-            -v /tmp/test_abi3.py:/test_abi3.py:ro \
-            ${{ matrix.cuda_runtime }} \
-            bash -c '
-              set -e
-              # g++ is needed by torch.compile/Inductor (cvxpylayers test_torch_compile_*)
-              apt-get update && apt-get install -y curl ca-certificates git gcc g++
-
-              # Install uv → standalone Python distributions (no Launchpad/PPA dependency)
-              curl -LsSf https://astral.sh/uv/install.sh | sh
-              export PATH="$HOME/.local/bin:$PATH"
-              uv python install 3.12 3.13 3.14
-
-              uv venv --seed --python 3.12 /test_env
-              source /test_env/bin/activate
-              pip install --upgrade pip
-
-              # Install CPU wheel and moreau wrapper package (built wheels)
-              pip install /dist-cpu/*.whl
-              pip install /dist-wrapper/*.whl
-              python -c "import moreau; print('"'"'CPU package OK:'"'"', moreau.__file__)"
-
-              # Install GPU wheel (pulls nvidia-cudss, nvidia-cusolver, etc. from PyPI)
-              pip install /dist-gpu/*.whl
-              python -c "import moreau; print('"'"'GPU available:'"'"', moreau.device_available('"'"'cuda'"'"')); assert moreau.device_available('"'"'cuda'"'"'), moreau.device_error('"'"'cuda'"'"')"
-
-              # === abi3 import tests (frontloaded - fast check before heavy deps) ===
-              echo ""
-              echo "=== Testing abi3 wheel import on Python 3.13 and 3.14 ==="
-              for PYVER in 3.13 3.14; do
-                uv venv --seed --python ${PYVER} /test_env_${PYVER}
-                /test_env_${PYVER}/bin/pip install --upgrade pip -q
-                /test_env_${PYVER}/bin/pip install numpy scipy -q
-                /test_env_${PYVER}/bin/pip install /dist-cpu/*.whl -q
-                /test_env_${PYVER}/bin/pip install /dist-wrapper/*.whl -q
-                /test_env_${PYVER}/bin/pip install /dist-gpu/*.whl -q
-                /test_env_${PYVER}/bin/python /test_abi3.py
-                echo "Python ${PYVER}: abi3 import test passed"
-              done
-
-              # Install torch and verify torch bindings
-              pip install torch --index-url https://download.pytorch.org/whl/${{ matrix.pytorch_index }}
-              python -c "import torch; assert torch.cuda.is_available(); from moreau.torch import Solver; print('"'"'Torch bindings OK'"'"')"
-
-              # Install JAX with CUDA support
-              pip install jax[${{ matrix.jax_cuda }}]
-              python -c "import jax; print('"'"'JAX backend:'"'"', jax.default_backend()); assert jax.default_backend() == '"'"'gpu'"'"'"
-
-              # Run tests — each file in its own process to prevent GPU OOM on T4 (16GB)
-              pip install pytest numpy scipy hypothesis cvxpy clarabel
-              pip install git+https://github.com/cvxpy/cvxpylayers.git@v1.1.0
-              git clone --depth 1 --branch release/1.8.x https://github.com/cvxpy/cvxpy.git /tmp/cvxpy
-              git clone --depth 1 --branch v1.1.0 https://github.com/cvxpy/cvxpylayers.git /tmp/cvxpylayers
-              cp -r /tmp/cvxpy/cvxpy/tests /tmp/cvxpy-tests
-              FAILED=0
-              FAILED_FILES=""
-              for f in /tests_py/test_*.py; do
-                echo "=== Running $f ==="
-                rc=0; pytest "$f" -v --tb=short || rc=$?
-                if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then
-                  FAILED=1
-                  FAILED_FILES="$FAILED_FILES $f"
-                fi
-              done
-              if [ "$FAILED" -ne 0 ]; then
-                echo "Failed test files:$FAILED_FILES"
-                exit 1
-              fi
-              pytest /tmp/cvxpy-tests/test_conic_solvers.py -v --tb=short -k "Moreau"
-              pytest /tmp/cvxpylayers/tests/test_moreau.py /tmp/cvxpylayers/tests/test_moreau_dual_variables.py -v --tb=short
-            '
-
-          echo "All tests passed for ${{ matrix.cuda_short }}!"
+    permissions:
+      contents: read
+      actions: read
+      statuses: write
+    uses: ./.github/workflows/test-gpu-wheels.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
 
   qa-coverage:
     name: QA coverage
     if: always()
-    needs: [test-gpu, test-cpu-macos, test-cpu-linux, julia-release-info, test-julia, test-julia-native]
+    needs: [test-gpu, test-cpu-macos, test-cpu-linux]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
     steps:
       - name: Record tested platforms
         env:
@@ -193,28 +49,45 @@ jobs:
           GPU_RESULT: ${{ needs.test-gpu.result }}
           MACOS_RESULT: ${{ needs.test-cpu-macos.result }}
           LINUX_RESULT: ${{ needs.test-cpu-linux.result }}
-          JULIA_RESULT: ${{ needs.test-julia.result }}
-          JULIA_NATIVE_RESULT: ${{ needs.test-julia-native.result }}
         run: |
           echo "| Validation | Result |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Linux CPU wheels | $LINUX_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           echo "| macOS CPU wheels | $MACOS_RESULT |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Julia registered JLL matrix | $JULIA_RESULT |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Julia prerelease native CPU | $JULIA_NATIVE_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           if [ "$GPU_REQUESTED" = "true" ]; then
             echo "| CUDA 12/13 runtime | $GPU_RESULT |" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "| CUDA 12/13 runtime | Not run (GPU testing not requested) |" >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Record Python QA result on the release commit
+        if: always()
+        uses: actions/github-script@v9
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GPU_REQUESTED: ${{ inputs.run_gpu_tests }}
+          NEEDS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const needs = JSON.parse(process.env.NEEDS);
+            const results = [needs['test-cpu-macos'].result, needs['test-cpu-linux'].result];
+            if (process.env.GPU_REQUESTED === 'true') results.push(needs['test-gpu'].result);
+            const state = results.every(result => result === 'success') ? 'success'
+              : results.includes('cancelled') ? 'error' : 'failure';
+            const {data: {sha}} = await github.rest.repos.getCommit({
+              ...context.repo, ref: process.env.RELEASE_TAG,
+            });
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha, state,
+              context: 'release-qa/python',
+              description: `Python release QA: ${state}`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
 
   # macOS CPU tests
   test-cpu-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.release_tag }}
 
       - uses: actions/setup-python@v7
         with:
@@ -291,8 +164,6 @@ jobs:
             python: '3.12'
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.release_tag }}
 
       - uses: actions/setup-python@v7
         with:
@@ -322,120 +193,3 @@ jobs:
           pip install pytest numpy scipy hypothesis cvxpy clarabel
           pytest packages/moreau/tests/python/ packages/moreau-cpu/tests/python/ \
             --device=cpu -v --tb=short -rs
-
-  julia-release-info:
-    runs-on: ubuntu-latest
-    outputs:
-      stable: ${{ steps.version.outputs.stable }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.release_tag }}
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - name: Read and validate released Julia source
-        id: version
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir julia-assets
-          python - <<'PYINFO'
-          import os, re, tarfile, tomllib
-          with tarfile.open("julia-assets/moreau-julia-src.tar.gz") as archive:
-              version = tomllib.loads(archive.extractfile("Moreau.jl/Project.toml").read().decode())["version"]
-          stable = bool(re.fullmatch(r"\d+\.\d+\.\d+", version))
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write(f"stable={str(stable).lower()}\n")
-          PYINFO
-      - name: Require exact tagged Julia source for stable releases
-        if: steps.version.outputs.stable == 'true'
-        run: bash scripts/check_julia_source.sh julia-assets/moreau-julia-src.tar.gz
-      - uses: actions/checkout@v7
-        if: steps.version.outputs.stable == 'true'
-        with:
-          repository: JuliaRegistries/General
-          path: general-registry
-          sparse-checkout: |
-            jll/M/Moreau_CPU_jll
-            jll/M/Moreau_CUDA_jll
-      - name: Require registered release dependencies
-        if: steps.version.outputs.stable == 'true'
-        run: python scripts/check_julia_registry.py general-registry
-
-  test-julia:
-    needs: julia-release-info
-    if: needs.julia-release-info.outputs.stable == 'true'
-    uses: ./.github/workflows/julia.yml
-    with:
-      release_tag: ${{ inputs.release_tag }}
-      run_gpu_tests: ${{ inputs.run_gpu_tests }}
-
-  # Prereleases build their native dependency from the release commit; shims
-  # avoid trying to register development versions in General.
-  test-julia-native:
-    needs: julia-release-info
-    if: needs.julia-release-info.outputs.stable != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.release_tag }}
-
-      - name: Download release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir dist-all
-
-          echo "=== Release assets ==="
-          ls -la dist-all/
-
-      - name: Extract Julia source
-        run: |
-          # Extract Julia source tarball
-          mkdir -p julia-src
-          tar xzf dist-all/moreau-julia-src.tar.gz -C julia-src
-          echo "=== Julia source ==="
-          find julia-src -type f | head -30
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup Julia
-        uses: julia-actions/setup-julia@v3
-        with:
-          version: '1.12'
-
-      - name: Prepare prerelease native dependency
-        run: |
-          VERSION=$(python -c 'import tomllib; print(tomllib.load(open("julia-src/Moreau.jl/Project.toml", "rb"))["version"].replace("-dev", ".dev"))')
-          python scripts/bump_version.py "$VERSION" --pin-dependencies
-          cargo build --manifest-path packages/moreau-cpu/Cargo.toml --locked --release --lib --features c-api
-          julia scripts/julia_native_fixture.jl julia-src/Moreau.jl \
-            native-qa/Moreau_CPU_jll packages/moreau-cpu/target/release/libmoreau.so
-
-      - name: Run Julia tests
-        run: |
-          # Check the native build and released Julia package have the same version.
-          julia --project=julia-src/Moreau.jl -e '
-            using Pkg
-            Pkg.Registry.add("General")
-            Pkg.develop(path="native-qa/Moreau_CPU_jll")
-            Pkg.resolve()
-            Pkg.test(julia_args=["--compile=min"])
-          '
-
-          # Use the same released package for the internal integration tests.
-          julia --project=packages/moreau-julia/MoreauTests.jl -e '
-            using Pkg
-            Pkg.develop([PackageSpec(path="julia-src/Moreau.jl"), PackageSpec(path="native-qa/Moreau_CPU_jll")])
-            Pkg.resolve()
-            Pkg.test(julia_args=["--compile=min"])
-          '

@@ -91,24 +91,24 @@ jobs:
             M/Moreau
       - name: Require both matching JLL registrations
         run: python scripts/check_julia_registry.py general-registry
-      - name: Run release QA
+      - name: Run Julia release QA
         if: inputs.stage == 'test'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           RUN_GPU_TESTS: ${{ inputs.run_gpu_tests }}
         run: |
-          gh workflow run test-release.yml --ref "$RELEASE_TAG" \
+          gh workflow run test-julia-release.yml --ref main \
             -f "release_tag=$RELEASE_TAG" -f "run_gpu_tests=$RUN_GPU_TESTS"
-      - name: Require successful QA before preparing registration
+      - name: Require successful Julia QA before preparing registration
         if: inputs.stage == 'prepare-registration'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
+          gh run list --workflow test-julia-release.yml --event workflow_dispatch \
             --limit 100 --json displayTitle,conclusion,status | \
-            jq -e --arg title "Test Release $RELEASE_TAG" \
+            jq -e --arg title "Test Julia Release $RELEASE_TAG" \
               '[.[] | select(.displayTitle == $title)][0] | .status == "completed" and .conclusion == "success"'
           gh release download "$RELEASE_TAG" --pattern moreau-julia-src.tar.gz --dir julia-assets
           bash scripts/check_julia_source.sh julia-assets/moreau-julia-src.tar.gz

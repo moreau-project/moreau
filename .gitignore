@@ -284,6 +284,8 @@ bench_*.py
 
 # Claude Code
 .claude/
+.worktrees/
+.codex/
 
 # Auto-generated skill templates
 .claude/skills/
@@ -313,3 +315,4 @@ Manifest.toml
 
 # Out-of-tree build directories
 build-*/
+
