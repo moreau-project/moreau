@@ -74,26 +74,18 @@ loss.backward()
 
 ## torch.compile
 
-CPU and CUDA solves and their gradients support `torch.compile`, including
-`fullgraph=True`. Construct the solver outside the compiled function, then
-compile the tensor computation that calls `solve`:
+CPU and CUDA solves support `torch.compile`, including gradients. Construct the
+solver outside the compiled function:
 
 ```python
-# Reuse the solver and float64 tensors from Quick Start.
+# Using the solver and tensors from Quick Start:
 @torch.compile(fullgraph=True)
-def objective(P_values, A_values, q, b):
-    return solver.solve(P_values, A_values, q, b).x.square().sum()
+def solve(P_values, A_values, q, b):
+    return solver.solve(P_values, A_values, q, b).x
 
-q.grad = None
-loss = objective(P_values, A_values, q, b)
-loss.backward()
+x = solve(P_values, A_values, q, b)
+x.sum().backward()
 ```
-
-Keep explicit `setup()` calls outside the compiled function. Compilation optimizes
-surrounding tensor operations; the native solver remains an opaque operation.
-
-IPM backward uses the saved problem data and solution. CPU active-set backward
-also reuses the saved factorization and working-set snapshot.
 
 ---
 
