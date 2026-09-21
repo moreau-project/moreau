@@ -72,6 +72,37 @@ loss.backward()
 
 ---
 
+## torch.compile
+
+CPU and CUDA solves and their gradients support `torch.compile`, including
+`fullgraph=True`. Construct the solver outside the compiled function, then
+compile the tensor computation that calls `solve`:
+
+```python
+# Reuse the solver and float64 tensors from Quick Start.
+@torch.compile(fullgraph=True)
+def objective(P_values, A_values, q, b):
+    return solver.solve(P_values, A_values, q, b).x.square().sum()
+
+q.grad = None
+loss = objective(P_values, A_values, q, b)
+loss.backward()
+```
+
+All `torch.compile` calls use a custom operation for the native solve, including
+the default `fullgraph=False` mode. This replaces the previous graph break around
+`solve`. The native solver remains opaque to Inductor; its iterations are not
+compiled or fused with surrounding tensor operations. Solver construction and
+explicit `setup()` calls still run eagerly outside the compiled function.
+
+Each forward call saves its problem data and solution and keeps the native
+implementation alive for delayed backward. IPM backward restores those saved
+values for the adjoint solve without rerunning the optimization. CPU active-set
+backward additionally reuses the saved factorization and working-set snapshot.
+Gradients for inputs shared across a batch are summed back to the input shapes.
+
+---
+
 ## Implicit Differentiation
 
 Unlike some other libraries that differentiate through solver iterations (unrolling), Moreau uses **implicit differentiation**. This technique computes gradients based on the optimality (KKT) conditions of the problem.

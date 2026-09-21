@@ -103,6 +103,10 @@ result = solver.solve(P_values, A_values, q, b)
 result.x.sum().backward()   # gradients w.r.t. P_values, A_values, q, b
 ```
 
+CPU and CUDA solves and their gradients support `torch.compile`, including
+`fullgraph=True`. Construct the solver outside the compiled function; see the
+[PyTorch compilation guide](docs/guide/pytorch-integration.md#torchcompile).
+
 **JAX** — `jit` / `vmap` / `grad`:
 
 ```python
