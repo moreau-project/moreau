@@ -74,17 +74,19 @@ loss.backward()
 
 ## torch.compile
 
-CPU and CUDA solves support `torch.compile`, including gradients. Construct the
-solver outside the compiled function:
+Compile the surrounding model or loss. CPU and CUDA solves support
+`fullgraph=True` and backpropagation; Moreau's native solver runs unchanged.
 
 ```python
 # Using the solver and tensors from Quick Start:
-@torch.compile(fullgraph=True)
-def solve(P_values, A_values, q, b):
-    return solver.solve(P_values, A_values, q, b).x
+weights = torch.eye(q.numel(), dtype=q.dtype, device=q.device, requires_grad=True)
 
-x = solve(P_values, A_values, q, b)
-x.sum().backward()
+@torch.compile(fullgraph=True)
+def loss(weights, q):
+    x = solver.solve(P_values, A_values, weights @ q, b).x
+    return x.square().mean()
+
+loss(weights, q).backward()
 ```
 
 ---

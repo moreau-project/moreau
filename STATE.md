@@ -41,12 +41,8 @@ The public direct cone API uses `DirectConeSpec` entries in `Cones.dir_cones`.
 Both native solver bindings accept the `dir_cones` argument. See
 [`docs/guide/direct-cones.md`](docs/guide/direct-cones.md) for usage.
 
-PyTorch CPU and CUDA solves use the forward custom op whenever
-`torch.compile` is tracing, including with `fullgraph=True`. Forward saves the
-problem data, solution, and native implementation lifetime for backward.
-IPM backward restores the saved data and solution for the adjoint solve; CPU
-active-set backward also reuses the saved factorization and working-set snapshot.
-The native solve remains opaque to Inductor. See the
+PyTorch CPU and CUDA solves and backward passes use custom ops under
+`torch.compile`, including with `fullgraph=True`. See the
 [PyTorch guide](docs/guide/pytorch-integration.md#torchcompile).
 
 ## packages/moreau-cpu (Rust solver)
