@@ -89,17 +89,11 @@ loss = objective(P_values, A_values, q, b)
 loss.backward()
 ```
 
-All `torch.compile` calls use a custom operation for the native solve, including
-the default `fullgraph=False` mode. This replaces the previous graph break around
-`solve`. The native solver remains opaque to Inductor; its iterations are not
-compiled or fused with surrounding tensor operations. Solver construction and
-explicit `setup()` calls still run eagerly outside the compiled function.
+Keep explicit `setup()` calls outside the compiled function. Compilation optimizes
+surrounding tensor operations; the native solver remains an opaque operation.
 
-Each forward call saves its problem data and solution and keeps the native
-implementation alive for delayed backward. IPM backward restores those saved
-values for the adjoint solve without rerunning the optimization. CPU active-set
-backward additionally reuses the saved factorization and working-set snapshot.
-Gradients for inputs shared across a batch are summed back to the input shapes.
+IPM backward uses the saved problem data and solution. CPU active-set backward
+also reuses the saved factorization and working-set snapshot.
 
 ---
 
