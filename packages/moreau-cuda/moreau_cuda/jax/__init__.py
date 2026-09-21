@@ -5,7 +5,7 @@ This provides a JAX-compatible interface to the CUDA solver with:
 - jax.grad support via custom_vjp
 - True zero-copy GPU tensor sharing via XLA FFI
 
-Requires JAX >= 0.6.0 for pure_callback vmap_method parameter.
+Requires JAX >= 0.8.0 for explicit 64-bit dtypes.
 """
 
 from ._ffi import ffi_available, clear_ffi_cache

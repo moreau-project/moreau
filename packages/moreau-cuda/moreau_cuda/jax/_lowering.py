@@ -14,6 +14,7 @@ from jax import custom_vjp
 from jax.custom_batching import custom_vmap
 
 from moreau._types import JaxSolution, JaxSolveInfo
+from moreau._jax_config import _check_jax_precision
 
 # =============================================================================
 # FFI-based solve with custom vmap (zero-copy, handles batching correctly)
@@ -396,6 +397,7 @@ def _make_ffi_solve_fn(
         Receives 10 gradients; uses the four solution-vector grads
         (dx, dz, ds, dz_x). Metadata grads are ignored.
         """
+        _check_jax_precision()
         P_data, A_data, q, b, x, z, s, z_x = residuals
         (
             dx,
@@ -559,6 +561,7 @@ def _make_ffi_solve_fn(
         the solver before computing gradients.  This ensures correctness
         for chained solves where a later forward pass overwrites state.
         """
+        _check_jax_precision()
         P_data, A_data, q, b, x, z, s, z_x = residuals
         (
             dx,
@@ -597,6 +600,7 @@ def _make_ffi_solve_fn(
         This is the main entry point. Returns a tuple of NamedTuples
         which are pytree-compatible and work with jax.vmap/jax.grad.
         """
+        _check_jax_precision()
         dtype = jnp.result_type(P_data, A_data, q, b, jnp.float32)
         # Cast outside custom_vjp so JAX restores each input's cotangent dtype.
         P_data, A_data, q, b = (jnp.asarray(v, dtype=jnp.float64) for v in (P_data, A_data, q, b))
@@ -930,6 +934,7 @@ def _make_ffi_solve_warm_fn(
 
     def _solve_warm_bwd(residuals, g):
         """Backward pass — stateless GPU backward via FFI + zero grads for warm arrays."""
+        _check_jax_precision()
         P_data, A_data, q, b, x, z, s, z_x, warm_x, warm_z, warm_s, warm_z_x = residuals
         (
             dx,
@@ -967,6 +972,7 @@ def _make_ffi_solve_warm_fn(
     # Final wrapper returning (JaxSolution, JaxSolveInfo)
     def _solve_warm_with_solution(P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x):
         """Warm-start solve returning (JaxSolution, JaxSolveInfo)."""
+        _check_jax_precision()
         dtype = jnp.result_type(P_data, A_data, q, b, jnp.float32)
         P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x = (
             jnp.asarray(v, dtype=jnp.float64)

@@ -10,6 +10,7 @@ import jax.numpy as jnp
 from jax import custom_vjp
 
 from moreau._types import JaxSolution, JaxSolveInfo
+from moreau._jax_config import _pure_callback
 
 from ._solver import _SOLVER_REGISTRY
 
@@ -258,7 +259,7 @@ def _solve_fallback(
         construction_time_shape = jax.ShapeDtypeStruct((batch_size,), dtype)
 
     x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time = (
-        jax.pure_callback(
+        _pure_callback(
             partial(_solve_fallback_callback, solver_id, result_dtype=dtype),
             (
                 x_shape,
@@ -356,7 +357,7 @@ def _solve_fallback_bwd(solver_id: int, residuals, g):
         dq_shape = jax.ShapeDtypeStruct((batch_size, n), q.dtype)
         db_shape = jax.ShapeDtypeStruct((batch_size, m), b.dtype)
 
-    dP, dA, dq, db = jax.pure_callback(
+    dP, dA, dq, db = _pure_callback(
         partial(_backward_fallback_callback, solver_id),
         (dP_shape, dA_shape, dq_shape, db_shape),
         dx,

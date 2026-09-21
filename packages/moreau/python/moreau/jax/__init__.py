@@ -36,6 +36,7 @@ from typing import Optional, Sequence
 import time
 import warnings
 
+from moreau._jax_config import _check_jax_precision
 from moreau._validation import _validate_P_sparsity_pattern_symmetric
 
 from moreau._backend import (
@@ -124,6 +125,7 @@ class Solver:
         jit: bool = True,
         b_sparsity_pattern: Optional[Sequence[bool]] = None,
     ):
+        _check_jax_precision()
         # Validate the fixed structure once, before choosing a solver backend.
         _validate_P_sparsity_pattern_symmetric(n, P_row_offsets, P_col_indices)
         # Check for old CVXPY with SOC cones
@@ -268,8 +270,9 @@ class Solver:
         """
         import jax.numpy as jnp
 
-        self._P_values = jnp.asarray(P_values)
-        self._A_values = jnp.asarray(A_values)
+        _check_jax_precision()
+        self._P_values = jnp.asarray(P_values, dtype=getattr(P_values, "dtype", None))
+        self._A_values = jnp.asarray(A_values, dtype=getattr(A_values, "dtype", None))
 
     def _needs_auto_tune(self) -> bool:
         return _needs_auto_tune_shared(
@@ -413,6 +416,7 @@ class Solver:
             Solver metadata (status, timing) is available via solver.info
             after calling solve().
         """
+        _check_jax_precision()
         if len(args) == 2:
             if self._P_values is None:
                 raise RuntimeError("setup() must be called before solve(q, b)")
@@ -422,6 +426,13 @@ class Solver:
             P_values, A_values, q, b = args
         else:
             raise TypeError(f"solve() takes 2 or 4 arguments, got {len(args)}")
+
+        import jax.numpy as jnp
+
+        # Preserve explicit NumPy dtypes before the internally jitted call.
+        P_values, A_values, q, b = (
+            jnp.asarray(v, dtype=getattr(v, "dtype", None)) for v in (P_values, A_values, q, b)
+        )
 
         # Auto-tune on first solve when device or method is 'auto'
         if self._needs_auto_tune():
@@ -441,14 +452,16 @@ class Solver:
 
             solve_warm_fn = self._impl.solve_warm
             if solve_warm_fn is not None:
-                warm_x = jnp.asarray(warm_start.x)
-                warm_z = jnp.asarray(warm_start.z)
-                warm_s = jnp.asarray(warm_start.s)
+                warm_x = jnp.asarray(warm_start.x, dtype=getattr(warm_start.x, "dtype", None))
+                warm_z = jnp.asarray(warm_start.z, dtype=getattr(warm_start.z, "dtype", None))
+                warm_s = jnp.asarray(warm_start.s, dtype=getattr(warm_start.s, "dtype", None))
                 # Direct dual: pass through if present, else zero-length
                 # placeholder (the FFI handler ignores it when total_xn==0).
                 total_xn = getattr(self._impl, "_total_xn", 0)
                 if warm_start.z_x is not None:
-                    warm_z_x = jnp.asarray(warm_start.z_x)
+                    warm_z_x = jnp.asarray(
+                        warm_start.z_x, dtype=getattr(warm_start.z_x, "dtype", None)
+                    )
                 elif warm_x.ndim == 1:
                     warm_z_x = jnp.zeros((total_xn,), dtype=warm_x.dtype)
                 else:

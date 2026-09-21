@@ -5,7 +5,7 @@ This provides a JAX-compatible interface to the CPU solver with:
 - jax.grad support via custom_vjp
 - Works without GPU or CUDA
 
-Requires JAX >= 0.6.0 for pure_callback vmap_method parameter.
+Requires JAX >= 0.8.0 for explicit 64-bit dtypes.
 """
 
 from functools import partial
@@ -17,6 +17,7 @@ import jax
 import jax.numpy as jnp
 from jax import custom_vjp
 
+from moreau._jax_config import _check_jax_precision, _pure_callback
 from moreau._types import Cones, Settings
 from ._types import JaxSolution, JaxSolveInfo
 
@@ -55,6 +56,7 @@ class JaxSolverCpu:
     ):
         import time
 
+        _check_jax_precision()
         start = time.perf_counter()
 
         self._n = n
@@ -524,7 +526,7 @@ def _solve_cpu_raw(
         construction_time_shape = batch_scalar_shape
 
     x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time = (
-        jax.pure_callback(
+        _pure_callback(
             partial(_solve_cpu_callback, solver_id, result_dtype=dtype),
             (
                 x_shape,
@@ -612,7 +614,7 @@ def _solve_cpu_bwd(solver_id: int, residuals, g):
         dq_shape = jax.ShapeDtypeStruct((batch_size, n), q.dtype)
         db_shape = jax.ShapeDtypeStruct((batch_size, m), b.dtype)
 
-    dP, dA, dq, db = jax.pure_callback(
+    dP, dA, dq, db = _pure_callback(
         partial(_backward_cpu_callback, solver_id),
         (dP_shape, dA_shape, dq_shape, db_shape),
         dx,

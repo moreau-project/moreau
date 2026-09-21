@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 
 from moreau._types import Cones, Settings
+from moreau._jax_config import _check_jax_precision
 
 from ._ffi import _get_ffi_lib, ffi_available
 from ._lowering import _make_ffi_solve_fn, _make_ffi_solve_warm_fn
@@ -60,6 +61,7 @@ class JaxSolverCuda:
     ):
         import time
 
+        _check_jax_precision()
         start = time.perf_counter()
 
         self._n = n
@@ -88,10 +90,9 @@ class JaxSolverCuda:
         self._nnzP = len(self._P_col_indices)
         self._nnzA = len(self._A_col_indices)
 
-        # The FFI ABI requires float64/int64 JAX buffers. With x64 disabled,
-        # the Python callback promotes inputs inside NumPy instead.
+        # Explicit float64/int64 buffers are allowed independently of defaults.
         self._ffi_lib = _get_ffi_lib()
-        self._use_ffi = ffi_available() and jax.config.jax_enable_x64
+        self._use_ffi = ffi_available()
 
         # Convert structure arrays to JAX arrays on GPU for FFI
         if self._use_ffi:
@@ -315,11 +316,11 @@ class JaxSolverCuda:
 
         Uses XLA FFI for true zero-copy GPU tensor sharing when available,
         with a custom vmap rule to handle structure arrays correctly.
-        Falls back to pure_callback when FFI or JAX x64 is unavailable.
+        Falls back to pure_callback when FFI is unavailable.
 
         Returns a function that returns (JaxSolution, JaxSolveInfo) tuple.
         """
-        if self._use_ffi and jax.config.jax_enable_x64:
+        if self._use_ffi:
             # Create a solve function with static values captured in closures
             # This avoids tracer issues with custom_vmap
             if not hasattr(self, "_ffi_solve_fn"):
@@ -370,12 +371,12 @@ class JaxSolverCuda:
         """Return a solve function that accepts warm start arrays.
 
         Uses XLA FFI warm-start handler for true zero-copy GPU tensor sharing.
-        Falls back to pure_callback when FFI or JAX x64 is unavailable.
+        Falls back to pure_callback when FFI is unavailable.
 
         Returns a function:
             (P_data, A_data, q, b, warm_x, warm_z, warm_s) -> (JaxSolution, JaxSolveInfo)
         """
-        if self._use_ffi and jax.config.jax_enable_x64:
+        if self._use_ffi:
             if self._ffi_solve_warm_fn is None:
                 self._ffi_solve_warm_fn = _make_ffi_solve_warm_fn(
                     self._n,
