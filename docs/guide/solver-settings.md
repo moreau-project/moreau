@@ -277,6 +277,13 @@ settings = moreau.Settings(
 )
 ```
 
+The active-set solver stores `P` and `A` as dense matrices, so its memory grows
+with `n² + m·n` rather than with the number of nonzeros. A solve typically needs
+about twice one dense copy, and more with `enable_grad=True` or per-problem
+matrices. Constructing an active-set solver warns when one dense copy alone
+would exceed 1 GiB. `solver='auto'` only selects active-set for problems with
+`n <= 500`; use `solver='ipm'` for large sparse problems.
+
 ### Active-Set Differentiation
 
 The active-set solver supports two differentiation modes:

@@ -234,6 +234,26 @@ _SolverInternal = _cpu_solver.DefaultSolver
 _CompiledSolverInternal = _cpu_solver.CompiledSolver
 
 
+# Active-set stores P and A densely. Warn when one dense copy of [P; A] alone
+# exceeds this, since measured peak use is roughly 2x that for a solve and more
+# with gradients or per-problem matrices.
+_ACTIVE_SET_DENSE_WARN_BYTES = 1 << 30
+
+
+def _warn_if_active_set_dense_is_large(n: int, m: int) -> None:
+    dense_bytes = 8 * (n * n + m * n)
+    if dense_bytes <= _ACTIVE_SET_DENSE_WARN_BYTES:
+        return
+    warnings.warn(
+        f"The active-set solver stores P and A as dense matrices. For n={n}, m={m} "
+        f"that needs at least {dense_bytes / 2**30:.1f} GiB, and typically about twice "
+        "that during a solve (more with enable_grad or per-problem matrices). "
+        "Use solver='ipm' for large sparse problems.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
 class ActiveSetSolver:
     """CPU active-set QP solver with the same setup/solve/backward dict interface.
 
@@ -269,6 +289,7 @@ class ActiveSetSolver:
         self._nnz_A = len(A_col_indices)
         self._enable_grad = enable_grad
         self._batch_size = batch_size or 1
+        _warn_if_active_set_dense_is_large(n, m)
 
         # Active-set CPU solver only supports zero + nonneg slack cones.
         # Direct cones (cones.dir_cones) and exotic slack cones (SOC, exp,
