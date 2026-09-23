@@ -277,6 +277,15 @@ settings = moreau.Settings(
 )
 ```
 
+The active-set iteration limit is resolved in this order:
+
+1. `ActiveSetSettings.iter_limit`, if you set it explicitly;
+2. otherwise `Settings.max_iter`, if you set it explicitly;
+3. otherwise the active-set default of 10000.
+
+The `Settings.max_iter` default of 200 is the IPM's limit and does not cap the
+active-set solver.
+
 ### Active-Set Differentiation
 
 The active-set solver supports two differentiation modes:

@@ -234,6 +234,20 @@ _SolverInternal = _cpu_solver.DefaultSolver
 _CompiledSolverInternal = _cpu_solver.CompiledSolver
 
 
+def _field_explicitly_set(obj, name: str) -> bool:
+    """Whether ``obj.name`` was set by the caller rather than defaulted.
+
+    Pydantic models record caller-set fields in ``model_fields_set``. Plain
+    objects carry no default information, so a present attribute counts as set.
+    """
+    if obj is None or not hasattr(obj, name):
+        return False
+    fields_set = getattr(obj, "model_fields_set", None)
+    if fields_set is None:
+        return True
+    return name in fields_set
+
+
 class ActiveSetSolver:
     """CPU active-set QP solver with the same setup/solve/backward dict interface.
 
@@ -323,11 +337,15 @@ class ActiveSetSolver:
                 ]:
                     if hasattr(as_src, attr):
                         as_settings_kwargs[attr] = getattr(as_src, attr)
-            if hasattr(settings, "max_iter") and settings.max_iter is not None:
-                # Only use top-level max_iter if the user didn't set iter_limit
-                # in active_set_settings (active-set default is 10000, not 200)
-                if "iter_limit" not in as_settings_kwargs or as_src is None:
-                    as_settings_kwargs["iter_limit"] = int(settings.max_iter)
+            # Iteration limit precedence: an explicit
+            # active_set_settings.iter_limit, then an explicit top-level
+            # max_iter, then the active-set default (10000). The top-level
+            # default (200) is the IPM's limit and must not cap active-set.
+            if not _field_explicitly_set(as_src, "iter_limit"):
+                as_settings_kwargs.pop("iter_limit", None)
+                max_iter = getattr(settings, "max_iter", None)
+                if max_iter is not None and _field_explicitly_set(settings, "max_iter"):
+                    as_settings_kwargs["iter_limit"] = int(max_iter)
             if hasattr(settings, "time_limit") and settings.time_limit is not None:
                 tl = settings.time_limit
                 if tl != float("inf"):
