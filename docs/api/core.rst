@@ -370,8 +370,9 @@ IPMSettings
    :param equilibrate_enable: Enable matrix equilibration preprocessing (default True)
    :param direct_solve_method: KKT solver method. Valid options:
 
-      - ``'auto'`` — benchmarked on first solve (default)
-      - ``'qdldl'`` — CPU only, best for small/sparse KKT systems
+      - ``'auto'`` — single-threaded faer on CPU, cuDSS on CUDA (default); benchmarked on
+        first solve when ``auto_tune=True``
+      - ``'qdldl'`` — CPU only, simplicial LDL
       - ``'faer'`` — CPU only, multi-threaded, best for large CPU problems
       - ``'faer-1t'`` — CPU only, single-threaded faer variant
       - ``'faer-nt'`` — CPU only, faer with automatic thread count
