@@ -9,14 +9,13 @@ Tests cover:
 Tests run on both CPU and CUDA backends (CUDA when available).
 """
 
+import subprocess
+import sys
+
 import pytest
 import numpy as np
 
 jax = pytest.importorskip("jax")
-
-# Enable 64-bit mode for JAX (required for the solver)
-jax.config.update("jax_enable_x64", True)
-
 jnp = pytest.importorskip("jax.numpy")
 
 import moreau
@@ -55,6 +54,9 @@ def check_grads_finite_diff(fn, args, eps=1e-5, atol=1e-3, rtol=1e-3, order=1, m
 
     # Compute numerical gradient
     x = args[0]
+    # Balance O(eps**2) truncation against O(machine_epsilon / eps) rounding.
+    # The former float64 step loses significant digits with float32 outputs.
+    eps = max(eps, float(jnp.finfo(x.dtype).eps) ** (1 / 3))
     grad_numerical = jnp.zeros_like(x)
 
     for i in range(x.size):
@@ -100,6 +102,254 @@ def make_simple_qp():
     cones = moreau.Cones(num_zero_cones=1)
 
     return n, m, P_row_offsets, P_col_indices, A_row_offsets, A_col_indices, cones
+
+
+@pytest.mark.parametrize("x64", [False, True])
+def test_import_preserves_precision(jax_device, x64):
+    module = "moreau.jax" if jax_device == "cpu" else "moreau_cuda.jax"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import jax; import jax.numpy as jnp; "
+            f"jax.config.update('jax_enable_x64', {x64}); "
+            "jax.config.update('jax_explicit_x64_dtypes', 'error'); "
+            "before = jnp.ones(1).dtype; "
+            f"import {module}; assert jax.config.jax_enable_x64 == {x64}; "
+            "assert jnp.ones(1).dtype == before; "
+            "assert jnp.ones(1, dtype=jnp.float64).dtype == jnp.float64; "
+            "assert jnp.ones(1, dtype=jnp.float32).dtype == jnp.float32",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.fixture(params=[False, True], ids=["x64-off", "x64-on"])
+def jax_x64(request):
+    """Exercise both caller precision settings without leaking either to other tests."""
+    previous = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", request.param)
+    try:
+        yield request.param
+    finally:
+        jax.config.update("jax_enable_x64", previous)
+
+
+@pytest.mark.parametrize(
+    "dtypes",
+    [
+        (jnp.float32,) * 4,
+        (jnp.float64,) * 4,
+        (jnp.float32, jnp.float64, jnp.float32, jnp.float64),
+        (jnp.float64, jnp.float32, jnp.float64, jnp.float32),
+    ],
+    ids=["float32", "float64", "mixed-Pq32", "mixed-Ab32"],
+)
+@pytest.mark.parametrize("mode", ["eager", "jit", "vmap"])
+def test_gradient_input_dtypes(dtypes, mode, jax_device, jax_x64):
+    """Cotangents match input dtypes, including when another path contributes."""
+    solver = Solver(*make_simple_qp(), moreau.Settings(device=jax_device, solver="ipm"))
+    assert jax.config.jax_enable_x64 == jax_x64
+    if jax_device == "cuda":
+        from moreau_cuda.jax._ffi import ffi_available
+
+        assert solver._impl._use_ffi == ffi_available()
+    solve = solver._impl.solve
+
+    def loss(P, A, q, b):
+        solution, _ = solve(P, A, q, b)
+        # Accumulate native cotangents with ordinary JAX cotangents of each
+        # input's dtype, as happens in a composed differentiable model.
+        return solution.x @ jnp.array([0.7, -1.2]) + 0.1 * sum(jnp.sum(v * v) for v in (P, A, q, b))
+
+    def reference(P, A, q, b):
+        regularizer = 0.1 * sum(jnp.sum(v * v) for v in (P, A, q, b))
+        dtype = jnp.result_type(P, A, q, b)
+        P, A, q, b = (jnp.asarray(v, dtype=dtype) for v in (P, A, q, b))
+        free = -q / P
+        dual = (A @ free - b[0]) / jnp.sum(A * A / P)
+        x = free - A / P * dual
+        return x @ jnp.array([0.7, -1.2]) + regularizer
+
+    inputs = tuple(
+        jnp.array(values, dtype=dtype)
+        for values, dtype in zip(([2.0, 3.0], [1.0, 2.0], [0.4, -0.2], [0.8]), dtypes)
+    )
+    actual_fn = jax.value_and_grad(loss, argnums=(0, 1, 2, 3))
+    expected_fn = jax.value_and_grad(reference, argnums=(0, 1, 2, 3))
+    if mode == "jit":
+        actual_fn = jax.jit(actual_fn)
+    elif mode == "vmap":
+        actual_fn = jax.jit(jax.vmap(actual_fn))
+        expected_fn = jax.vmap(expected_fn)
+        inputs = tuple(jnp.stack([v, 1.2 * v]) for v in inputs)
+
+    solution, _ = solve(*(v[0] if mode == "vmap" else v for v in inputs))
+    assert solution.x.dtype == jnp.result_type(*inputs)
+    value, grads = actual_fn(*inputs)
+    assert jax.config.jax_enable_x64 == jax_x64
+    if jax_device == "cuda" and solver._impl._use_ffi:
+        assert "pure_callback" not in str(jax.make_jaxpr(actual_fn)(*inputs))
+    expected_value, expected_grads = expected_fn(*inputs)
+    np.testing.assert_allclose(value, expected_value, rtol=2e-5, atol=2e-6)
+    for arg, grad, expected in zip(inputs, grads, expected_grads):
+        assert grad.dtype == arg.dtype
+        assert grad.shape == arg.shape
+        np.testing.assert_allclose(grad, expected, rtol=2e-5, atol=2e-6)
+
+
+def test_inputs_created_before_solver(jax_device):
+    """Default-precision arrays remain differentiable after solver construction."""
+    previous_x64 = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", False)
+    try:
+        P = jnp.array([2.0, 2.0])
+        A = jnp.array([1.0, 1.0])
+        q = jnp.array([0.4, -0.2])
+        b = jnp.array([0.8])
+        assert q.dtype == jnp.float32
+        solver = Solver(*make_simple_qp(), moreau.Settings(device=jax_device, solver="ipm"))
+        assert not jax.config.jax_enable_x64
+        solver.setup(P, A)
+
+        def loss(q):
+            return solver.solve(q, b).x[0] + jnp.sum(q * q)
+
+        grad = jax.jit(jax.grad(loss))(q)
+        assert not jax.config.jax_enable_x64
+        assert grad.dtype == q.dtype
+        np.testing.assert_allclose(grad, jnp.array([-0.25, 0.25]) + 2 * q, atol=1e-6)
+    finally:
+        jax.config.update("jax_enable_x64", previous_x64)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("jit", [False, True])
+def test_numpy_input_dtypes(jax_device, dtype, jit):
+    with jax.enable_x64(False):
+        solver = Solver(
+            *make_simple_qp(), moreau.Settings(device=jax_device, solver="ipm"), jit=jit
+        )
+        P, A, q, b = (
+            np.array(v, dtype=dtype) for v in ([2.0, 2.0], [1.0, 1.0], [0.4, -0.2], [0.8])
+        )
+        solution = solver.solve(P, A, q, b)
+        assert solution.x.dtype == dtype
+        np.testing.assert_allclose(solution.x, [0.25, 0.55], atol=1e-6)
+        solver.setup(P, A)
+        assert solver._P_values.dtype == solver._A_values.dtype == dtype
+        result = solver.solve(q, b)
+        assert result.x.dtype == dtype
+        np.testing.assert_allclose(result.x, solution.x, atol=1e-6)
+
+
+@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+def test_warm_start_input_dtypes(jax_device, jax_x64, dtype):
+    solver = Solver(*make_simple_qp(), moreau.Settings(device=jax_device, solver="ipm"))
+    P = jnp.array([2.0, 2.0], dtype=dtype)
+    A = jnp.array([1.0, 1.0], dtype=dtype)
+    q = jnp.array([0.4, -0.2], dtype=dtype)
+    b = jnp.array([0.8], dtype=dtype)
+    solution = solver.solve(P, A, q, b)
+    warm = moreau.WarmStart(
+        x=np.asarray(solution.x), z=np.asarray(solution.z), s=np.asarray(solution.s)
+    )
+
+    def loss(q):
+        return solver.solve(P, A, q, b, warm_start=warm).x[0] + jnp.sum(q * q)
+
+    grad = jax.grad(loss)(q)
+    assert grad.dtype == q.dtype
+    assert jax.config.jax_enable_x64 == jax_x64
+    np.testing.assert_allclose(grad, jnp.array([-0.25, 0.25]) + 2 * q, atol=1e-6)
+
+
+@pytest.mark.parametrize("explicit_mode", ["warn", "error"])
+@pytest.mark.parametrize("jit", [False, True])
+def test_precision_changed_after_construction(jax_device, explicit_mode, jit):
+    """Check operations even when their callables were cached before settings changed."""
+    previous_x64 = jax.config.jax_enable_x64
+    previous_explicit = jax.config.jax_explicit_x64_dtypes
+    jax.config.update("jax_enable_x64", False)
+    try:
+        settings = moreau.Settings(device=jax_device, solver="ipm")
+        solver = Solver(*make_simple_qp(), settings, jit=jit)
+        P, A, q, b = (
+            jnp.array(v, dtype=jnp.float32) for v in ([2.0, 2.0], [1.0, 1.0], [0.4, -0.2], [0.8])
+        )
+        solver.setup(P, A)
+        solve = jax.jit(solver.solve) if jit else solver.solve
+        raw_solve = solver._impl.solve
+        raw_solve = jax.jit(raw_solve) if jit else raw_solve
+        solution = solve(q, b)
+        raw_solve(P, A, q, b)
+        warm = moreau.WarmStart(
+            x=np.asarray(solution.x), z=np.asarray(solution.z), s=np.asarray(solution.s)
+        )
+        _, pullback = jax.vjp(lambda q: solver.solve(q, b).x.sum(), q)
+        cotangent = jnp.array(1.0, dtype=jnp.float32)
+        operations = [
+            lambda: Solver(*make_simple_qp(), settings),
+            lambda: solver.setup(P, A),
+            lambda: solve(q, b),
+            lambda: raw_solve(P, A, q, b),
+            lambda: solver.solve(q, b, warm_start=warm),
+            lambda: pullback(cotangent),
+        ]
+        jax.config.update("jax_explicit_x64_dtypes", explicit_mode)
+        for operation in operations:
+            with pytest.raises(ValueError, match="Moreau requires 64-bit JAX arrays"):
+                operation()
+        assert jax.config.jax_explicit_x64_dtypes.name == explicit_mode.upper()
+        assert not jax.config.jax_enable_x64
+
+        # Either allowed configuration restores the same solver's operation.
+        jax.config.update("jax_enable_x64", True)
+        np.testing.assert_allclose(solve(q, b).x, solution.x, atol=1e-6)
+        jax.config.update("jax_enable_x64", False)
+        jax.config.update("jax_explicit_x64_dtypes", "allow")
+        np.testing.assert_allclose(solve(q, b).x, solution.x, atol=1e-6)
+    finally:
+        jax.config.update("jax_enable_x64", previous_x64)
+        jax.config.update("jax_explicit_x64_dtypes", previous_explicit)
+
+
+@pytest.mark.parametrize("mode", ["eager", "jit", "vmap"])
+def test_callback_preserves_float64_bits(mode):
+    from moreau._jax_config import _pure_callback
+
+    with jax.enable_x64(False):
+        values = np.array([1.0 + 2.0**-40, -0.0], dtype=np.float64)
+
+        def call(x):
+            return _pure_callback(
+                lambda x, unused: (
+                    np.asarray(x),
+                    np.asarray(x)[..., 0],
+                    np.empty((*x.shape[:-1], 0), dtype=np.float64),
+                ),
+                (
+                    jax.ShapeDtypeStruct((2,), jnp.float64),
+                    jax.ShapeDtypeStruct((), jnp.float64),
+                    jax.ShapeDtypeStruct((0,), jnp.float64),
+                ),
+                x,
+                None,
+                vmap_method="broadcast_all",
+            )
+
+        if mode == "jit":
+            call = jax.jit(call)
+        elif mode == "vmap":
+            call = jax.jit(jax.vmap(call))
+            values = np.stack([values, values])
+        result, scalar, empty = call(jnp.asarray(values, dtype=jnp.float64))
+        np.testing.assert_array_equal(np.asarray(result).view(np.uint64), values.view(np.uint64))
+        np.testing.assert_array_equal(scalar, values[..., 0])
+        assert scalar.dtype == empty.dtype == jnp.float64
+        assert not jax.config.jax_enable_x64
 
 
 def make_inequality_qp():

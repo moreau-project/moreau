@@ -14,6 +14,7 @@ from jax import custom_vjp
 from jax.custom_batching import custom_vmap
 
 from moreau._types import JaxSolution, JaxSolveInfo
+from moreau._jax_config import _check_jax_precision
 
 # =============================================================================
 # FFI-based solve with custom vmap (zero-copy, handles batching correctly)
@@ -396,6 +397,7 @@ def _make_ffi_solve_fn(
         Receives 10 gradients; uses the four solution-vector grads
         (dx, dz, ds, dz_x). Metadata grads are ignored.
         """
+        _check_jax_precision()
         P_data, A_data, q, b, x, z, s, z_x = residuals
         (
             dx,
@@ -559,6 +561,7 @@ def _make_ffi_solve_fn(
         the solver before computing gradients.  This ensures correctness
         for chained solves where a later forward pass overwrites state.
         """
+        _check_jax_precision()
         P_data, A_data, q, b, x, z, s, z_x = residuals
         (
             dx,
@@ -597,6 +600,10 @@ def _make_ffi_solve_fn(
         This is the main entry point. Returns a tuple of NamedTuples
         which are pytree-compatible and work with jax.vmap/jax.grad.
         """
+        _check_jax_precision()
+        dtype = jnp.result_type(P_data, A_data, q, b, jnp.float32)
+        # Cast outside custom_vjp so JAX restores each input's cotangent dtype.
+        P_data, A_data, q, b = (jnp.asarray(v, dtype=jnp.float64) for v in (P_data, A_data, q, b))
         (
             x,
             z,
@@ -608,7 +615,7 @@ def _make_ffi_solve_fn(
             solve_time,
             setup_time,
             _ffi_construction_time,
-        ) = _solve_with_grad(P_data, A_data, q, b)
+        ) = (v.astype(dtype) for v in _solve_with_grad(P_data, A_data, q, b))
         solution = JaxSolution(x=x, z=z, s=s, z_x=z_x)
         # Use wrapper construction time instead of FFI-returned value (which is 0.0)
         info = JaxSolveInfo(
@@ -617,7 +624,7 @@ def _make_ffi_solve_fn(
             iterations=iterations,
             solve_time=solve_time,
             setup_time=setup_time,
-            construction_time=jnp.asarray(wrapper_construction_time, dtype=jnp.float64),
+            construction_time=jnp.asarray(wrapper_construction_time, dtype=x.dtype),
         )
         return solution, info
 
@@ -927,6 +934,7 @@ def _make_ffi_solve_warm_fn(
 
     def _solve_warm_bwd(residuals, g):
         """Backward pass — stateless GPU backward via FFI + zero grads for warm arrays."""
+        _check_jax_precision()
         P_data, A_data, q, b, x, z, s, z_x, warm_x, warm_z, warm_s, warm_z_x = residuals
         (
             dx,
@@ -964,6 +972,12 @@ def _make_ffi_solve_warm_fn(
     # Final wrapper returning (JaxSolution, JaxSolveInfo)
     def _solve_warm_with_solution(P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x):
         """Warm-start solve returning (JaxSolution, JaxSolveInfo)."""
+        _check_jax_precision()
+        dtype = jnp.result_type(P_data, A_data, q, b, jnp.float32)
+        P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x = (
+            jnp.asarray(v, dtype=jnp.float64)
+            for v in (P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x)
+        )
         (
             x,
             z,
@@ -975,7 +989,10 @@ def _make_ffi_solve_warm_fn(
             solve_time,
             setup_time,
             _ffi_construction_time,
-        ) = _solve_warm_with_grad(P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x)
+        ) = (
+            v.astype(dtype)
+            for v in _solve_warm_with_grad(P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x)
+        )
         solution = JaxSolution(x=x, z=z, s=s, z_x=z_x)
         info = JaxSolveInfo(
             status=status,
@@ -983,7 +1000,7 @@ def _make_ffi_solve_warm_fn(
             iterations=iterations,
             solve_time=solve_time,
             setup_time=setup_time,
-            construction_time=jnp.asarray(wrapper_construction_time, dtype=jnp.float64),
+            construction_time=jnp.asarray(wrapper_construction_time, dtype=x.dtype),
         )
         return solution, info
 
