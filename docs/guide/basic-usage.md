@@ -264,8 +264,15 @@ solution = solver.solve()
 
 # Compute gradients of a scalar loss w.r.t. problem data
 # dl_dx, dl_dz, dl_ds are the gradients of your loss w.r.t. x, z, s
-dl_dP, dl_dq, dl_dA, dl_db = solver.backward(dl_dx, dl_dz, dl_ds)
+grads = solver.backward(dl_dx, dl_dz, dl_ds)
+dl_dP = grads["dP_values"]  # w.r.t. P's CSR values
+dl_dq = grads["dq"]
+dl_dA = grads["dA_values"]  # w.r.t. A's CSR values
+dl_db = grads["db"]
 ```
+
+`backward()` returns a dict keyed by name; index it by key rather than
+unpacking it, since the key order differs between solvers.
 
 For PyTorch and JAX, gradient computation is handled automatically by the
 framework's autograd system — see the [PyTorch](../api/torch) and
