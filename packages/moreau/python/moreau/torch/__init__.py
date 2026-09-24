@@ -81,7 +81,13 @@ def _validate_tensor_dtype(t: torch.Tensor, name: str) -> None:
 # Custom-op / autograd plumbing — see torch/_autograd.py.
 # `_solve_backward_op` is re-exported so it remains patchable via
 # `moreau.torch._solve_backward_op` (tests rely on this).
-from ._autograd import _register_impl, _SolveFunction, _solve_backward_op
+from ._autograd import (
+    _check_backward_statuses_torch,
+    _register_impl,
+    _SolveFunction,
+    _solve_backward_op,
+    _status_tensor,
+)
 from ._compiled import _register_solver, _compiled_solve
 
 
@@ -649,7 +655,14 @@ class Solver:
         dz: Optional[torch.Tensor] = None,
         ds: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute gradients via implicit differentiation."""
+        """Compute gradients via implicit differentiation.
+
+        Raises:
+            RuntimeError: If an upstream gradient is nonzero for a problem
+                whose last solve returned no solution (e.g. infeasible).
+        """
+        if self._info is not None:
+            _check_backward_statuses_torch(_status_tensor(self._info.status), dx, dz, ds)
         return self._impl.backward(dx, dz, ds)
 
     def setup_grad(self, batch_size: Optional[int] = None):
