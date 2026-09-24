@@ -15,7 +15,7 @@ Solver
    Supports two usage patterns:
 
    1. **Full signature:** ``solve(P_data, A_data, q, b)``
-   2. **Two-step:** ``setup(P_data, A_data)`` then ``solve(q, b)``
+   2. **Two-step:** ``setup(P_values, A_values)`` then ``solve(q, b)``
 
    :param n: Number of primal variables
    :param m: Number of constraints

@@ -235,8 +235,7 @@ solver = Solver(
     A_row_offsets=A_ro, A_col_indices=A_ci,
     cones=moreau.Cones(psd_dims=[3]),
 )
-solver.setup(P_values_tensor, A_values_tensor)
-solution = solver.solve(q_tensor, b_tensor)
+solution = solver.solve(P_values_tensor, A_values_tensor, q_tensor, b_tensor)
 solution.x.sum().backward()  # gradients flow through PSD projection
 ```
 
