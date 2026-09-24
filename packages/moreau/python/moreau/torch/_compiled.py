@@ -19,7 +19,7 @@ import weakref
 import numpy as np
 import torch
 
-from ._autograd import _solve_backward_op
+from ._autograd import _solve_backward_op, _status_tensor
 from ._types import TorchBatchedSolution, TorchSolution
 
 _SOLVERS = weakref.WeakValueDictionary()
@@ -59,7 +59,13 @@ def _solve(
     active_set: bool,
     warm: list[torch.Tensor],
 ) -> tuple[
-    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[torch.Tensor]
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    list[torch.Tensor],
 ]:
     # Only native execution touches the solver or its diagnostic metadata.
     # Backward saves explicit data and solutions, never the latest solve state.
@@ -81,6 +87,7 @@ def _solve(
         solution.s,
         solution.z_x,
         torch.from_numpy(_ImplHandle(solver)),
+        _status_tensor(solver._last_result["status"]),
         state,
     )
 
@@ -101,20 +108,21 @@ def _solve_fake(P, A, q, b, handle, direct_dual_size, active_set, warm):
         b.new_empty(b.shape),
         q.new_empty(zx_shape),
         torch.empty((), dtype=torch.int64, device="cpu"),
+        torch.empty(q.shape[:-1], dtype=torch.int64, device="cpu"),
         state,
     )
 
 
 def _setup_context(ctx, inputs, output):
     P, A, q, b, _handle, _direct_dual_size, _active_set, warm = inputs
-    x, z, s, z_x, impl_handle, state = output
-    ctx.save_for_backward(P, A, q, b, x, z, s, z_x, impl_handle, *state)
-    ctx.mark_non_differentiable(impl_handle, *state)
+    x, z, s, z_x, impl_handle, status, state = output
+    ctx.save_for_backward(P, A, q, b, x, z, s, z_x, impl_handle, status, *state)
+    ctx.mark_non_differentiable(impl_handle, status, *state)
     ctx.warm_count = len(warm)
 
 
-def _backward(ctx, dx, dz, ds, dz_x, _handle_grad, _state_grads):
-    P, A, q, b, x, z, s, z_x, impl_handle, *state = ctx.saved_tensors
+def _backward(ctx, dx, dz, ds, dz_x, _handle_grad, _status_grad, _state_grads):
+    P, A, q, b, x, z, s, z_x, impl_handle, status, *state = ctx.saved_tensors
     empty = q.new_empty(0)
     empty_int = torch.empty(0, dtype=torch.int64, device=q.device)
     if not state:
@@ -126,6 +134,7 @@ def _backward(ctx, dx, dz, ds, dz_x, _handle_grad, _state_grads):
         torch.zeros_like(s) if ds is None else ds,
         impl_handle,
         mode,
+        status,
         *state,
         P,
         A,
@@ -156,7 +165,7 @@ def _compiled_solve(solver, P, A, q, b, warm_start):
             if zx is None
             else torch.as_tensor(zx, dtype=q.dtype, device=q.device).detach()
         )
-    x, z, s, z_x, _, _state = _solve(
+    x, z, s, z_x, _, _status, _state = _solve(
         P,
         A,
         q,
