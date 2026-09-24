@@ -1086,6 +1086,89 @@ def _warn_warm_retry(failed_idx, statuses):
         )
 
 
+# Statuses whose returned iterate is not a solution, so backward has nothing
+# to differentiate. MaxIterations/MaxTime/CallbackTerminated still return the
+# last iterate, which is differentiated as-is.
+_NO_SOLUTION_STATUSES: FrozenSet[SolverStatus] = frozenset(
+    {
+        SolverStatus.Unsolved,
+        SolverStatus.PrimalInfeasible,
+        SolverStatus.DualInfeasible,
+        SolverStatus.AlmostPrimalInfeasible,
+        SolverStatus.AlmostDualInfeasible,
+        SolverStatus.NumericalError,
+        SolverStatus.InsufficientProgress,
+    }
+)
+
+
+def _no_solution_mask(statuses):
+    """Boolean numpy mask (same shape as `statuses`) of problems without a solution."""
+    import numpy as _np
+
+    codes = _np.asarray(statuses, dtype=_np.int64)
+    return _np.isin(codes, [int(s) for s in _NO_SOLUTION_STATUSES])
+
+
+def _raise_backward_without_solution(statuses, used):
+    """Raise for backward through problems with no solution.
+
+    `statuses` holds the per-problem status codes (scalar for a single
+    problem, one entry per batch element otherwise). `used` is a boolean
+    mask of the same shape marking problems with a nonzero upstream
+    gradient. Returns normally when no failed problem is used, so callers
+    can mask failed problems out of the loss.
+    """
+    import numpy as _np
+
+    codes = _np.asarray(statuses, dtype=_np.int64)
+    hit = _no_solution_mask(codes) & _np.asarray(used, dtype=bool)
+    if not hit.any():
+        return
+    fix = (
+        "The solver returned no solution there, so there is nothing to "
+        "differentiate. Exclude failed problems from the loss (their upstream "
+        "gradients must be exactly zero), e.g. by masking on solver.info.status."
+    )
+    if codes.ndim == 0:
+        raise RuntimeError(
+            f"Cannot backpropagate through a problem with status "
+            f"{SolverStatus(int(codes)).name}. {fix}"
+        )
+    idx = [tuple(int(i) for i in ix) if codes.ndim > 1 else int(ix[0]) for ix in _np.argwhere(hit)]
+    names = sorted({SolverStatus(int(c)).name for c in codes[hit]})
+    raise RuntimeError(
+        f"Cannot backpropagate through problems at batch indices {idx} "
+        f"(status {', '.join(names)}). {fix}"
+    )
+
+
+def _check_backward_statuses(statuses, *upstreams):
+    """Numpy backward guard: raise if a failed problem has a nonzero upstream.
+
+    Each upstream has shape (..., *statuses.shape, dim); empty or None
+    upstreams are ignored. Only touches the upstreams when some problem
+    failed, so the common path costs nothing.
+    """
+    import numpy as _np
+
+    codes = _np.asarray(statuses, dtype=_np.int64)
+    if not _no_solution_mask(codes).any():
+        return
+    used = _np.zeros(codes.shape, dtype=bool)
+    for g in upstreams:
+        if g is None:
+            continue
+        g = _np.asarray(g)
+        if g.size == 0:
+            continue
+        nz = _np.any(g != 0, axis=-1)
+        while nz.ndim > codes.ndim:
+            nz = nz.any(axis=0)
+        used |= nz
+    _raise_backward_without_solution(codes, used)
+
+
 __all__ = [
     "SolverType",
     "SolverStatus",
