@@ -240,12 +240,13 @@ class TestActiveSetIterationLimit:
         solver, _ = self._solve(solver="auto")
         assert solver.info.status == moreau.SolverStatus.Solved
 
-    def test_explicit_max_iter_limits_active_set(self):
+    def test_max_iter_does_not_limit_active_set(self):
+        # Settings.max_iter is the IPM's limit only.
         solver, _ = self._solve(solver="active_set", max_iter=50)
-        assert solver.info.status == moreau.SolverStatus.MaxIterations
-        assert solver.info.iterations <= 50
+        assert solver.info.status == moreau.SolverStatus.Solved
+        assert solver.info.iterations > 50
 
-    def test_explicit_iter_limit_takes_precedence_over_max_iter(self):
+    def test_iter_limit_limits_active_set(self):
         solver, _ = self._solve(
             solver="active_set",
             max_iter=1000,

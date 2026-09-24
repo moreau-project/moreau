@@ -277,14 +277,15 @@ settings = moreau.Settings(
 )
 ```
 
-The active-set iteration limit is resolved in this order:
+`Settings.max_iter` limits the IPM only. The active-set solver is limited by
+`ActiveSetSettings.iter_limit` (default 10000), so set that to cap it.
 
-1. `ActiveSetSettings.iter_limit`, if you set it explicitly;
-2. otherwise `Settings.max_iter`, if you set it explicitly;
-3. otherwise the active-set default of 10000.
-
-The `Settings.max_iter` default of 200 is the IPM's limit and does not cap the
-active-set solver.
+The active-set solver stores `P` and `A` as dense matrices, so its memory grows
+with `n² + m·n` rather than with the number of nonzeros. A solve typically needs
+about twice one dense copy, and more with `enable_grad=True` or per-problem
+matrices. Constructing an active-set solver warns when one dense copy alone
+would exceed 1 GiB. `solver='auto'` only selects active-set for problems with
+`n <= 500`; use `solver='ipm'` for large sparse problems.
 
 ### Active-Set Differentiation
 

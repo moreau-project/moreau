@@ -234,18 +234,24 @@ _SolverInternal = _cpu_solver.DefaultSolver
 _CompiledSolverInternal = _cpu_solver.CompiledSolver
 
 
-def _field_explicitly_set(obj, name: str) -> bool:
-    """Whether ``obj.name`` was set by the caller rather than defaulted.
+# Active-set stores P and A densely. Warn when one dense copy of [P; A] alone
+# exceeds this, since measured peak use is roughly 2x that for a solve and more
+# with gradients or per-problem matrices.
+_ACTIVE_SET_DENSE_WARN_BYTES = 1 << 30
 
-    Pydantic models record caller-set fields in ``model_fields_set``. Plain
-    objects carry no default information, so a present attribute counts as set.
-    """
-    if obj is None or not hasattr(obj, name):
-        return False
-    fields_set = getattr(obj, "model_fields_set", None)
-    if fields_set is None:
-        return True
-    return name in fields_set
+
+def _warn_if_active_set_dense_is_large(n: int, m: int) -> None:
+    dense_bytes = 8 * (n * n + m * n)
+    if dense_bytes <= _ACTIVE_SET_DENSE_WARN_BYTES:
+        return
+    warnings.warn(
+        f"The active-set solver stores P and A as dense matrices. For n={n}, m={m} "
+        f"that needs at least {dense_bytes / 2**30:.1f} GiB, and typically about twice "
+        "that during a solve (more with enable_grad or per-problem matrices). "
+        "Use solver='ipm' for large sparse problems.",
+        UserWarning,
+        stacklevel=3,
+    )
 
 
 class ActiveSetSolver:
@@ -283,6 +289,7 @@ class ActiveSetSolver:
         self._nnz_A = len(A_col_indices)
         self._enable_grad = enable_grad
         self._batch_size = batch_size or 1
+        _warn_if_active_set_dense_is_large(n, m)
 
         # Active-set CPU solver only supports zero + nonneg slack cones.
         # Direct cones (cones.dir_cones) and exotic slack cones (SOC, exp,
@@ -337,15 +344,8 @@ class ActiveSetSolver:
                 ]:
                     if hasattr(as_src, attr):
                         as_settings_kwargs[attr] = getattr(as_src, attr)
-            # Iteration limit precedence: an explicit
-            # active_set_settings.iter_limit, then an explicit top-level
-            # max_iter, then the active-set default (10000). The top-level
-            # default (200) is the IPM's limit and must not cap active-set.
-            if not _field_explicitly_set(as_src, "iter_limit"):
-                as_settings_kwargs.pop("iter_limit", None)
-                max_iter = getattr(settings, "max_iter", None)
-                if max_iter is not None and _field_explicitly_set(settings, "max_iter"):
-                    as_settings_kwargs["iter_limit"] = int(max_iter)
+            # Settings.max_iter is the IPM's limit. The active-set limit comes
+            # only from ActiveSetSettings.iter_limit (default 10000).
             if hasattr(settings, "time_limit") and settings.time_limit is not None:
                 tl = settings.time_limit
                 if tl != float("inf"):
