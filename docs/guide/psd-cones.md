@@ -96,14 +96,9 @@ cones = moreau.Cones(
 
 ### Constraint Ordering
 
-PSD cone rows come last in the constraint matrix, after all other cones:
-
-1. Zero cone rows
-2. Nonnegative cone rows
-3. Second-order cone rows
-4. Exponential cone rows
-5. Power cone rows
-6. **PSD cone rows** (svec length per cone)
+PSD cone rows come after second-order cone rows and before exponential,
+power, and generalized power cone rows. See
+[Constraint Ordering](basic-usage.md#constraint-ordering) for the full order.
 
 ```python
 # 2 equality + 3 inequality + PSD(3) = 2 + 3 + 6 = 11 constraints
