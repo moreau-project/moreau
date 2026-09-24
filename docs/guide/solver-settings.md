@@ -170,13 +170,13 @@ system at each IPM iteration:
 
 | Method | Device | Best For |
 |--------|--------|----------|
-| `'auto'` | any | Heuristic or auto-tuned (default) |
-| `'qdldl'` | CPU | Small/sparse KKT systems |
+| `'auto'` | any | Default: single-threaded faer on CPU, cuDSS on CUDA; benchmarked when `auto_tune=True` |
+| `'qdldl'` | CPU | Simplicial LDL; faer ties or beats it at every size we measured |
 | `'faer'` | CPU | Large CPU problems (multi-threaded) |
 | `'faer-1t'` | CPU | Large CPU problems (single-threaded) |
 | `'faer-nt'` | CPU | Large CPU problems (automatic thread count) |
 | `'cudss'` | CUDA | Large GPU problems |
-| `'riccati'` | CPU / CUDA | Block-tridiagonal problems (MPC/LQR) |
+| `'riccati'` | CUDA | Block-tridiagonal problems (MPC/LQR) |
 | `'woodbury'` | CUDA | Portfolio-type (diagonal P + low-rank constraints) |
 
 When set to `'auto'` (the default), a heuristic picks the best method for the
