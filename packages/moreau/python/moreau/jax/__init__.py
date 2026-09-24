@@ -36,7 +36,10 @@ from typing import Optional, Sequence
 import time
 import warnings
 
-from moreau._validation import _validate_P_sparsity_pattern_symmetric
+from moreau._validation import (
+    _validate_csr_structure,
+    _validate_P_sparsity_pattern_symmetric,
+)
 
 from moreau._backend import (
     default_device,
@@ -125,6 +128,9 @@ class Solver:
         b_sparsity_pattern: Optional[Sequence[bool]] = None,
     ):
         # Validate the fixed structure once, before choosing a solver backend.
+        _validate_csr_structure(
+            n, m, P_row_offsets, P_col_indices, A_row_offsets, A_col_indices, cones
+        )
         _validate_P_sparsity_pattern_symmetric(n, P_row_offsets, P_col_indices)
         # Check for old CVXPY with SOC cones
         from moreau import _warn_cvxpy_soc_if_needed, _require_dir_cones_compatible
