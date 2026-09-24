@@ -96,20 +96,9 @@ cones = moreau.Cones(
 
 ### Constraint Ordering
 
-PSD cone rows come **after** second-order cone rows and **before**
-exponential, power, and generalized power cone rows:
-
-1. Zero cone rows
-2. Nonnegative cone rows
-3. Second-order cone rows
-4. **PSD cone rows** (svec length per cone)
-5. Exponential cone rows
-6. Power cone rows
-7. Generalized power cone rows
-
-See [Constraint Ordering](basic-usage.md#constraint-ordering) for the full
-rules. Placing PSD rows after exponential or power rows is not detected and
-typically produces a false `PrimalInfeasible` or a wrong solution.
+PSD cone rows come after second-order cone rows and before exponential,
+power, and generalized power cone rows. See
+[Constraint Ordering](basic-usage.md#constraint-ordering) for the full order.
 
 ```python
 # 2 equality + 3 inequality + PSD(3) = 2 + 3 + 6 = 11 constraints

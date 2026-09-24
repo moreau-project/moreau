@@ -202,7 +202,7 @@ where $\text{mat}(s)$ reconstructs the symmetric matrix from svec form (column-m
 ### Constraint Ordering
 
 The rows of `A` and `b` must be stacked by cone type in this order, which is
-the same on CPU and CUDA and matches Clarabel and CVXPY:
+the same on CPU and CUDA and similar to the convention used by SCS:
 
 1. Zero cone rows
 2. Nonnegative cone rows
