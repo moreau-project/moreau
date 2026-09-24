@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 from types import SimpleNamespace
@@ -49,6 +51,33 @@ def test_active_set_zero_constraints_forward_backward(batch_shape):
         np.testing.assert_allclose(gradients["dq"].reshape(q.shape), -np.ones_like(q) / P)
         np.testing.assert_allclose(gradients["dP_values"].reshape(q.shape), q / P**2)
         assert gradients["dA_values"].size == gradients["db"].size == 0
+
+
+def _diagonal_active_set_solver(n, m):
+    # Construction only records sparsity (O(n + nnz)); dense buffers are
+    # allocated in setup(), so large n is cheap to construct here.
+    return cpu_mod.ActiveSetSolver(
+        n=n,
+        m=m,
+        P_row_offsets=np.arange(n + 1, dtype=np.int64),
+        P_col_indices=np.arange(n, dtype=np.int64),
+        A_row_offsets=np.minimum(np.arange(m + 1), n).astype(np.int64),
+        A_col_indices=np.arange(min(m, n), dtype=np.int64),
+        cones=SimpleNamespace(num_zero_cones=0, num_nonneg_cones=m),
+    )
+
+
+def test_active_set_warns_when_dense_storage_is_large():
+    # 8 * (n^2 + m*n) bytes for n = 12000, m = 1 is about 1.07 GiB.
+    with pytest.warns(UserWarning, match=r"dense matrices.*n=12000, m=1.*solver='ipm'"):
+        _diagonal_active_set_solver(12000, 1)
+
+
+def test_active_set_small_problems_do_not_warn():
+    # The largest problem solver='auto' routes to active-set: n = 500, m = 1000.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _diagonal_active_set_solver(500, 1000)
 
 
 def test_active_set_backward_with_data_flat_delegates_to_backend():
