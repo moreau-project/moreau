@@ -23,7 +23,9 @@ enum_dispatch  = "0.3.8"
 lazy_static    = "1.4"
 num-traits     = "0.2"
 thiserror      = "1.0"
-rayon          = "1.10"
+
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
+rayon = "1.10"
 
 
 # -------------------------------
@@ -332,7 +334,7 @@ features = ["build", "cargo", "rustc", "si"]
 # ------------------------------
 # testing, benchmarking etc
 # ------------------------------
-[dev-dependencies]
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dev-dependencies]
 tempfile = "3"
 rand = "0.8"
 
