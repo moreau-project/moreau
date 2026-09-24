@@ -140,7 +140,6 @@ class KKTProblem:
             verbose=False,
             ipm_settings=moreau.IPMSettings(
                 equilibrate_enable=equilibrate,
-                presolve_enable=False,
                 chordal_decomposition_enable=False,
                 **(ipm_options or {}),
             ),

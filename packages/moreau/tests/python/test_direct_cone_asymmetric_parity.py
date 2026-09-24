@@ -31,7 +31,6 @@ PARITY_ATOL = 1e-4
 COMMON_SETTINGS = dict(
     solver="ipm",
     ipm_settings=moreau.IPMSettings(
-        presolve_enable=False,
         equilibrate_enable=False,
     ),
     verbose=False,

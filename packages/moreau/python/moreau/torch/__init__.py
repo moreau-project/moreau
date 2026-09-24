@@ -30,7 +30,11 @@ import warnings
 import torch
 from typing import Tuple, Optional, Sequence
 
-from moreau._validation import _validate_P_sparsity_pattern_symmetric
+from moreau._validation import (
+    _check_real_array,
+    _validate_csr_structure,
+    _validate_P_sparsity_pattern_symmetric,
+)
 
 # Use centralized backend for device availability
 from moreau._backend import (
@@ -148,19 +152,19 @@ class Solver:
         b_sparsity_pattern: Optional[Sequence[bool]] = None,
     ):
         # Validate the fixed structure once, before choosing a solver backend.
-        _validate_P_sparsity_pattern_symmetric(
+        def _host(a):
+            return a.detach().cpu() if isinstance(a, torch.Tensor) else a
+
+        _validate_csr_structure(
             n,
-            (
-                P_row_offsets.detach().cpu()
-                if isinstance(P_row_offsets, torch.Tensor)
-                else P_row_offsets
-            ),
-            (
-                P_col_indices.detach().cpu()
-                if isinstance(P_col_indices, torch.Tensor)
-                else P_col_indices
-            ),
+            m,
+            _host(P_row_offsets),
+            _host(P_col_indices),
+            _host(A_row_offsets),
+            _host(A_col_indices),
+            cones,
         )
+        _validate_P_sparsity_pattern_symmetric(n, _host(P_row_offsets), _host(P_col_indices))
         # Check for old CVXPY with SOC cones
         from moreau import _warn_cvxpy_soc_if_needed, _require_dir_cones_compatible
 
@@ -510,6 +514,19 @@ class Solver:
     def _solve_eager(self, P_values, A_values, q, b, *, warm_start=None):
         if isinstance(warm_start, (TorchSolution, TorchBatchedSolution)):
             warm_start = warm_start.to_warm_start()
+        # Reject NaN/Inf on CPU tensors. CUDA tensors are not checked (that
+        # would force a device-to-host sync on every solve), and neither are
+        # tensors under functorch transforms (vmap/jacrev), which have no
+        # inspectable storage.
+        if not torch._C._are_functorch_transforms_active():
+            for name, value, allow_inf in (
+                ("P_values", P_values, False),
+                ("A_values", A_values, False),
+                ("q", q, False),
+                ("b", b, True),
+            ):
+                if isinstance(value, torch.Tensor) and not value.is_cuda:
+                    _check_real_array(name, value.detach().numpy(), allow_inf=allow_inf)
         self.setup(P_values, A_values)
 
         # Auto-tune on first solve when device or method is 'auto'
