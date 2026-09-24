@@ -20,7 +20,7 @@ packages/
 python/moreau/
 ├── __init__.py        # Solver, CompiledSolver (public API)
 ├── _backend.py        # Device + method resolution, auto-tune dispatch
-├── _dispatch.py       # CPU/CUDA backend selection
+├── _dispatch.py       # CPU/CUDA backend selection; solver='auto' resolution (enables active-set IPM fallback)
 ├── _types.py          # Cones, Settings, IPMSettings, ActiveSetSettings,
 │                      # Solution, BatchedSolution, WarmStart, BatchedWarmStart
 ├── _validation.py     # Input shape/dtype/sparsity validation

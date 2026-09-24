@@ -165,7 +165,7 @@ last non-NaN iterate (safe to overshoot). Incompatible with `enable_grad=True`.
 ## Key Types
 
 - `Cones(num_zero_cones, num_nonneg_cones, so_cone_dims, num_exp_cones, power_alphas, gen_power_cone_params, psd_dims)` — `so_cone_dims` is a list of ints (each >= 2). Backward compat: `num_so_cones=N` creates `so_cone_dims=[3]*N`. `gen_power_cone_params` is a list of `(alphas, dim2)` tuples where alphas are positive floats summing to 1 and dim2 >= 1.
-- `Settings(solver, device, batch_size, max_iter, verbose, enable_grad, yolo, yolo_num_iters, auto_tune, ipm_settings, active_set_settings)` — `solver`: `'auto'` (default, picks active-set for small QPs), `'ipm'`, or `'active_set'` (CPU, zero+nonneg cones only)
+- `Settings(solver, device, batch_size, max_iter, verbose, enable_grad, yolo, yolo_num_iters, auto_tune, ipm_settings, active_set_settings)` — `solver`: `'auto'` (default, picks active-set for small QPs, verifying each result and falling back to IPM when it fails), `'ipm'`, or `'active_set'` (CPU, zero+nonneg cones only)
 - `IPMSettings(tol_gap_abs, tol_feas, direct_solve_method, warm_start_no_retry, ...)` - tolerances default 1e-8. `direct_solve_method`: `'auto'` (default — uses Riccati for block-tridiagonal structure e.g. MPC/LQR, otherwise heuristic unless `auto_tune=True`), `'qdldl'` (CPU), `'faer'` (CPU), `'riccati'` (CPU/CUDA, block-tridiagonal only), `'cudss'` (CUDA), `'woodbury'` (CUDA, diagonal P + low-rank A, portfolio-type)
 - `ActiveSetSettings(primal_tol, dual_tol, iter_limit, diff_method, diff_smoothing_mu, ...)` — `diff_method`: `'exact'` (default) or `'smoothed'`
 - `SolverStatus`: Solved, PrimalInfeasible, DualInfeasible, AlmostSolved, MaxIterations, NumericalError, ...

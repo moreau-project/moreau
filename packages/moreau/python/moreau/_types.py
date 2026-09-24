@@ -548,6 +548,12 @@ class ActiveSetSettings(BaseModel):
             produce C^∞ gradients through active-set transitions.
         diff_smoothing_mu: Smoothing parameter μ for 'smoothed' mode (default: 1e-4).
             Larger values produce smoother gradients at the cost of accuracy.
+        ipm_fallback: Verify each active-set result and re-solve any problem that
+            fails the check with the IPM, emitting a warning (default: False).
+            ``solver='auto'`` turns this on when it picks active-set, unless you
+            set it explicitly. A problem fails the check if its status is not
+            ``Solved`` or its primal residual, dual residual, cone membership or
+            complementarity exceeds 1e-6 relative to the problem scale.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -562,6 +568,7 @@ class ActiveSetSettings(BaseModel):
     cycle_tol: Annotated[int, Field(ge=1)] = 10
     diff_method: Literal["exact", "smoothed"] = "exact"
     diff_smoothing_mu: Annotated[float, Field(gt=0)] = 1e-4
+    ipm_fallback: bool = False
 
 
 class Settings(BaseModel):
