@@ -344,11 +344,8 @@ class ActiveSetSolver:
                 ]:
                     if hasattr(as_src, attr):
                         as_settings_kwargs[attr] = getattr(as_src, attr)
-            if hasattr(settings, "max_iter") and settings.max_iter is not None:
-                # Only use top-level max_iter if the user didn't set iter_limit
-                # in active_set_settings (active-set default is 10000, not 200)
-                if "iter_limit" not in as_settings_kwargs or as_src is None:
-                    as_settings_kwargs["iter_limit"] = int(settings.max_iter)
+            # Settings.max_iter is the IPM's limit. The active-set limit comes
+            # only from ActiveSetSettings.iter_limit (default 10000).
             if hasattr(settings, "time_limit") and settings.time_limit is not None:
                 tl = settings.time_limit
                 if tl != float("inf"):
