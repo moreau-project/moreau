@@ -201,14 +201,20 @@ where $\text{mat}(s)$ reconstructs the symmetric matrix from svec form (column-m
 
 ### Constraint Ordering
 
-Constraints in A and b must be ordered to match the cone specification:
-1. Zero cone rows first
+The rows of `A` and `b` must be stacked by cone type in this order, which is
+the same on CPU and CUDA and matches Clarabel and CVXPY:
+
+1. Zero cone rows
 2. Nonnegative cone rows
-3. Second-order cone rows (one block per cone, size = cone dimension)
-4. Exponential cone rows (3 per cone)
-5. Power cone rows (3 per cone)
-6. Generalized power cone rows (one block per cone, size = `len(alphas) + dim2`)
-7. PSD cone rows ($d(d+1)/2$ per cone)
+3. Second-order cone rows (one block per cone, in `so_cone_dims` order)
+4. PSD cone rows ($d(d+1)/2$ per cone, in `psd_dims` order)
+5. Exponential cone rows (3 per cone)
+6. Power cone rows (3 per cone, in `power_alphas` order)
+7. Generalized power cone rows (one block per cone, size `len(alphas) + dim2`)
+
+Rows in the wrong order are not detected: they are silently interpreted as a
+different cone, which typically produces a false `PrimalInfeasible` or a wrong
+solution. Direct cones (`dir_cones`) constrain `x` directly and use no rows.
 
 ---
 
