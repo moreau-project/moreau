@@ -28,15 +28,13 @@ fi
 cp ../moreau-c/include/moreau.h ${includedir}/
 """
 
-# The Julia wrapper and C interface use 64-bit sparse indices.
-platforms = [
-    Platform("x86_64", "linux"; libc="glibc"),
-    Platform("aarch64", "linux"; libc="glibc"),
-    Platform("x86_64", "linux"; libc="musl"),
-    Platform("aarch64", "linux"; libc="musl"),
-    Platform("aarch64", "macos"),
-    Platform("x86_64", "windows"),
-]
+platforms = supported_platforms()
+# The C API requires 64-bit usize for its Int64 sparse indices.
+filter!(p -> nbits(p) == 64, platforms)
+# BinaryBuilder has no Rust 1.87 toolchain for RISC-V.
+filter!(p -> arch(p) != "riscv64", platforms)
+# BinaryBuilder has no Rust 1.87 toolchain for aarch64 FreeBSD.
+filter!(p -> !(Sys.isfreebsd(p) && arch(p) == "aarch64"), platforms)
 products = [LibraryProduct(["libmoreau_cpu", "moreau_cpu"], :libmoreau)]
 dependencies = [Dependency("CompilerSupportLibraries_jll")]
 

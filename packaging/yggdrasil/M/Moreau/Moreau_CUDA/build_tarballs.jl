@@ -67,9 +67,11 @@ dependencies = [
     Dependency("CUDSS_jll", v"0.7.1"; compat="=0.7.1"),
     Dependency("CompilerSupportLibraries_jll"),
 ]
-platforms = CUDA.supported_platforms(; min_version=v"12.2", max_version=v"13.1")
-# One toolkit per runtime ABI. Keep both ARM CUDA-12 variants selected by Yggdrasil.
-filter!(p -> p["cuda"] in ("12.2", "13.0"), platforms)
+platforms = CUDA.supported_platforms()
+# Moreau's CUDA 12 release baseline is toolkit 12.2.
+filter!(p -> VersionNumber(p["cuda"]) >= v"12.2", platforms)
+# cuDSS 0.7.1 only provides binaries for the CUDA 12 and 13 runtime ABIs.
+filter!(p -> VersionNumber(p["cuda"]) < v"14", platforms)
 
 filter!(p -> should_build_platform(triplet(p)), platforms)
 # Each variant has different SDK dependencies; do not let build_tarballs expand it
