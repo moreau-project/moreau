@@ -103,7 +103,6 @@ def test_nonneg_dual_scaling_and_external_warm_start(device, equilibrate):
         solver="ipm",
         verbose=False,
         ipm_settings=moreau.IPMSettings(
-            presolve_enable=False,
             equilibrate_enable=equilibrate,
         ),
     )
@@ -141,7 +140,7 @@ def test_direct_x_warm_start_reduces_iters(device):
     if not device_available(device):
         pytest.skip(f"{device} backend not available")
 
-    ipm = moreau.IPMSettings(presolve_enable=False, equilibrate_enable=False)
+    ipm = moreau.IPMSettings(equilibrate_enable=False)
     n = 3
     P = sparse.eye(n, format="csr") * 0.1
     q = np.array([-0.5, -0.5, 5.0])
@@ -196,7 +195,7 @@ def test_direct_x_warm_start_without_z_x_uses_default_init(device):
     if not device_available(device):
         pytest.skip(f"{device} backend not available")
 
-    ipm = moreau.IPMSettings(presolve_enable=False, equilibrate_enable=False)
+    ipm = moreau.IPMSettings(equilibrate_enable=False)
     n = 3
     P = sparse.eye(n, format="csr") * 0.1
     A = sparse.csr_matrix(np.zeros((0, n)))
@@ -364,7 +363,6 @@ def test_mixed_psd_exp_power_slack_order_with_direct_x(device):
         solver="ipm",
         verbose=False,
         ipm_settings=moreau.IPMSettings(
-            presolve_enable=False,
             equilibrate_enable=False,
         ),
     )

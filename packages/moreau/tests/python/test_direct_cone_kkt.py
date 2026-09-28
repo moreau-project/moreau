@@ -63,7 +63,6 @@ def test_boundary_warm_start_respects_tolerances(device, equilibrate, equality_r
             verbose=False,
             ipm_settings=moreau.IPMSettings(
                 equilibrate_enable=equilibrate,
-                presolve_enable=False,
                 tol_feas=1e-10,
                 tol_gap_abs=1e-10,
                 tol_gap_rel=1e-10,
