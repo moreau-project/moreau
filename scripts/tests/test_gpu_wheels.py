@@ -130,7 +130,9 @@ def test_rejects_incomplete_or_ambiguous_wheels(run_qa, wheel_error):
     assert '"uv"' not in commands
 
 
-@pytest.mark.parametrize("failure", ["install", "import", "test_a.py", "test_conic_solvers"])
+@pytest.mark.parametrize(
+    "failure", ["install", "import", "test_a.py", "test_conic_solvers", "test_jax_ffi.py"]
+)
 def test_failures_fail_qa(run_qa, failure):
     _, run = run_qa
     result, commands = run(failure)
@@ -150,6 +152,9 @@ def test_success_including_optional_empty_module(run_qa, optional_module):
     assert "python3.14/bin/python" in commands
     assert "test_conic_solvers.py" in commands
     assert "test_moreau_dual_variables.py" in commands
+    assert "jax[cuda12]==0.6.1" in commands
+    assert "jax[cuda12]==0.10.2" in commands
+    assert commands.count("test_jax_ffi.py") == 2
     assert '["git", "clone", "--depth=1", "--branch", "v91.2.3",' in commands
     assert '["git", "clone", "--depth=1", "--branch", "v82.3.4",' in commands
 
@@ -169,6 +174,10 @@ def test_release_statuses_follow_each_suite_on_tagged_commit(run_qa, cuda, suite
     _, run = run_qa
     result, commands = run(failure, release_suite=suite, cuda=cuda)
     assert result.returncode == bool(failure), result.stderr
+    if cuda == "13" and suite != "julia":
+        assert "jax[cuda13]==0.6.1" not in commands
+        if not failure:
+            assert "jax[cuda13]==0.10.2" in commands
     calls = [json.loads(line) for line in commands.splitlines()]
     updates = [call for call in calls if call[0] == "gh" and "POST" in call]
     expected = []
