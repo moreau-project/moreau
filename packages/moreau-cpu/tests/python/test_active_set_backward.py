@@ -122,6 +122,7 @@ def test_active_set_backward_with_data_flat_delegates_to_backend():
 
     fake_self = type("FakeActiveSetSelf", (), {})()
     fake_self._enable_grad = True
+    fake_self._ipm_fallback = False
     fake_self._n = 2
     fake_self._m = 1
     fake_self._nnz_P = 2

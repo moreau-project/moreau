@@ -254,6 +254,23 @@ def _warn_if_active_set_dense_is_large(n: int, m: int) -> None:
     )
 
 
+# Relative tolerance for verifying an active-set result before accepting it.
+_ACTIVE_SET_VERIFY_TOL = 1e-6
+
+
+def _csr_to_dense_batched(n_rows, n_cols, row_offsets, col_indices, values):
+    """Dense (B, n_rows, n_cols) array from CSR values of shape (nnz,) or (B, nnz).
+
+    Duplicate entries are summed, matching scipy semantics.
+    """
+    values = np.atleast_2d(values)
+    rows = np.repeat(np.arange(n_rows), np.diff(row_offsets))
+    flat = rows * n_cols + np.asarray(col_indices, dtype=np.int64)
+    dense = np.zeros((values.shape[0], n_rows * n_cols))
+    np.add.at(dense, (np.arange(values.shape[0])[:, None], flat[None, :]), values)
+    return dense.reshape(values.shape[0], n_rows, n_cols)
+
+
 class ActiveSetSolver:
     """CPU active-set QP solver with the same setup/solve/backward dict interface.
 
@@ -290,6 +307,21 @@ class ActiveSetSolver:
         self._enable_grad = enable_grad
         self._batch_size = batch_size or 1
         _warn_if_active_set_dense_is_large(n, m)
+
+        # IPM fallback (enabled by solver='auto'): verify each result and
+        # re-solve failures with the IPM. State is filled by setup()/solve().
+        as_cfg = getattr(settings, "active_set_settings", None) if settings else None
+        self._ipm_fallback = bool(getattr(as_cfg, "ipm_fallback", False))
+        self._cones_spec = cones
+        self._settings_spec = settings
+        self._ipm_solver = None
+        self._ipm_setup_key = None
+        self._P_setup = None
+        self._A_setup = None
+        self._P_dense = None
+        self._A_dense = None
+        self._fallback_mask = None
+        self._last_solution = None
 
         # Active-set CPU solver only supports zero + nonneg slack cones.
         # Direct cones (cones.dir_cones) and exotic slack cones (SOC, exp,
@@ -393,6 +425,16 @@ class ActiveSetSolver:
         P_flat = np.ascontiguousarray(P_values, dtype=np.float64).ravel()
         A_flat = np.ascontiguousarray(A_values, dtype=np.float64).ravel()
         self._solver.setup(P_flat, A_flat, shared)
+        if self._ipm_fallback:
+            self._P_setup = np.array(P_values, dtype=np.float64, copy=True)
+            self._A_setup = np.array(A_values, dtype=np.float64, copy=True)
+            self._P_dense = _csr_to_dense_batched(
+                self._n, self._n, self._P_row_offsets, self._P_col_indices, self._P_setup
+            )
+            self._A_dense = _csr_to_dense_batched(
+                self._m, self._n, self._A_row_offsets, self._A_col_indices, self._A_setup
+            )
+            self._ipm_setup_key = None
 
     def solve(
         self,
@@ -430,6 +472,16 @@ class ActiveSetSolver:
         obj_vals = list(raw["obj_val"])
         iters = list(raw["iterations"])
         backward_state = self._solver.get_backward_state() if self._enable_grad else None
+
+        self._fallback_mask = None
+        if self._ipm_fallback:
+            failed = ~self._verify(x, z, s, q, b, statuses)
+            if failed.any():
+                self._resolve_with_ipm(failed, q, b, x, z, s, statuses, obj_vals, iters)
+                self._fallback_mask = failed
+                self._last_solution = (q.copy(), b.copy(), x.copy(), z.copy(), s.copy())
+                if backward_state is not None:
+                    backward_state = self._mark_fallback_in_state(backward_state, failed)
         self._last_backward_state = backward_state
 
         result = {
@@ -520,6 +572,24 @@ class ActiveSetSolver:
             "db": np.array(raw["db"], dtype=np.float64).reshape(batch_size, self._m),
         }
 
+        if self._fallback_mask is not None:
+            q_last, b_last, x_last, z_last, s_last = self._last_solution
+            for i in np.flatnonzero(self._fallback_mask):
+                grads = self._ipm_gradient(
+                    dx[i],
+                    ds[i],
+                    dz[i],
+                    self._problem_values(self._P_setup, i),
+                    self._problem_values(self._A_setup, i),
+                    q_last[i],
+                    b_last[i],
+                    x_last[i],
+                    z_last[i],
+                    s_last[i],
+                )
+                for key in result:
+                    result[key][i] = grads[key]
+
         if is_single:
             return {k: v.squeeze(0) for k, v in result.items()}
         return result
@@ -542,6 +612,17 @@ class ActiveSetSolver:
         """Compute gradients from explicit problem data and saved solution."""
         if not self._enable_grad:
             raise RuntimeError("backward_with_data_flat() requires enable_grad=True")
+        # Problems re-solved by the IPM are marked with n_active = -1 in the
+        # saved state. Give the active-set backward a harmless empty working
+        # set for them, then replace their rows with IPM gradients.
+        fallback = np.zeros(batch_size, dtype=bool)
+        if self._ipm_fallback:
+            flat_state = backward_state._to_flat_dict()
+            fallback = np.asarray(flat_state["n_active"]) < 0
+        if fallback.any():
+            n_active = np.asarray(flat_state["n_active"], dtype=np.int32).copy()
+            n_active[fallback] = 0
+            backward_state = self._state_from_flat(flat_state, n_active)
         raw = self._solver.backward_with_data_flat(
             np.ascontiguousarray(dx_flat, dtype=np.float64).ravel(),
             np.ascontiguousarray(ds_flat, dtype=np.float64).ravel(),
@@ -567,7 +648,147 @@ class ActiveSetSolver:
             "dq": np.array(raw["dq"], dtype=np.float64).reshape(batch_size, self._n),
             "db": np.array(raw["db"], dtype=np.float64).reshape(batch_size, self._m),
         }
+        if fallback.any():
+            n, m = self._n, self._m
+            per = lambda a, size, i: np.asarray(a).reshape(batch_size, size)[i]  # noqa: E731
+            P_rows = np.asarray(P_values_flat).reshape(-1, self._nnz_P)
+            A_rows = np.asarray(A_values_flat).reshape(-1, self._nnz_A)
+            for i in np.flatnonzero(fallback):
+                grads = self._ipm_gradient(
+                    per(dx_flat, n, i),
+                    per(ds_flat, m, i),
+                    per(dz_flat, m, i),
+                    P_rows[i if P_rows.shape[0] > 1 else 0],
+                    A_rows[i if A_rows.shape[0] > 1 else 0],
+                    per(q_flat, n, i),
+                    per(b_flat, m, i),
+                    per(x_flat, n, i),
+                    per(z_flat, m, i),
+                    per(s_flat, m, i),
+                )
+                for key in result:
+                    result[key][i] = grads[key]
         return result
+
+    # ------------------------------------------------------------------
+    # IPM fallback
+    # ------------------------------------------------------------------
+
+    def _verify(self, x, z, s, q, b, statuses):
+        """Per-problem check that an active-set result is a KKT point.
+
+        Checks the status, primal and dual residuals, cone membership and
+        complementarity in the original problem units, relative to the
+        problem scale. NaN or Inf anywhere fails the check.
+        """
+        tol = _ACTIVE_SET_VERIFY_TOL
+        mz = int(getattr(self._cones_spec, "num_zero_cones", 0))
+        Px = np.matmul(self._P_dense, x[:, :, None])[:, :, 0]
+        Ax = np.matmul(self._A_dense, x[:, :, None])[:, :, 0]
+        ATz = np.matmul(np.swapaxes(self._A_dense, 1, 2), z[:, :, None])[:, :, 0]
+
+        def inf(a):
+            return np.max(np.abs(a), axis=1, initial=0.0)
+
+        scale_p = 1.0 + np.maximum.reduce([inf(Ax), inf(s), inf(b)])
+        scale_d = 1.0 + np.maximum.reduce([inf(Px), inf(q), inf(ATz)])
+        primal = np.maximum(inf(Ax + s - b), inf(s[:, :mz])) <= tol * scale_p
+        dual = inf(Px + q + ATz) <= tol * scale_d
+        s_nn, z_nn = s[:, mz:], z[:, mz:]
+        cone = (np.min(s_nn, axis=1, initial=0.0) >= -tol * scale_p) & (
+            np.min(z_nn, axis=1, initial=0.0) >= -tol * scale_d
+        )
+        comp = inf(s_nn * z_nn) <= tol * (1.0 + inf(s_nn) * inf(z_nn))
+        solved = np.array([st == SolverStatus.Solved for st in statuses])
+        finite = (
+            np.isfinite(x).all(axis=1) & np.isfinite(z).all(axis=1) & np.isfinite(s).all(axis=1)
+        )
+        return solved & finite & primal & dual & cone & comp
+
+    def _get_ipm_solver(self):
+        if self._ipm_solver is None:
+            self._ipm_solver = Solver(
+                self._n,
+                self._m,
+                self._P_row_offsets,
+                self._P_col_indices,
+                self._A_row_offsets,
+                self._A_col_indices,
+                self._cones_spec,
+                settings=self._settings_spec,
+                batch_size=1,
+                enable_grad=self._enable_grad,
+            )
+        return self._ipm_solver
+
+    @staticmethod
+    def _problem_values(values, i):
+        return values if values.ndim == 1 else values[i]
+
+    def _resolve_with_ipm(self, failed, q, b, x, z, s, statuses, obj_vals, iters):
+        """Re-solve failed problems with the IPM, updating the outputs in place."""
+        ipm = self._get_ipm_solver()
+        shared = self._P_setup.ndim == 1 and self._A_setup.ndim == 1
+        reasons = {}
+        for i in np.flatnonzero(failed):
+            key = "shared" if shared else i
+            if self._ipm_setup_key != key:
+                ipm.setup(
+                    self._problem_values(self._P_setup, i),
+                    self._problem_values(self._A_setup, i),
+                )
+                self._ipm_setup_key = key
+            reasons[statuses[i].name] = reasons.get(statuses[i].name, 0) + 1
+            r = ipm.solve(q[i], b[i])
+            x[i], z[i], s[i] = r["x"], r["z"], r["s"]
+            statuses[i] = SolverStatus(int(r["status"]))
+            obj_vals[i] = r["obj_val"]
+            iters[i] = r["iterations"]
+        detail = ", ".join(f"{k}: {v}" for k, v in sorted(reasons.items()))
+        warnings.warn(
+            f"solver='auto': active-set result failed verification for {int(failed.sum())} "
+            f"of {len(failed)} problem(s) (active-set status {detail}); fell back to the IPM. "
+            "Pass solver='ipm' to skip the active-set attempt, or "
+            "ActiveSetSettings(ipm_fallback=False) to disable the fallback.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+    def _state_from_flat(self, flat_state, n_active):
+        return self._solver._make_backward_state_from_flat(
+            np.asarray(flat_state["rinv"], dtype=np.float64),
+            np.asarray(flat_state["rinv_diag"], dtype=np.float64),
+            np.asarray(flat_state["use_rinv_diag"], dtype=np.int32),
+            np.asarray(n_active, dtype=np.int32),
+            np.asarray(flat_state["ws"], dtype=np.int32),
+            np.asarray(flat_state["sense"], dtype=np.int32),
+            np.asarray(flat_state["lam_star"], dtype=np.float64),
+        )
+
+    def _mark_fallback_in_state(self, backward_state, failed):
+        """Mark IPM-solved problems (n_active = -1) so delayed backward can route them."""
+        flat_state = backward_state._to_flat_dict()
+        n_active = np.asarray(flat_state["n_active"], dtype=np.int32).copy()
+        n_active[failed] = -1
+        return self._state_from_flat(flat_state, n_active)
+
+    def _ipm_gradient(self, dx, ds, dz, P_values, A_values, q, b, x, z, s):
+        """Gradient of one IPM-solved problem from explicit data and solution."""
+        ipm = self._get_ipm_solver()
+        out = ipm.backward_with_data_flat(
+            np.ascontiguousarray(dx, dtype=np.float64).ravel(),
+            np.ascontiguousarray(ds, dtype=np.float64).ravel(),
+            np.ascontiguousarray(dz, dtype=np.float64).ravel(),
+            np.ascontiguousarray(P_values, dtype=np.float64).ravel(),
+            np.ascontiguousarray(A_values, dtype=np.float64).ravel(),
+            np.ascontiguousarray(q, dtype=np.float64).ravel(),
+            np.ascontiguousarray(b, dtype=np.float64).ravel(),
+            np.ascontiguousarray(x, dtype=np.float64).ravel(),
+            np.ascontiguousarray(z, dtype=np.float64).ravel(),
+            np.ascontiguousarray(s, dtype=np.float64).ravel(),
+            1,
+        )
+        return {key: np.asarray(val).reshape(-1) for key, val in out.items()}
 
 
 class Solver:
