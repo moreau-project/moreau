@@ -219,10 +219,17 @@ class Cones(BaseModel):
             Each element is (alphas, dim2) where alphas is a list of positive
             floats summing to 1 (length = dim1) and dim2 >= 1. Total cone
             dimension is dim1 + dim2.
+        psd_dims: List of PSD cone matrix dimensions. A cone of dimension d
+            uses d(d+1)/2 rows in scaled svec form.
         dir_cones: List of direct cone specifications constraining subvectors
             of ``x`` directly (see :class:`DirectConeSpec`). Indices across all
             entries must be pairwise disjoint. Direct cones are additive
             to the slack cones above; they do not consume rows of ``A`` or ``b``.
+
+    Row order:
+        Rows of ``A`` and ``b`` must be stacked by cone type as zero, nonneg,
+        second-order, PSD, exponential, power, then generalized power, with
+        cones of one type in list order. Misordered rows are not detected.
 
     Example:
         >>> cones = Cones(num_zero_cones=1, num_nonneg_cones=2, so_cone_dims=[3, 5])
