@@ -73,6 +73,11 @@ composite direct conic constraints. Symmetric and nonsymmetric helpers live in
 
 Tests in `tests/` (top-level integration tests).
 
+Browser WASM (`wasm32-unknown-unknown`, no default features) uses QDLDL and
+sequential batch execution through `utils/batch.rs`. Native batches use Rayon.
+`tests/browser.rs` runs portable solve and derivative checks natively and in
+Firefox through `.github/workflows/ci-wasm.yml`. See `docs/guide/webassembly.md`.
+
 ## packages/moreau-cuda (C++/CUDA solver)
 
 ```
