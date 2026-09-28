@@ -731,11 +731,13 @@ class CompiledSolver:
         # Auto-tune (benchmarking) fires when device='auto' OR method='auto'.
         # When method='auto' and device is explicit, we resolve the method
         # heuristically for initial construction, but keep _original_method='auto'
-        # so auto-tune benchmarks methods on first solve.
+        # so auto-tune benchmarks methods on first solve. On CPU, 'auto' is left
+        # to the Rust core (single-threaded faer), exactly as Solver does, so
+        # both classes factor the KKT system the same way.
         self._original_device = settings.device
         ipm = settings.ipm_settings
         self._original_method = ipm.direct_solve_method if ipm else "auto"
-        if self._original_method == "auto" and settings.device != "auto":
+        if self._original_method == "auto" and settings.device != "auto" and device != "cpu":
             from moreau._backend import _rank_method
 
             ranked = _rank_method(device, n, m, self._nnz_A, self._batch_size)

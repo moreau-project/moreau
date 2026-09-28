@@ -181,12 +181,11 @@ class TestAutoTuneDisabledByDefault:
         assert solver.device in available_devices()
         assert solver.device != "auto"
 
-    def test_auto_method_heuristic_picks_method(self):
-        """method='auto' with auto_tune=False resolves to a concrete method."""
+    def test_auto_method_left_to_rust_on_cpu(self):
+        """On CPU, method='auto' is passed through so the Rust core picks faer,
+        exactly as Solver does (#50)."""
         solver = _make_compiled_solver("cpu", method="auto", auto_tune=False)
-        # Method should be resolved heuristically
-        assert solver._settings.ipm_settings.direct_solve_method != "auto"
-        assert solver._settings.ipm_settings.direct_solve_method in solver_methods_for_device("cpu")
+        assert solver._settings.ipm_settings.direct_solve_method == "auto"
 
     def test_explicit_device_and_method_works(self):
         """Explicit device + explicit method works with auto_tune=False."""
