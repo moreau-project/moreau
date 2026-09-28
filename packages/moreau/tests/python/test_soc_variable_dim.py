@@ -2349,7 +2349,6 @@ class TestMixedConesWithSOCBackward:
 try:
     import jax
 
-    jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
     from moreau.jax import Solver as JaxSolver
     from moreau._backend import jax_available as _jax_available
@@ -2367,6 +2366,8 @@ def _check_grads_finite_diff(fn, args, eps=1e-5, atol=1e-3, rtol=1e-3):
     grad_fn = jax.grad(fn)
     grad_analytical = grad_fn(*args)
     x = args[0]
+    # Central differences balance truncation and rounding at machine_epsilon**(1/3).
+    eps = max(eps, float(jnp.finfo(x.dtype).eps) ** (1 / 3))
     grad_numerical = jnp.zeros_like(x)
     for i in range(x.size):
         x_flat = x.ravel()

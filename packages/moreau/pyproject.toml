@@ -38,6 +38,7 @@ cuda = ["moreau-cuda12==0.4.1"]
 cuda12 = ["moreau-cuda12==0.4.1"]
 cuda13 = ["moreau-cuda13==0.4.1"]
 torch = ["torch>=2.4.0"]
+jax = ["jax>=0.8.0"]
 test = ["pytest>=7.0.0", "cvxpy>=1.4.0"]
 all = ["moreau[cuda,torch]"]
 

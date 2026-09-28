@@ -2,6 +2,11 @@
 
 Moreau provides a first-class JAX integration that is compatible with `jax.grad`, `jax.vmap`, and `jax.jit`. It supports automatic device selection between CPU and CUDA backends and provides gradients via implicit differentiation.
 
+Install with `pip install 'moreau[jax]'` (JAX >= 0.8.0).
+Importing Moreau's JAX integration allows explicit 64-bit arrays without changing
+your default dtypes. Solutions use the promoted input dtype; each input's
+gradient matches its dtype.
+
 ## Quick Start
 
 ```python
@@ -153,10 +158,7 @@ solver = Solver(..., settings=settings)
 
 ## Best Practices
 
-1.  **Use `float64`**: Moreau performs all internal calculations in double precision. Ensure your JAX inputs are `jnp.float64` for best results.
-    ```python
-    jax.config.update("jax_enable_x64", True)
-    ```
+1.  **Precision**: Pass `dtype=jnp.float64` when you need double-precision results. Keep `jax_explicit_x64_dtypes="allow"` or `jax_enable_x64=True` while using Moreau.
 2.  **Pre-construct Solvers**: Avoid creating `Solver` objects inside JIT-compiled functions or loops. Construct them once and reuse them.
 3.  **Two-Step API**: Use `setup(P, A)` whenever $P$ and $A$ are constant to skip redundant factorization steps.
 4.  **Auto-Tune**: By default, Moreau uses a heuristic to select the KKT solver without benchmarking. Set `auto_tune=True` in `Settings` to benchmark different KKT solvers on the first solve and lock in the fastest. Alternatively, set `direct_solve_method` explicitly in `IPMSettings` to skip selection entirely.

@@ -156,8 +156,6 @@ import jax
 import jax.numpy as jnp
 from cvxpylayers.jax import CvxpyLayer
 
-jax.config.update("jax_enable_x64", True)
-
 # 1. Define parametric problem
 n = 5
 x = cp.Variable(n)
@@ -273,15 +271,14 @@ assert hasattr(cp, 'MOREAU'), "MOREAU solver not available"
 
 ### `float32` errors
 
-Moreau requires double precision. Ensure your tensors are `float64`:
+For PyTorch, use `float64` tensors:
 
 ```python
-# PyTorch
 q_val = torch.randn(n, dtype=torch.float64, requires_grad=True)
-
-# JAX
-jax.config.update("jax_enable_x64", True)
 ```
+
+JAX accepts float32, float64, and mixed inputs. Solutions use the promoted input
+dtype, and each gradient matches its input's dtype.
 
 ### Slow performance in training loops
 

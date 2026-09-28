@@ -5,7 +5,7 @@ This provides a JAX-compatible interface to the CPU solver with:
 - jax.grad support via custom_vjp
 - Works without GPU or CUDA
 
-Requires JAX >= 0.6.0 for pure_callback vmap_method parameter.
+Requires JAX >= 0.8.0 for explicit 64-bit dtypes.
 """
 
 from functools import partial
@@ -17,19 +17,9 @@ import jax
 import jax.numpy as jnp
 from jax import custom_vjp
 
+from moreau._jax_config import _check_jax_precision, _pure_callback
 from moreau._types import Cones, Settings
 from ._types import JaxSolution, JaxSolveInfo
-
-
-def _ensure_x64_enabled():
-    """Ensure JAX 64-bit mode is enabled (required for solver's numerical precision).
-
-    This is called lazily when the solver is first used, rather than at import time,
-    to avoid polluting global JAX config for users who import but don't use the JAX solver.
-    """
-    if not jax.config.jax_enable_x64:
-        jax.config.update("jax_enable_x64", True)
-
 
 # Global registry for solver instances (keyed by solver_id).
 # WeakValueDictionary so the registry doesn't keep wrappers alive after the
@@ -64,11 +54,9 @@ class JaxSolverCpu:
         settings: Optional[Settings] = None,
         b_sparsity_pattern=None,
     ):
-        # Ensure JAX 64-bit mode is enabled (lazy, only when solver is created)
-        _ensure_x64_enabled()
-
         import time
 
+        _check_jax_precision()
         start = time.perf_counter()
 
         self._n = n
@@ -212,6 +200,8 @@ def _solve_cpu_callback(
     A_data: np.ndarray,
     q: np.ndarray,
     b: np.ndarray,
+    *,
+    result_dtype: np.dtype,
 ) -> Tuple[
     np.ndarray,
     np.ndarray,
@@ -330,7 +320,21 @@ def _solve_cpu_callback(
         setup_time = np.full(batch_size, setup_time_val, dtype=np.float64)
         construction_time = np.full(batch_size, construction_time_val, dtype=np.float64)
 
-    return (x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time)
+    return tuple(
+        np.asarray(v, dtype=result_dtype)
+        for v in (
+            x,
+            z,
+            s,
+            z_x,
+            status,
+            obj_val,
+            iterations,
+            solve_time,
+            setup_time,
+            construction_time,
+        )
+    )
 
 
 def _backward_cpu_callback(
@@ -353,6 +357,8 @@ def _backward_cpu_callback(
     Returns 4 arrays: dP, dA, dq, db
     """
     solver_wrapper = _SOLVER_REGISTRY[solver_id]
+
+    input_dtypes = tuple(v.dtype for v in (P_data, A_data, q, b))
 
     # Convert to float64
     dx = np.asarray(dx, dtype=np.float64)
@@ -472,7 +478,7 @@ def _backward_cpu_callback(
         dq = dq.reshape(1, -1) if dq.ndim == 1 else dq
         db = db.reshape(1, -1) if db.ndim == 1 else db
 
-    return dP, dA, dq, db
+    return tuple(np.asarray(v, dtype=dtype) for v, dtype in zip((dP, dA, dq, db), input_dtypes))
 
 
 @partial(custom_vjp, nondiff_argnums=(0,))
@@ -488,13 +494,15 @@ def _solve_cpu_raw(
     n, m = solver_wrapper._n, solver_wrapper._m
     total_xn = solver_wrapper._total_x_dim
 
+    dtype = jnp.result_type(P_data, A_data, q, b, jnp.float32)
+
     # Determine output shapes
-    scalar_shape = jax.ShapeDtypeStruct((), jnp.float64)
+    scalar_shape = jax.ShapeDtypeStruct((), dtype)
     if q.ndim == 1:
-        x_shape = jax.ShapeDtypeStruct((n,), jnp.float64)
-        z_shape = jax.ShapeDtypeStruct((m,), jnp.float64)
-        s_shape = jax.ShapeDtypeStruct((m,), jnp.float64)
-        z_x_shape = jax.ShapeDtypeStruct((total_xn,), jnp.float64)
+        x_shape = jax.ShapeDtypeStruct((n,), dtype)
+        z_shape = jax.ShapeDtypeStruct((m,), dtype)
+        s_shape = jax.ShapeDtypeStruct((m,), dtype)
+        z_x_shape = jax.ShapeDtypeStruct((total_xn,), dtype)
         # Metadata: all scalars for single problem
         status_shape = scalar_shape
         obj_val_shape = scalar_shape
@@ -504,12 +512,12 @@ def _solve_cpu_raw(
         construction_time_shape = scalar_shape
     else:
         batch_size = q.shape[0]
-        x_shape = jax.ShapeDtypeStruct((batch_size, n), jnp.float64)
-        z_shape = jax.ShapeDtypeStruct((batch_size, m), jnp.float64)
-        s_shape = jax.ShapeDtypeStruct((batch_size, m), jnp.float64)
-        z_x_shape = jax.ShapeDtypeStruct((batch_size, total_xn), jnp.float64)
+        x_shape = jax.ShapeDtypeStruct((batch_size, n), dtype)
+        z_shape = jax.ShapeDtypeStruct((batch_size, m), dtype)
+        s_shape = jax.ShapeDtypeStruct((batch_size, m), dtype)
+        z_x_shape = jax.ShapeDtypeStruct((batch_size, total_xn), dtype)
         # Metadata: per-problem arrays for batch (timing is broadcast to batch size for vmap compat)
-        batch_scalar_shape = jax.ShapeDtypeStruct((batch_size,), jnp.float64)
+        batch_scalar_shape = jax.ShapeDtypeStruct((batch_size,), dtype)
         status_shape = batch_scalar_shape
         obj_val_shape = batch_scalar_shape
         iterations_shape = batch_scalar_shape
@@ -518,8 +526,8 @@ def _solve_cpu_raw(
         construction_time_shape = batch_scalar_shape
 
     x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time = (
-        jax.pure_callback(
-            partial(_solve_cpu_callback, solver_id),
+        _pure_callback(
+            partial(_solve_cpu_callback, solver_id, result_dtype=dtype),
             (
                 x_shape,
                 z_shape,
@@ -595,18 +603,18 @@ def _solve_cpu_bwd(solver_id: int, residuals, g):
 
     # Determine output shapes
     if dx.ndim == 1:
-        dP_shape = jax.ShapeDtypeStruct((nnzP,), jnp.float64)
-        dA_shape = jax.ShapeDtypeStruct((nnzA,), jnp.float64)
-        dq_shape = jax.ShapeDtypeStruct((n,), jnp.float64)
-        db_shape = jax.ShapeDtypeStruct((m,), jnp.float64)
+        dP_shape = jax.ShapeDtypeStruct((nnzP,), P_data.dtype)
+        dA_shape = jax.ShapeDtypeStruct((nnzA,), A_data.dtype)
+        dq_shape = jax.ShapeDtypeStruct((n,), q.dtype)
+        db_shape = jax.ShapeDtypeStruct((m,), b.dtype)
     else:
         batch_size = dx.shape[0]
-        dP_shape = jax.ShapeDtypeStruct((batch_size, nnzP), jnp.float64)
-        dA_shape = jax.ShapeDtypeStruct((batch_size, nnzA), jnp.float64)
-        dq_shape = jax.ShapeDtypeStruct((batch_size, n), jnp.float64)
-        db_shape = jax.ShapeDtypeStruct((batch_size, m), jnp.float64)
+        dP_shape = jax.ShapeDtypeStruct((batch_size, nnzP), P_data.dtype)
+        dA_shape = jax.ShapeDtypeStruct((batch_size, nnzA), A_data.dtype)
+        dq_shape = jax.ShapeDtypeStruct((batch_size, n), q.dtype)
+        db_shape = jax.ShapeDtypeStruct((batch_size, m), b.dtype)
 
-    dP, dA, dq, db = jax.pure_callback(
+    dP, dA, dq, db = _pure_callback(
         partial(_backward_cpu_callback, solver_id),
         (dP_shape, dA_shape, dq_shape, db_shape),
         dx,

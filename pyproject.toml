@@ -30,7 +30,7 @@ dev = [
     "moreau-cuda",
     "scikit-build-core>=0.5",
     "nanobind>=2.0",
-    "jax",
+    "jax>=0.8.0",
     "pytest>=7.0.0",
     "cvxpy>=1.4.0",
 ]

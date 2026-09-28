@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 
 from moreau._types import Cones, Settings
+from moreau._jax_config import _check_jax_precision
 
 from ._ffi import _get_ffi_lib, ffi_available
 from ._lowering import _make_ffi_solve_fn, _make_ffi_solve_warm_fn
@@ -60,6 +61,7 @@ class JaxSolverCuda:
     ):
         import time
 
+        _check_jax_precision()
         start = time.perf_counter()
 
         self._n = n
@@ -88,7 +90,7 @@ class JaxSolverCuda:
         self._nnzP = len(self._P_col_indices)
         self._nnzA = len(self._A_col_indices)
 
-        # Check if FFI is available
+        # Explicit float64/int64 buffers are allowed independently of defaults.
         self._ffi_lib = _get_ffi_lib()
         self._use_ffi = ffi_available()
 
@@ -314,7 +316,7 @@ class JaxSolverCuda:
 
         Uses XLA FFI for true zero-copy GPU tensor sharing when available,
         with a custom vmap rule to handle structure arrays correctly.
-        Falls back to pure_callback when FFI is not available.
+        Falls back to pure_callback when FFI is unavailable.
 
         Returns a function that returns (JaxSolution, JaxSolveInfo) tuple.
         """
@@ -369,7 +371,7 @@ class JaxSolverCuda:
         """Return a solve function that accepts warm start arrays.
 
         Uses XLA FFI warm-start handler for true zero-copy GPU tensor sharing.
-        Falls back to pure_callback with solve_warm_start when FFI is not available.
+        Falls back to pure_callback when FFI is unavailable.
 
         Returns a function:
             (P_data, A_data, q, b, warm_x, warm_z, warm_s) -> (JaxSolution, JaxSolveInfo)
