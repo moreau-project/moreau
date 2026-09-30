@@ -20,6 +20,9 @@ use moreau::solver::{SolverStatus, SupportedConeT};
 
 const EPS: f64 = 1e-6;
 const TOL: f64 = 1e-3;
+/// Chordal on vs off: two IPM solves compared directly, with no finite
+/// differences, so tighter than `TOL`.
+const ON_OFF_TOL: f64 = 1e-4;
 
 fn triangular_number(n: usize) -> usize {
     n * (n + 1) / 2
@@ -897,7 +900,22 @@ fn test_chordal_on_off_gradients_match_unequal_values_in_column() {
         "  dA on {:?} off {:?}\n  dA/dq/db max diff: {:.2e} {:.2e} {:.2e}",
         on.dA_values, off.dA_values, dA_err, dq_err, db_err
     );
-    assert!(dA_err < 1e-4, "dA on/off max diff {:.2e}", dA_err);
-    assert!(dq_err < 1e-4, "dq on/off max diff {:.2e}", dq_err);
-    assert!(db_err < 1e-4, "db on/off max diff {:.2e}", db_err);
+    assert!(
+        dA_err < ON_OFF_TOL,
+        "dA on/off max diff {:.2e} exceeds {:.2e}",
+        dA_err,
+        ON_OFF_TOL
+    );
+    assert!(
+        dq_err < ON_OFF_TOL,
+        "dq on/off max diff {:.2e} exceeds {:.2e}",
+        dq_err,
+        ON_OFF_TOL
+    );
+    assert!(
+        db_err < ON_OFF_TOL,
+        "db on/off max diff {:.2e} exceeds {:.2e}",
+        db_err,
+        ON_OFF_TOL
+    );
 }
