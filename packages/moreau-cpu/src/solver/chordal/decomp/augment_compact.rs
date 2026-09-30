@@ -39,8 +39,11 @@ pub(crate) struct CompactAugmentedProblem<T: FloatT> {
     pub cones: Vec<SupportedConeT<T>>,
     /// Number of original P nonzeros (first this many NNZ in P are user values)
     pub P_nnz_orig: usize,
-    /// Number of original A nonzeros (first this many NNZ in A are user values)
-    pub A_nnz_orig: usize,
+    /// Position in `A.nzval` of each original A nonzero, in the original CSC
+    /// order: `A.nzval[A_orig_to_aug[k]]` holds original value `k`. The
+    /// decomposition reorders rows, so within a column this is a permutation,
+    /// not the identity.
+    pub A_orig_to_aug: Vec<usize>,
     /// Original problem dimensions
     pub n_orig: usize,
     pub m_orig: usize,
@@ -73,11 +76,13 @@ impl<T: FloatT> CompactAugmentedProblem<T> {
             q_aug[..self.n_orig].copy_from_slice(q);
         }
 
-        // A: copy original values into first A_nnz_orig slots,
+        // A: scatter original values through A_orig_to_aug,
         // overlap +1/-1 values are already baked into the structural pattern
         let mut A_aug_nzval = self.A.nzval.clone();
         if !A_values.is_empty() {
-            A_aug_nzval[..self.A_nnz_orig].copy_from_slice(A_values);
+            for (&aug_k, &v) in zip(&self.A_orig_to_aug, A_values) {
+                A_aug_nzval[aug_k] = v;
+            }
         }
 
         // b: apply b_row_map permutation (skip if empty)
@@ -111,7 +116,6 @@ where
         let n_orig = P.n;
         let m_orig = A.m;
         let P_nnz_orig = P.nnz();
-        let A_nnz_orig = A.nnz();
 
         // Run augmentation with dummy values to get the structure.
         // cone_maps is set as a side-effect.
@@ -126,6 +130,7 @@ where
         // where A[row,:] == 0 (the old marker approach missed these).
         let m_aug = b_aug.len();
         let b_row_map = self.build_b_row_map(m_aug, m_orig);
+        let A_orig_to_aug = build_A_orig_to_aug(A, &A_aug, &b_row_map);
 
         CompactAugmentedProblem {
             P: P_aug,
@@ -134,7 +139,7 @@ where
             b: b_aug,
             cones: cones_aug,
             P_nnz_orig,
-            A_nnz_orig,
+            A_orig_to_aug,
             n_orig,
             m_orig,
             b_row_map,
@@ -326,6 +331,37 @@ where
 
         (rows, cols, num_overlaps)
     }
+}
+
+/// Map each nonzero of the original A, in CSC order, to its position in
+/// `A_aug.nzval`. A's rows go through the same row map as b's, so invert
+/// `b_row_map` and find each entry's new row within its column of `A_aug`,
+/// whose rows are sorted. The overlap columns come after the original ones
+/// and are not touched.
+fn build_A_orig_to_aug<T: FloatT>(
+    A: &CscMatrix<T>,
+    A_aug: &CscMatrix<T>,
+    b_row_map: &[usize],
+) -> Vec<usize> {
+    let mut aug_row_of = vec![usize::MAX; A.m];
+    for (aug_row, &orig_row) in b_row_map.iter().enumerate() {
+        if orig_row != usize::MAX {
+            aug_row_of[orig_row] = aug_row;
+        }
+    }
+
+    let mut A_orig_to_aug = Vec::with_capacity(A.nnz());
+    for col in 0..A.n {
+        let aug_start = A_aug.colptr[col];
+        let aug_rows = &A_aug.rowval[aug_start..A_aug.colptr[col + 1]];
+        for &orig_row in &A.rowval[A.colptr[col]..A.colptr[col + 1]] {
+            let offset = aug_rows
+                .binary_search(&aug_row_of[orig_row])
+                .expect("original A entry missing from augmented A");
+            A_orig_to_aug.push(aug_start + offset);
+        }
+    }
+    A_orig_to_aug
 }
 
 // Handles all cones that are not decomposed by a sparsity pattern

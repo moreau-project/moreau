@@ -662,3 +662,70 @@ class TestBatchSDPBackward:
         assert np.allclose(
             dP_analytic, dP_fd, atol=TOL_FD
         ), f"Batch SDP dP max diff: {np.max(np.abs(dP_analytic - dP_fd)):.2e}"
+
+
+class TestChordalUnequalValuesInColumn:
+    """Chordal decomposition when it reorders rows within a column of A that
+    holds unequal values.
+
+    X(t, s) = [[1, t, 0, 0], [t, 1, 2t, 0], [0, 2t, 1, s], [0, 0, s, 1]] ⪰ 0,
+    t = 0.3, maximize s. det X = 0.55 - 0.91 s², so s* = √(55/91). Filling
+    A's values in the wrong order exchanges t's coefficients and gives
+    s = √(55/64) at a point where X is not PSD.
+    """
+
+    S_OPT = np.sqrt(55 / 91)
+
+    @staticmethod
+    def _problem():
+        r2 = np.sqrt(2)
+        A = np.zeros((11, 2))
+        b = np.zeros(11)
+        A[0, 0] = 1.0  # zero cone: t = 0.3
+        b[0] = 0.3
+        A[2, 0] = -r2  # svec (0,1) = t
+        A[5, 0] = -2 * r2  # svec (1,2) = 2t
+        A[9, 1] = -r2  # svec (2,3) = s
+        b[[1, 3, 6, 10]] = 1.0  # diagonal of X
+        q = np.array([0.0, -1.0])
+        cones = moreau.Cones(num_zero_cones=1, psd_dims=[4])
+        return sparse.csr_array(A), b, q, cones
+
+    def _compiled(self, device, chordal):
+        A, b, q, cones = self._problem()
+        settings = moreau.Settings(
+            device=device,
+            batch_size=1,
+            verbose=False,
+            enable_grad=True,
+            ipm_settings=moreau.IPMSettings(chordal_decomposition_enable=chordal),
+        )
+        solver = moreau.CompiledSolver(
+            n=2,
+            m=11,
+            P_row_offsets=[0, 0, 0],
+            P_col_indices=[],
+            A_row_offsets=A.indptr.tolist(),
+            A_col_indices=A.indices.tolist(),
+            cones=cones,
+            settings=settings,
+            b_sparsity_pattern=(b != 0).tolist(),
+        )
+        solver.setup(P_values=np.zeros(0), A_values=A.data)
+        sol = solver.solve(qs=q[None, :], bs=b[None, :])
+        return solver, np.asarray(sol.x).ravel()
+
+    def test_solver_chordal_on_matches_optimum(self, device):
+        A, b, q, cones = self._problem()
+        settings = moreau.Settings(device=device, verbose=False)
+        sol = moreau.Solver(sparse.csr_array((2, 2)), q, A, b, cones, settings=settings).solve()
+        assert abs(sol.x[1] - self.S_OPT) < 1e-5
+
+    def test_compiled_dA_chordal_on_matches_off(self, device):
+        grads = {}
+        for chordal in (True, False):
+            solver, x = self._compiled(device, chordal)
+            assert abs(x[1] - self.S_OPT) < 1e-5, f"chordal={chordal}: s = {x[1]}"
+            g = solver.backward(np.array([[0.0, 1.0]]))
+            grads[chordal] = np.asarray(g["dA_values"]).ravel()
+        np.testing.assert_allclose(grads[True], grads[False], atol=1e-4)

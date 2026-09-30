@@ -799,3 +799,105 @@ fn test_chordal_backward_batch() {
         assert!(db_err < TOL, "Problem {} db error {:.2e}", prob, db_err);
     }
 }
+
+/// Gradients with chordal decomposition on and off must agree when the
+/// decomposition reorders rows within a column of A that holds unequal
+/// values. Problem: X = [[1, t, 0, 0], [t, 1, 2t, 0], [0, 2t, 1, s],
+/// [0, 0, s, 1]] ⪰ 0, t = 0.3, maximize s, with loss s. The b sparsity
+/// pattern is passed so the PSD(4) cone is decomposed.
+///
+/// A finite-difference check alone cannot catch this: when the forward
+/// fill of A's values is permuted, a backward gather with the same
+/// permutation is its exact adjoint.
+#[test]
+fn test_chordal_on_off_gradients_match_unequal_values_in_column() {
+    let n = 2; // x = (t, s)
+    let m = 11; // one zero cone + svec(4×4)
+    let r2 = std::f64::consts::SQRT_2;
+
+    // CSR rows: 0 = (t = 0.3), 2 = svec (0,1), 5 = svec (1,2), 9 = svec (2,3)
+    let mut A_row_offsets = vec![0usize; m + 1];
+    let entries: [(usize, usize, f64); 4] =
+        [(0, 0, 1.0), (2, 0, -r2), (5, 0, -2.0 * r2), (9, 1, -r2)];
+    for &(row, _, _) in &entries {
+        A_row_offsets[row + 1] += 1;
+    }
+    for r in 0..m {
+        A_row_offsets[r + 1] += A_row_offsets[r];
+    }
+    let A_col_indices: Vec<usize> = entries.iter().map(|e| e.1).collect();
+    let A_values: Vec<f64> = entries.iter().map(|e| e.2).collect();
+
+    let mut b = vec![0.0; m];
+    b[0] = 0.3;
+    for &i in &[1, 3, 6, 10] {
+        b[i] = 1.0;
+    }
+    let b_nnz_mask: Vec<bool> = b.iter().map(|&v| v != 0.0).collect();
+    let q = vec![0.0, -1.0];
+    let cones = vec![
+        SupportedConeT::ZeroConeT(1),
+        SupportedConeT::PSDTriangleConeT(4),
+    ];
+
+    let gradients = |chordal: bool| {
+        let mut settings = DefaultSettings::<f64>::default();
+        settings.verbose = false;
+        settings.ipm.chordal_decomposition_enable = chordal;
+        let mut solver = CompiledSolver::new_with_b_nnz_mask(
+            n,
+            m,
+            &[0, 0, 0],
+            &[],
+            &A_row_offsets,
+            &A_col_indices,
+            &cones,
+            settings,
+            1,
+            true,
+            Some(&b_nnz_mask),
+        )
+        .expect("construction failed");
+        solver.setup(&[vec![]], &[A_values.clone()]);
+        let sols = solver
+            .solve(&[q.clone()], &[b.clone()])
+            .expect("solve failed");
+        assert_eq!(sols[0].status, SolverStatus::Solved, "chordal={}", chordal);
+        let upstream = UpstreamGradients {
+            dx: vec![0.0, 1.0],
+            ds: vec![0.0; m],
+            dz: vec![0.0; m],
+            dz_x: vec![],
+        };
+        let mut g = solver.backward(&[upstream]).expect("backward failed");
+        g.remove(0)
+    };
+
+    let on = gradients(true);
+    let off = gradients(false);
+
+    // Rows 4, 7, 8 (svec entries (0,2), (0,3), (1,3)) are zero in A and in
+    // the declared b pattern, so the decomposed problem has no row for them
+    // and reports db = 0 there. Compare db on the rows it does have.
+    let in_pattern: Vec<bool> = (0..m)
+        .map(|r| b_nnz_mask[r] || A_row_offsets[r + 1] > A_row_offsets[r])
+        .collect();
+    let restrict = |v: &[f64]| -> Vec<f64> {
+        v.iter()
+            .zip(&in_pattern)
+            .filter(|(_, &keep)| keep)
+            .map(|(&x, _)| x)
+            .collect()
+    };
+
+    let dA_err = max_abs_diff(&on.dA_values, &off.dA_values);
+    let dq_err = max_abs_diff(&on.dq, &off.dq);
+    let db_err = max_abs_diff(&restrict(&on.db), &restrict(&off.db));
+    println!(
+        "  dA on {:?} off {:?}\n  dA/dq/db max diff: {:.2e} {:.2e} {:.2e}",
+        on.dA_values, off.dA_values, dA_err, dq_err, db_err
+    );
+    assert!(dA_err < 1e-4, "dA on/off max diff {:.2e}", dA_err);
+    assert!(dq_err < 1e-4, "dq on/off max diff {:.2e}", dq_err);
+    assert!(db_err < 1e-4, "db on/off max diff {:.2e}", db_err);
+}
