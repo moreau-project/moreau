@@ -2446,8 +2446,12 @@ impl<T: FloatT> CompiledSolver<T> {
 
                         // dP: first P_nnz_orig entries of augmented P gradient (CSC)
                         let dP_csc_orig = backward_result.dP.nzval[..aug.P_nnz_orig].to_vec();
-                        // dA: first A_nnz_orig entries of augmented A gradient (CSC)
-                        let dA_csc_orig = backward_result.dA.nzval[..aug.A_nnz_orig].to_vec();
+                        // dA: gather through A_orig_to_aug (adjoint of the scatter in augment_values)
+                        let dA_csc_orig: Vec<T> = aug
+                            .A_orig_to_aug
+                            .iter()
+                            .map(|&aug_k| backward_result.dA.nzval[aug_k])
+                            .collect();
 
                         let dP_csr = self.csc_to_csr_values(&dP_csc_orig, &self.P_csr_to_csc_grad);
                         let dA_csr = self.csc_to_csr_values(&dA_csc_orig, &self.A_csr_to_csc);
