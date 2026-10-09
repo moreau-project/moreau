@@ -78,6 +78,7 @@ from ._types import (
     _AUTO_TUNE_MARGIN,
     _should_retry_cold,
     _warn_warm_retry,
+    _check_backward_statuses,
 )
 from typing import Optional, Sequence, Union
 
@@ -585,6 +586,8 @@ class Solver:
             dict with keys ``dq``, ``db``, ``dP_values``, ``dA_values``,
             each mapped to a numpy array of the corresponding shape.
         """
+        if self._info is not None:
+            _check_backward_statuses(self._info.status, dx, dz, ds, dz_x)
         return self._impl.backward(dx, dz, ds, dz_x=dz_x)
 
     @property
@@ -1226,6 +1229,8 @@ class CompiledSolver:
             dict with keys ``dq``, ``db``, ``dP_values``, ``dA_values``,
             each mapped to a numpy array of the corresponding batched shape.
         """
+        if self._info is not None:
+            _check_backward_statuses(self._info.status, dx, dz, ds, dz_x)
         return self._impl.backward(dx, dz, ds, dz_x=dz_x)
 
     @property

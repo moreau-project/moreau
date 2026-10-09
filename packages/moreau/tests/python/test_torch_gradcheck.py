@@ -1528,6 +1528,7 @@ class TestAutogradRegressions:
                 "x": q + 1.0,
                 "z": b + 2.0,
                 "s": b + 3.0,
+                "status": 1,
             }
 
     class _FakeSolver:
@@ -1547,6 +1548,7 @@ class TestAutogradRegressions:
             ds,
             impl_handle,
             solve_mode,
+            status,
             state_rinv,
             state_rinv_diag,
             state_use_rinv_diag,
@@ -1604,6 +1606,7 @@ class TestAutogradRegressions:
             ds,
             impl_handle,
             solve_mode,
+            status,
             state_rinv,
             state_rinv_diag,
             state_use_rinv_diag,

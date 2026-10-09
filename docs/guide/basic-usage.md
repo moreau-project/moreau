@@ -271,6 +271,27 @@ For PyTorch and JAX, gradient computation is handled automatically by the
 framework's autograd system — see the [PyTorch](../api/torch) and
 [JAX](../api/jax) API docs.
 
+### Gradients of failed solves
+
+A problem that ends with no solution has nothing to differentiate. These statuses count as no solution:
+`PrimalInfeasible`, `DualInfeasible`, `AlmostPrimalInfeasible`, `AlmostDualInfeasible`,
+`NumericalError`, `InsufficientProgress`, and `Unsolved`. The backward pass (`backward()`,
+PyTorch autograd, JAX `grad`) raises a `RuntimeError` naming the problem's batch index and status
+when the upstream gradient for such a problem is nonzero. `MaxIterations`, `MaxTime`, and
+`CallbackTerminated` differentiate the last iterate as-is.
+
+In a batch, mask failed problems out of the loss so that their upstream gradients are exactly
+zero. The rest of the batch then differentiates normally:
+
+```python
+solution = solver.solve(P_values, A_values, q, b)  # moreau.torch.Solver, batched
+ok = torch.tensor([s == moreau.SolverStatus.Solved for s in solver.info.status])
+loss = solution.x[ok].sum()
+loss.backward()
+```
+
+JAX on CUDA does not run this check yet.
+
 ---
 
 ## Error Handling
