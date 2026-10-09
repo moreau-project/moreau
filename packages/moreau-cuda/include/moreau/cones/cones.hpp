@@ -3020,7 +3020,7 @@ struct Cones {
         return numZeroCones + numNonnegCones + socDim + psdDim + numExpCones * 3 + numPowerCones * 3 + gpDim;
     }
 
-    // Public slack-vector layout, matching Clarabel/CVXPY and the CPU backend:
+    // Public slack-vector layout, matching the CPU backend and the docs:
     // Zero, Nonnegative, SOC, PSD, Exponential, Power, Generalized Power.
     [[nodiscard]] int64_t psdOffset() const noexcept {
         return numZeroCones + numNonnegCones + totalSocDim;
