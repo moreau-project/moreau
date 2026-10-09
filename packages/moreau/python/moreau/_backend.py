@@ -435,7 +435,7 @@ def solver_methods_for_device(device: str) -> List[str]:
 def _rank_method(device: str, n: int, m: int, nnz_A: int, batch_size: int) -> List[str]:
     """Return methods for a device, ordered by heuristic likelihood of winning.
 
-    For CPU, faer wins on larger systems; QDLDL wins on small ones.
+    For CPU, faer is ranked first at every size (it ties or beats QDLDL).
 
     Args:
         device: 'cuda', 'cpu', etc.
@@ -444,15 +444,13 @@ def _rank_method(device: str, n: int, m: int, nnz_A: int, batch_size: int) -> Li
         nnz_A: Number of non-zeros in A.
         batch_size: Batch size.
     """
-    kkt_dim = n + m
     methods = solver_methods_for_device(device)
     if device == "cuda":
         return methods
     elif device == "cpu":
-        # faer wins for larger systems; QDLDL for small
-        if kkt_dim >= 500 or nnz_A >= 10_000:
-            return [m for m in methods if m == "faer"] + [m for m in methods if m != "faer"]
-        return [m for m in methods if m == "qdldl"] + [m for m in methods if m != "qdldl"]
+        # faer ties QDLDL on small KKT systems and is 2-13x faster from a few
+        # hundred rows up (#50), so rank it first at every size.
+        return [m for m in methods if m == "faer"] + [m for m in methods if m != "faer"]
     return methods
 
 
