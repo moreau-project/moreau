@@ -11,6 +11,61 @@ import numpy as np
 from scipy import sparse
 
 
+def _check_real_array(name, values, *, allow_inf=False):
+    """Reject complex, string and object arrays, and NaN (and Inf unless allowed).
+
+    Returns the values as a float64 ndarray (a view when no conversion is needed).
+    """
+    arr = np.asarray(values)
+    if arr.dtype.kind not in "biuf":
+        raise TypeError(f"{name} must be a real numeric array, got dtype {arr.dtype}")
+    arr = arr.astype(np.float64, copy=False)
+    bad = np.isnan(arr) if allow_inf else ~np.isfinite(arr)
+    if bad.any():
+        kind = "NaN" if allow_inf else "NaN or Inf"
+        first = np.argwhere(bad)[0].tolist()
+        raise ValueError(f"{name} contains {kind} (first at index {first})")
+    return arr
+
+
+def _canonical_csr(name, matrix):
+    """Validated float64 CSR copy of a scipy sparse or dense matrix.
+
+    Rejects malformed structure (non-monotone row pointers, out-of-range column
+    indices), duplicate entries, non-real dtypes and NaN or Inf values. The
+    caller's entry order is kept, so gradients line up with ``matrix.data``, and
+    the result never aliases the caller's arrays.
+    """
+    if sparse.issparse(matrix):
+        csr = matrix.tocsr(copy=True)
+        try:
+            csr.check_format(full_check=True)
+        except ValueError as exc:
+            raise ValueError(f"{name} is not a valid CSR matrix: {exc}") from None
+        rows = np.repeat(np.arange(csr.shape[0], dtype=np.int64), np.diff(csr.indptr))
+        keys = rows * csr.shape[1] + csr.indices.astype(np.int64)
+        if len(np.unique(keys)) != len(keys):
+            raise ValueError(
+                f"{name} has duplicate entries (scipy would sum them). "
+                f"Call {name}.sum_duplicates() first."
+            )
+        csr.data = _check_real_array(f"{name} values", csr.data)
+        return csr
+    dense = _check_real_array(name, matrix)
+    return sparse.csr_array(dense)
+
+
+def _check_cones(cones):
+    """Reject a missing or wrong-typed cone specification with a clear error."""
+    if not hasattr(cones, "total_constraints"):
+        raise TypeError(f"cones must be a moreau.Cones, got {type(cones).__name__}")
+
+
+def _real_vector(name, values, *, allow_inf=False):
+    """Validated float64 copy of q or b (never aliases the caller's array)."""
+    return np.array(_check_real_array(name, values, allow_inf=allow_inf), copy=True)
+
+
 def _to_csr(matrix):
     """Convert matrix to CSR format, extracting row_offsets, col_indices, values."""
     if sparse.issparse(matrix):
@@ -117,6 +172,7 @@ def _validate_csr_structure(
     Raises:
         ValueError: If CSR structure is invalid
     """
+    _check_cones(cones)
     P_ro = np.asarray(P_row_offsets)
     P_ci = np.asarray(P_col_indices)
     A_ro = np.asarray(A_row_offsets)
@@ -181,6 +237,19 @@ def _validate_csr_structure(
                 f"A_col_indices contains invalid column index(es): {bad_idx[:5].tolist()}... "
                 f"Valid range is [0, {n - 1}]."
             )
+
+    # Duplicate (row, column) entries would be silently mishandled downstream.
+    for label, ro, ci, rows in (("P", P_ro, P_ci, n), ("A", A_ro, A_ci, m)):
+        if len(ci) > 1:
+            row_of = np.repeat(np.arange(rows, dtype=np.int64), np.diff(ro))
+            keys = row_of * n + ci.astype(np.int64)
+            unique, counts = np.unique(keys, return_counts=True)
+            if np.any(counts > 1):
+                dup = int(unique[np.argmax(counts > 1)])
+                raise ValueError(
+                    f"{label} sparsity pattern has a duplicate entry at "
+                    f"(row {dup // n}, column {dup % n}). Each (row, column) may appear once."
+                )
 
     # Validate direct cone indices lie in [0, n)
     if hasattr(cones, "validate_dir_cone_indices"):
@@ -285,6 +354,9 @@ def _validate_setup_values(batch_size, nnz_P, nnz_A, P_values, A_values):
             f"A_values must be 1D (shared) or 2D (per-batch), got shape {A_vals.shape}"
         )
 
+    _check_real_array("P_values", P_vals)
+    _check_real_array("A_values", A_vals)
+
 
 def _validate_solve_inputs(batch_size, n, m, qs, bs):
     """Validate qs and bs dimensions for solve().
@@ -349,6 +421,10 @@ def _validate_solve_inputs(batch_size, n, m, qs, bs):
             )
     else:
         raise ValueError(f"bs must be 1D (batch_size=1) or 2D, got shape {bs_arr.shape}")
+
+    _check_real_array("qs", qs_arr)
+    # +/-inf in b is meaningful (e.g. an absent bound); NaN never is.
+    _check_real_array("bs", bs_arr, allow_inf=True)
 
 
 def _max_abs_asymmetry(P) -> float:

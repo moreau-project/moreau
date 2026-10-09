@@ -18,6 +18,7 @@ import jax.numpy as jnp
 from jax import custom_vjp
 
 from moreau._types import Cones, Settings
+from moreau._validation import _check_real_array
 from ._types import JaxSolution, JaxSolveInfo
 
 
@@ -232,11 +233,12 @@ def _solve_cpu_callback(
     """
     solver_wrapper = _SOLVER_REGISTRY[solver_id]
 
-    # Convert to float64 (JAX may pass float32 by default)
-    P_data = np.asarray(P_data, dtype=np.float64)
-    A_data = np.asarray(A_data, dtype=np.float64)
-    q = np.asarray(q, dtype=np.float64)
-    b = np.asarray(b, dtype=np.float64)
+    # Convert to float64 (JAX may pass float32 by default) and reject NaN/Inf;
+    # values are concrete here, unlike inside a traced jit function.
+    P_data = _check_real_array("P_data", P_data)
+    A_data = _check_real_array("A_data", A_data)
+    q = _check_real_array("q", q)
+    b = _check_real_array("b", b, allow_inf=True)
 
     # Determine batch size
     if q.ndim == 1:

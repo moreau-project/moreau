@@ -291,4 +291,19 @@ Common validation errors:
 - Dimension mismatches between P, q, A, b
 - Non-symmetric P matrix
 - Cone dimensions don't sum to constraint count
-- Invalid CSR structure
+- Invalid CSR structure: non-monotone row pointers, column indices out of
+  range, or duplicate (row, column) entries. For a scipy matrix with
+  duplicates, call `.sum_duplicates()` first.
+- NaN or Inf in P, A or q, or NaN in b (`±inf` in b is allowed and means an
+  absent bound) — `ValueError`
+- Complex, string or other non-real inputs — `TypeError`
+- Misspelled or unknown fields in `Settings`, `IPMSettings` or
+  `ActiveSetSettings` — pydantic `ValidationError`
+- A CUDA-only `direct_solve_method` (`'cudss'`, `'riccati'`, `'woodbury'`) on
+  CPU — `ValueError`
+
+Value checks run on CPU inputs. CUDA tensors passed to `moreau.torch` are not
+scanned for NaN, since that would force a device-to-host sync on every solve.
+
+Moreau copies `P`, `A`, `q` and `b` when you construct a `Solver` or call
+`setup()`, so editing your arrays afterwards doesn't affect later solves.

@@ -187,6 +187,12 @@ def settings_to_cpu(settings) -> "_cpu_solver.DefaultSettings":
     # Copy IPM settings to the nested ipm field
     # PyO3 returns a copy, so we get it, modify it, then reassign
     ipm_src = getattr(settings, "ipm_settings", None)
+    method = getattr(ipm_src, "direct_solve_method", None)
+    if method in ("cudss", "riccati", "woodbury"):
+        raise ValueError(
+            f"direct_solve_method={method!r} is only available on CUDA. "
+            "On CPU use 'auto', 'qdldl' or 'faer'."
+        )
     if ipm_src is not None:
         ipm_dst = cpu_settings.ipm
         for attr in [
@@ -739,8 +745,9 @@ class Solver:
             ValueError: If value dimensions don't match sparsity pattern.
             TypeError: If values are not float64.
         """
-        P_values = np.asarray(P_values, dtype=np.float64)
-        A_values = np.asarray(A_values, dtype=np.float64)
+        # Copy so later edits to the caller's arrays can't change stored values.
+        P_values = np.array(P_values, dtype=np.float64, copy=True)
+        A_values = np.array(A_values, dtype=np.float64, copy=True)
 
         # Validate dimensions
         P_dim = P_values.shape[-1] if P_values.ndim > 0 else 0
