@@ -587,7 +587,8 @@ class Settings(BaseModel):
         yolo: If True, run in YOLO mode: fixed iterations, no convergence check,
               no GPU-host sync. Incompatible with enable_grad=True (default: False).
         yolo_num_iters: Number of iterations to run in YOLO mode (default: 15)
-        max_iter: Maximum iterations (default: 200)
+        max_iter: Maximum IPM iterations (default: 200). Does not limit the
+            active-set solver; use ``ActiveSetSettings.iter_limit`` for that.
         time_limit: Time limit in seconds (default: infinity)
         verbose: Enable verbose output (default: False)
         ipm_settings: IPM-specific settings including tolerances (auto-created if None)
