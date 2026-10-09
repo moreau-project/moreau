@@ -15,6 +15,7 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <stdexcept>
@@ -28,6 +29,10 @@ namespace moreau {
 // ============================================================================
 
 static int64_t triangular_number(int64_t n) { return n * (n + 1) / 2; }
+
+// svec scales off-diagonal entries by sqrt(2)
+static constexpr double SQRT2 = 1.4142135623730951;
+static constexpr double INV_SQRT2 = 0.7071067811865476;
 
 // ============================================================================
 // Helper: coord_to_upper_triangular_index (Rust version)
@@ -821,7 +826,153 @@ void ChordalInfo::reverse_z(const double* z_aug, double* z_orig) const {
 }
 
 // ============================================================================
-// complete_z — PSD completion (Cholesky-based fill of structural zeros)
+// Helpers for complete_z: solve Waa * Y = Wan for a principal block Waa of z
+//
+// Waa is positive semidefinite but can be singular, since SDP duals are often
+// low rank. Cholesky handles the definite case. When it fails, solve with the
+// pseudoinverse from an eigendecomposition, as the CPU backend does with an SVD
+// (psd_completion.rs). For a PSD-completable matrix the system is consistent
+// and every solution gives the same fill Wea * Y, so the pseudoinverse solution
+// is exact, not an approximation. A clearly negative eigenvalue means z is not
+// PSD-completable, and that still throws.
+// ============================================================================
+
+// Eigendecomposition of the symmetric n x n row-major matrix A by cyclic Jacobi
+// rotations. On return the diagonal of A holds the eigenvalues and the columns
+// of V the eigenvectors.
+static void symmetric_eigen(std::vector<double>& A, int64_t n, std::vector<double>& V) {
+    constexpr int kMaxSweeps = 50;
+    const double eps = std::numeric_limits<double>::epsilon();
+    V.assign(n * n, 0.0);
+    for (int64_t i = 0; i < n; ++i) V[i * n + i] = 1.0;
+
+    for (int sweep = 0; sweep < kMaxSweeps; ++sweep) {
+        double off = 0.0, total = 0.0;
+        for (int64_t i = 0; i < n; ++i) {
+            for (int64_t j = 0; j < n; ++j) {
+                double a2 = A[i * n + j] * A[i * n + j];
+                total += a2;
+                if (i != j) off += a2;
+            }
+        }
+        if (off <= eps * eps * total) return;
+
+        for (int64_t p = 0; p < n - 1; ++p) {
+            for (int64_t q = p + 1; q < n; ++q) {
+                double apq = A[p * n + q];
+                if (apq == 0.0) continue;
+                // Rotation J zeroing A[p,q] in J^T A J (Golub and Van Loan, Alg. 8.5.1)
+                double tau = (A[q * n + q] - A[p * n + p]) / (2.0 * apq);
+                double t = (tau >= 0.0 ? 1.0 : -1.0) / (std::abs(tau) + std::sqrt(1.0 + tau * tau));
+                double c = 1.0 / std::sqrt(1.0 + t * t);
+                double sn = t * c;
+                for (int64_t k = 0; k < n; ++k) {
+                    double akp = A[k * n + p], akq = A[k * n + q];
+                    A[k * n + p] = c * akp - sn * akq;
+                    A[k * n + q] = sn * akp + c * akq;
+                }
+                for (int64_t k = 0; k < n; ++k) {
+                    double apk = A[p * n + k], aqk = A[q * n + k];
+                    A[p * n + k] = c * apk - sn * aqk;
+                    A[q * n + k] = sn * apk + c * aqk;
+                }
+                A[p * n + q] = A[q * n + p] = 0.0;
+                for (int64_t k = 0; k < n; ++k) {
+                    double vkp = V[k * n + p], vkq = V[k * n + q];
+                    V[k * n + p] = c * vkp - sn * vkq;
+                    V[k * n + q] = sn * vkp + c * vkq;
+                }
+            }
+        }
+    }
+    throw std::runtime_error("PSD completion failed: Jacobi eigendecomposition did not converge");
+}
+
+// Y = Waa \ Wan, with Waa na x na and Wan na x nn, both row-major.
+static std::vector<double> solve_psd_block(const std::vector<double>& Waa, int64_t na,
+                                           const std::vector<double>& Wan, int64_t nn) {
+    std::vector<double> Y(Wan);
+
+    // Cholesky factorization (in-place, lower triangle)
+    std::vector<double> L(Waa);
+    bool chol_ok = true;
+    for (int64_t k = 0; k < na; ++k) {
+        double diag = L[k * na + k];
+        if (diag <= 0.0) { chol_ok = false; break; }
+        diag = std::sqrt(diag);
+        L[k * na + k] = diag;
+        for (int64_t i2 = k + 1; i2 < na; ++i2) {
+            L[i2 * na + k] /= diag;
+        }
+        for (int64_t j2 = k + 1; j2 < na; ++j2) {
+            for (int64_t i2 = j2; i2 < na; ++i2) {
+                L[i2 * na + j2] -= L[i2 * na + k] * L[j2 * na + k];
+            }
+        }
+    }
+
+    if (chol_ok) {
+        for (int64_t c = 0; c < nn; ++c) {
+            // Solve L * Z = Wan (forward substitution)
+            for (int64_t k = 0; k < na; ++k) {
+                Y[k * nn + c] /= L[k * na + k];
+                for (int64_t i2 = k + 1; i2 < na; ++i2) {
+                    Y[i2 * nn + c] -= L[i2 * na + k] * Y[k * nn + c];
+                }
+            }
+            // Solve L^T * Y_col = Z_col (backward substitution)
+            for (int64_t k = na - 1; k >= 0; --k) {
+                Y[k * nn + c] /= L[k * na + k];
+                for (int64_t i2 = 0; i2 < k; ++i2) {
+                    Y[i2 * nn + c] -= L[k * na + i2] * Y[k * nn + c];
+                }
+            }
+        }
+        return Y;
+    }
+
+    // Pseudoinverse solve: Waa = V diag(lambda) V^T
+    std::vector<double> D(Waa), V;
+    symmetric_eigen(D, na, V);
+    double lam_max = 0.0, lam_min = 0.0;
+    for (int64_t i = 0; i < na; ++i) {
+        lam_max = std::max(lam_max, std::abs(D[i * na + i]));
+        lam_min = std::min(lam_min, D[i * na + i]);
+    }
+    // Rounding leaves eigenvalues of a singular PSD block slightly negative;
+    // anything below -sqrt(eps) relative is not rounding.
+    const double eps = std::numeric_limits<double>::epsilon();
+    if (lam_min < -std::sqrt(eps) * lam_max) {
+        throw std::runtime_error(
+            "PSD completion failed: clique principal block is not positive "
+            "semidefinite; cannot complete matrix without a silently-wrong result");
+    }
+    // Same cutoff as the CPU backend's SVD solve
+    const double tol = eps * lam_max * static_cast<double>(na);
+
+    // Y = V * diag(1/lambda on lambda > tol) * V^T * Wan
+    std::vector<double> T(na * nn, 0.0);
+    for (int64_t i = 0; i < na; ++i) {
+        double lam = D[i * na + i];
+        if (lam <= tol) continue;
+        for (int64_t c = 0; c < nn; ++c) {
+            double sum = 0.0;
+            for (int64_t k = 0; k < na; ++k) sum += V[k * na + i] * Wan[k * nn + c];
+            T[i * nn + c] = sum / lam;
+        }
+    }
+    for (int64_t k = 0; k < na; ++k) {
+        for (int64_t c = 0; c < nn; ++c) {
+            double sum = 0.0;
+            for (int64_t i = 0; i < na; ++i) sum += V[k * na + i] * T[i * nn + c];
+            Y[k * nn + c] = sum;
+        }
+    }
+    return Y;
+}
+
+// ============================================================================
+// complete_z — PSD completion (fill of structural zeros, see solve_psd_block)
 //
 // Operates on z in original dimensions, after reverse mapping.
 // Traverses clique tree in reverse post-order (descending).
@@ -844,15 +995,15 @@ void ChordalInfo::complete_z(double* z, int64_t psd_offset) const {
         // Unpack svec to full symmetric matrix
         std::vector<double> W(N * N, 0.0);
 
-        // z_cone is in svec format (column-major upper triangle)
-        // Unpack to full symmetric, with permutation p
+        // z_cone is in svec format (column-major upper triangle, off-diagonal
+        // entries scaled by sqrt(2)). Unpack to full symmetric, with permutation p
         // First: unpack svec to dense matrix A (original ordering)
         std::vector<double> A(N * N, 0.0);
         {
             int64_t idx = 0;
             for (int64_t col = 0; col < N; ++col) {
                 for (int64_t row = 0; row <= col; ++row) {
-                    double val = z_cone[idx];
+                    double val = row == col ? z_cone[idx] : z_cone[idx] * INV_SQRT2;
                     A[row * N + col] = val;
                     A[col * N + row] = val;
                     idx++;
@@ -915,58 +1066,7 @@ void ChordalInfo::complete_z(double* z, int64_t psd_offset) const {
                 }
             }
 
-            // Solve: Y = Waa \ Wan  (Waa * Y = Wan)
-            // Use Cholesky: Waa = L * L^T, then L * L^T * Y = Wan
-            // For simplicity, use direct solve via Gaussian elimination with pivoting
-
-            // Copy Waa for factoring
-            std::vector<double> L(na * na);
-            std::copy(Waa.begin(), Waa.end(), L.begin());
-
-            // Cholesky factorization (in-place, lower triangle)
-            bool chol_ok = true;
-            for (int64_t k = 0; k < na; ++k) {
-                double diag = L[k * na + k];
-                if (diag <= 0.0) { chol_ok = false; break; }
-                diag = std::sqrt(diag);
-                L[k * na + k] = diag;
-                for (int64_t i2 = k + 1; i2 < na; ++i2) {
-                    L[i2 * na + k] /= diag;
-                }
-                for (int64_t j2 = k + 1; j2 < na; ++j2) {
-                    for (int64_t i2 = j2; i2 < na; ++i2) {
-                        L[i2 * na + j2] -= L[i2 * na + k] * L[j2 * na + k];
-                    }
-                }
-            }
-
-            std::vector<double> Y(na * nn);
-            std::copy(Wan.begin(), Wan.end(), Y.begin());
-
-            if (chol_ok) {
-                // Solve L * Z = Wan (forward substitution)
-                for (int64_t c = 0; c < nn; ++c) {
-                    for (int64_t k = 0; k < na; ++k) {
-                        Y[k * nn + c] /= L[k * na + k];
-                        for (int64_t i2 = k + 1; i2 < na; ++i2) {
-                            Y[i2 * nn + c] -= L[i2 * na + k] * Y[k * nn + c];
-                        }
-                    }
-                    // Solve L^T * Y_col = Z_col (backward substitution)
-                    for (int64_t k = na - 1; k >= 0; --k) {
-                        Y[k * nn + c] /= L[k * na + k];
-                        for (int64_t i2 = 0; i2 < k; ++i2) {
-                            Y[i2 * nn + c] -= L[k * na + i2] * Y[k * nn + c];
-                        }
-                    }
-                }
-            } else {
-                // Clique principal block must be positive definite to complete.
-                throw std::runtime_error(
-                    "PSD completion failed: clique principal block is not "
-                    "positive definite (Cholesky failed); cannot complete "
-                    "matrix without a silently-wrong result");
-            }
+            std::vector<double> Y = solve_psd_block(Waa, na, Wan, nn);
 
             // Wea_times_Y = Wea * Y (ne x nn)
             std::vector<double> Wea_Y(ne * nn, 0.0);
@@ -1007,7 +1107,7 @@ void ChordalInfo::complete_z(double* z, int64_t psd_offset) const {
             int64_t idx = 0;
             for (int64_t col = 0; col < N; ++col) {
                 for (int64_t row = 0; row <= col; ++row) {
-                    z_cone[idx] = A[row * N + col];
+                    z_cone[idx] = row == col ? A[row * N + col] : A[row * N + col] * SQRT2;
                     idx++;
                 }
             }
