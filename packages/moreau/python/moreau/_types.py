@@ -489,11 +489,9 @@ class IPMSettings(BaseModel):
     # x[J] partitions and the augmentation map doesn't yet thread them).
     chordal_decomposition_enable: bool = True
 
-    # Chordal decomposition merge strategy for sparse PSD cones. Must match
-    # across CPU and CUDA so the same problem produces the same decomposition
-    # (and the same Solved iterate of the same reformulation) regardless of
-    # backend. Accepted values: 'clique_graph' (default; Garstka et al. 2019),
-    # 'parent_child', or 'none'. (#176)
+    # Chordal decomposition merge strategy for sparse PSD cones, honored by
+    # both backends. Accepted values: 'clique_graph' (default; Garstka et al.
+    # 2019), 'parent_child', or 'none'. (#83)
     chordal_decomposition_merge_method: str = "clique_graph"
 
     @field_validator("direct_solve_method")
