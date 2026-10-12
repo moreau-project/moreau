@@ -95,6 +95,37 @@ TEST_F(PsdForwardTest, Psd1) {
     EXPECT_NEAR(r.x[0], 1.0, TOL_SOL);
 }
 
+// The symmetric-cone default start shifts a zero PSD block by 1 onto the
+// identity. A stale NaN in the shared syevd workspace, which makes
+// cusolverDnDsyevd return NaN eigenvalues for a zero matrix, must not change
+// that.
+TEST_F(PsdForwardTest, ShiftOfZeroIgnoresStaleEigWorkspace) {
+    int64_t n = 2, m = 3;
+    std::vector<int64_t> P_ro = {0, 0, 0}, P_ci = {};
+    std::vector<int64_t> A_ro = {0, 1, 1, 2}, A_ci = {0, 1};
+
+    Cones cones{}; cones.psdConeDims = {2};
+    Settings settings;
+    settings.verbose = false;
+    CompiledSolver solver(n, m, 1, P_ro.data(), P_ci.data(), 0,
+                          A_ro.data(), A_ci.data(), 2, cones, settings);
+
+    Cones& c = solver.data.cones;
+    ASSERT_NE(c.d_psd_syevd_work_, nullptr);
+    std::vector<double> nans(c.psd_syevd_work_size_, std::nan(""));
+    ASSERT_EQ(cudaMemcpy(c.d_psd_syevd_work_, nans.data(), sizeof(double) * nans.size(),
+                         cudaMemcpyHostToDevice), cudaSuccess);
+
+    BatchedVector& z = solver.variables.z;
+    z.setToConstant(0.0);
+    c.psd_shift_to_interior(z, static_cast<double>(c.degree()));
+
+    std::vector<double> z_h(m);
+    ASSERT_EQ(cudaMemcpy(z_h.data(), z.data(), sizeof(double) * m, cudaMemcpyDeviceToHost),
+              cudaSuccess);
+    EXPECT_EQ(z_h, (std::vector<double>{1.0, 0.0, 1.0}));
+}
+
 // PSD(2): min x0 + x1
 // s.t. [-1 0; 0 0; 0 -1]x + s = [-1; 0; -1], s in PSD(2)
 // svec: s = [x0-1, 0, x1-1], matrix = [[x0-1, 0],[0, x1-1]] PSD => x0>=1, x1>=1

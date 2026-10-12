@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "moreau/cones/cones.hpp"
+#include "moreau/cones/psd_kernels.cuh"
 #include "moreau/diff/diff_kernels.cuh"
 #include "moreau/settings/settings.hpp"
 #include "moreau/solver/solver.hpp"
@@ -1221,6 +1222,47 @@ TEST(XConeEndToEndTest, PSDDirectXInteriorOptimum) {
     cudaFree(d_A);
     cudaFree(d_q);
     cudaFree(d_b);
+}
+
+// ----------------------------------------------------------------------
+// The cold start shifts x[J] = 0 by α = 1 onto the identity. It must not
+// depend on the shared syevd workspace: cusolverDnDsyevd returns NaN
+// eigenvalues for a zero matrix when the workspace holds NaN, as it does after
+// a solve whose iterates went non-finite, and that gave α = 0.
+// ----------------------------------------------------------------------
+TEST(XConeEndToEndTest, PSDDirectXShiftOfZeroIgnoresStaleEigWorkspace) {
+    constexpr int n = 3;
+
+    std::vector<int64_t> P_ro = {0, 1, 2, 3};
+    std::vector<int64_t> P_ci = {0, 1, 2};
+    std::vector<int64_t> A_ro = {0};
+    std::vector<int64_t> A_ci = {};
+
+    Cones cones{};
+    cones.dir_cones.push_back(
+        SupportedXConeT{XConeKind::PSD, {0, 1, 2}, /*psd_k=*/2});
+
+    Settings settings;
+    settings.verbose = false;
+
+    CompiledSolver solver(n, 0, 1, P_ro.data(), P_ci.data(), 3,
+                          A_ro.data(), A_ci.data(), 0, cones, settings);
+
+    Cones& c = solver.data.cones;
+    ASSERT_NE(c.d_psd_syevd_work_, nullptr);
+    std::vector<double> nans(c.psd_syevd_work_size_, std::nan(""));
+    ASSERT_EQ(cudaMemcpy(c.d_psd_syevd_work_, nans.data(), sizeof(double) * nans.size(),
+                         cudaMemcpyHostToDevice), cudaSuccess);
+
+    double* d_x = cuda_upload(std::vector<double>(n, 0.0));
+    shift_x_into_psd_interior(c, d_x, n, static_cast<double>(c.degree()));
+
+    std::vector<double> x(n);
+    ASSERT_EQ(cudaMemcpy(x.data(), d_x, sizeof(double) * n, cudaMemcpyDeviceToHost),
+              cudaSuccess);
+    EXPECT_EQ(x, (std::vector<double>{1.0, 0.0, 1.0}));
+
+    cudaFree(d_x);
 }
 
 // ----------------------------------------------------------------------

@@ -13,6 +13,7 @@
 #include <cuda_runtime.h>
 #include <cusolverDn.h>
 #include <cublas_v2.h>
+#include <algorithm>
 #include <cmath>
 #include <cfloat>
 #include <vector>
@@ -1980,20 +1981,29 @@ void shift_x_into_psd_interior(
                 mat_h[row * n + col] = v;
             }
 
-            // Upload to device and eigendecompose.
-            double* d_mat = cones.xcone_psd_work_mat1.data() + b * totalMatSqDim + matsq_off;
-            double* d_eig = cones.xcone_psd_work_mat3.data() + b * totalMatSqDim + matsq_off;
-            cudaMemcpy(d_mat, mat_h.data(), sizeof(double) * n2, cudaMemcpyHostToDevice);
-            cudaMemset(cones.d_psd_info_, 0, sizeof(int));
-            cusolverDnDsyevd(cusolver,
-                             CUSOLVER_EIG_MODE_NOVECTOR, CUBLAS_FILL_MODE_LOWER,
-                             n, d_mat, n, d_eig,
-                             cones.d_psd_syevd_work_, cones.psd_syevd_work_size_,
-                             cones.d_psd_info_);
-            cudaDeviceSynchronize();
-
-            std::vector<double> eigs(n);
-            cudaMemcpy(eigs.data(), d_eig, sizeof(double) * n, cudaMemcpyDeviceToHost);
+            // A cold start passes x[J] = 0. Its eigenvalues are zero, and
+            // cusolverDnDsyevd must not be asked for them: for an all-zero
+            // matrix of order >= 2 it returns NaN eigenvalues, with info = 0,
+            // whenever its workspace holds NaN from an earlier call (seen with
+            // cuSOLVER 11.7). The workspace is shared with the in-loop scaling
+            // and step-length eigendecompositions, so a solve whose iterates
+            // went non-finite would leave α = 0 here, starting the next solve
+            // on the cone boundary.
+            std::vector<double> eigs(n, 0.0);
+            if (std::any_of(mat_h.begin(), mat_h.end(), [](double v) { return v != 0.0; })) {
+                // Upload to device and eigendecompose.
+                double* d_mat = cones.xcone_psd_work_mat1.data() + b * totalMatSqDim + matsq_off;
+                double* d_eig = cones.xcone_psd_work_mat3.data() + b * totalMatSqDim + matsq_off;
+                cudaMemcpy(d_mat, mat_h.data(), sizeof(double) * n2, cudaMemcpyHostToDevice);
+                cudaMemset(cones.d_psd_info_, 0, sizeof(int));
+                cusolverDnDsyevd(cusolver,
+                                 CUSOLVER_EIG_MODE_NOVECTOR, CUBLAS_FILL_MODE_LOWER,
+                                 n, d_mat, n, d_eig,
+                                 cones.d_psd_syevd_work_, cones.psd_syevd_work_size_,
+                                 cones.d_psd_info_);
+                cudaDeviceSynchronize();
+                cudaMemcpy(eigs.data(), d_eig, sizeof(double) * n, cudaMemcpyDeviceToHost);
+            }
 
             // Compute (min_margin, pos_margin, target, α) using CPU's
             // _shift_single_cone_to_interior algorithm.
