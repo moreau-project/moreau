@@ -573,6 +573,7 @@ pub struct PyIPMSettings {
     //chordal decomposition
     #[pyo3(get, set)]
     pub chordal_decomposition_enable: bool,
+    #[pyo3(get, set)]
     pub chordal_decomposition_merge_method: String,
     pub chordal_decomposition_compact: bool,
     pub chordal_decomposition_complete_dual: bool,
