@@ -1,0 +1,73 @@
+name: CI (DGX Spark)
+
+# Builds and tests Moreau from source on a self-hosted NVIDIA DGX Spark
+# (aarch64, GB10, compute capability 12.1). Unlike ci-cuda.yml it builds on
+# the runner itself, without Docker, so it also covers aarch64 and Blackwell.
+# The steps are in scripts/ci_spark.sh, which lists what the runner needs.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/moreau-cuda/**'
+      - 'packages/moreau-cpu/**'
+      - 'packages/moreau/**'
+      - 'scripts/ci_spark.sh'
+      - '.github/workflows/ci-spark.yml'
+  pull_request:
+    paths:
+      - 'packages/moreau-cuda/**'
+      - 'packages/moreau-cpu/**'
+      - 'packages/moreau/**'
+      - 'scripts/ci_spark.sh'
+      - '.github/workflows/ci-spark.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: spark-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Pull requests from forks must not run code on the self-hosted runner, so
+  # only pushes and pull requests from branches of this repository run here.
+  test:
+    if: >-
+      github.repository == 'moreau-project/moreau' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, spark-gb10]
+    name: Test (DGX Spark)
+    timeout-minutes: 90
+    defaults:
+      run:
+        # A login shell, so the runner's profile puts devenv, Spack, and uv on PATH.
+        shell: bash -l -eo pipefail {0}
+    env:
+      WORK_DIR: ${{ github.workspace }}/../spark-ci-work
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Python environment
+      run: scripts/ci_spark.sh setup "$WORK_DIR"
+
+    - name: Build moreau-cpu and moreau-cuda
+      id: build
+      run: scripts/ci_spark.sh build "$WORK_DIR"
+
+    - name: Run C++ tests
+      run: scripts/ci_spark.sh test-cpp "$WORK_DIR"
+
+    - name: Run Python tests
+      # Run after a C++ failure too, but only once the build has succeeded.
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: scripts/ci_spark.sh test-python "$WORK_DIR"
+
+    - name: Run cvxpy and cvxpylayers Moreau tests
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: scripts/ci_spark.sh test-upstream "$WORK_DIR"
