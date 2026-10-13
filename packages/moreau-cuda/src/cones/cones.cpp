@@ -8,8 +8,8 @@
 #include "moreau/cones/cone_kernels.cuh"
 #include "moreau/cones/psd_kernels.cuh"
 #include "moreau/cuda/utils.hpp"
+#include "moreau/cuda/cusolver_utils.hpp"
 #include "moreau/cuda/status_utils.hpp"
-#include <algorithm>
 #include <iostream>
 #include <limits>
 
@@ -356,24 +356,21 @@ void Cones::psd_shift_to_interior(BatchedVector& z, double total_degree, cudaStr
                 }
             }
 
-            // An all-zero block has zero eigenvalues; skip cusolverDnDsyevd,
-            // which can return NaN for it (see shift_x_into_psd_interior).
-            std::vector<double> eigs(n, 0.0);
-            if (std::any_of(mat.begin(), mat.end(), [](double v) { return v != 0.0; })) {
-                // Eigendecompose using this cone's workspace
-                double* d_mat = psd_work_mat1.data() + b * totalPsdMatSqDim + matsq_off;
-                double* d_eig = psd_work_mat3.data() + b * totalPsdMatSqDim + matsq_off;
-                CUDA_THROW(cudaMemcpy(d_mat, mat.data(), sizeof(double) * n2, cudaMemcpyHostToDevice));
-                CUDA_THROW(cudaMemset(d_psd_info_, 0, sizeof(int)));
-                CUSOLVER_THROW(cusolverDnSetStream(cusolverH_, stream));
-                CUSOLVER_THROW(cusolverDnDsyevd(cusolverH_,
-                                CUSOLVER_EIG_MODE_NOVECTOR, CUBLAS_FILL_MODE_LOWER,
-                                n, d_mat, n, d_eig,
-                                d_psd_syevd_work_, psd_syevd_work_size_,
-                                d_psd_info_));
-                CUDA_THROW(cudaDeviceSynchronize());
-                CUDA_THROW(cudaMemcpy(eigs.data(), d_eig, sizeof(double) * n, cudaMemcpyDeviceToHost));
-            }
+            // Eigendecompose using this cone's workspace
+            double* d_mat = psd_work_mat1.data() + b * totalPsdMatSqDim + matsq_off;
+            double* d_eig = psd_work_mat3.data() + b * totalPsdMatSqDim + matsq_off;
+            CUDA_THROW(cudaMemcpy(d_mat, mat.data(), sizeof(double) * n2, cudaMemcpyHostToDevice));
+            CUDA_THROW(cudaMemset(d_psd_info_, 0, sizeof(int)));
+            CUSOLVER_THROW(cusolverDnSetStream(cusolverH_, stream));
+            CUSOLVER_THROW(dsyevd_zeroed_workspace(cusolverH_,
+                                   CUSOLVER_EIG_MODE_NOVECTOR, CUBLAS_FILL_MODE_LOWER,
+                                   n, d_mat, n, d_eig,
+                                   d_psd_syevd_work_, psd_syevd_work_size_,
+                                   d_psd_info_));
+            CUDA_THROW(cudaDeviceSynchronize());
+
+            std::vector<double> eigs(n);
+            CUDA_THROW(cudaMemcpy(eigs.data(), d_eig, sizeof(double) * n, cudaMemcpyDeviceToHost));
 
             for (int64_t i = 0; i < n; i++) {
                 if (eigs[i] < min_margin) min_margin = eigs[i];

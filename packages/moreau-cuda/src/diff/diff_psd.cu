@@ -10,6 +10,7 @@
 #include "moreau/diff/diff.hpp"
 #include "moreau/diff/diff_kernels.cuh"
 #include "moreau/profiling/profiler.hpp"
+#include "moreau/cuda/cusolver_utils.hpp"
 #include <cuda_runtime.h>
 #include <cusolverDn.h>
 #include <cublas_v2.h>
@@ -282,10 +283,10 @@ void project_psd_cone_dual(
                 eigvecs, u + b * m + offset + sz_off, n);
 
             // Eigendecompose in-place
-            cusolverDnDsyevd(cusolver, CUSOLVER_EIG_MODE_VECTOR, CUBLAS_FILL_MODE_LOWER,
-                            n, eigvecs, n, eigvals,
-                            derivs.d_psd_cusolver_work, derivs.d_psd_cusolver_work_size,
-                            derivs.d_psd_info);
+            dsyevd_zeroed_workspace(cusolver, CUSOLVER_EIG_MODE_VECTOR, CUBLAS_FILL_MODE_LOWER,
+                                   n, eigvecs, n, eigvals,
+                                   derivs.d_psd_cusolver_work, derivs.d_psd_cusolver_work_size,
+                                   derivs.d_psd_info);
 
             // Clamp eigenvalues (use omega workspace as temp)
             double* clamped = derivs.psd_omega.data() + b * derivs.totalPsdMatSqDim + matsq_off;
@@ -541,10 +542,10 @@ void compute_xcone_psd_derivative(
                 d_eigvecs, d_u_svec, n_mat);
 
             // Eigendecompose in-place: eigvecs ← Q, eigvals ← λ.
-            cusolverDnDsyevd(cusolver, CUSOLVER_EIG_MODE_VECTOR,
-                             CUBLAS_FILL_MODE_LOWER,
-                             (int)n_mat, d_eigvecs, (int)n_mat, d_eigvals,
-                             cusolver_work, cusolver_work_size, d_info);
+            dsyevd_zeroed_workspace(cusolver, CUSOLVER_EIG_MODE_VECTOR,
+                                    CUBLAS_FILL_MODE_LOWER,
+                                    (int)n_mat, d_eigvecs, (int)n_mat, d_eigvals,
+                                    cusolver_work, cusolver_work_size, d_info);
 
             // Build Ω from eigenvalues.
             MOREAU_KERNEL_LAUNCH(build_omega_kernel, blk_n2, 256, 0, stream, d_omega, d_eigvals, n_mat);
