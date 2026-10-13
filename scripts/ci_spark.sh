@@ -78,7 +78,7 @@ test_cpp() {
 test_python() {
     cd "$source_dir"
     "$python" -m pytest packages/moreau/tests/python packages/moreau-cpu/tests/python \
-        packages/moreau-cuda/tests/python --tb=short -rs
+        packages/moreau-cuda/tests/python --tb=short -rfEs
 }
 
 test_upstream() {
