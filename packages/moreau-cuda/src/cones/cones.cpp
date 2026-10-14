@@ -8,6 +8,7 @@
 #include "moreau/cones/cone_kernels.cuh"
 #include "moreau/cones/psd_kernels.cuh"
 #include "moreau/cuda/utils.hpp"
+#include "moreau/cuda/cusolver_utils.hpp"
 #include "moreau/cuda/status_utils.hpp"
 #include <iostream>
 #include <limits>
@@ -361,11 +362,11 @@ void Cones::psd_shift_to_interior(BatchedVector& z, double total_degree, cudaStr
             CUDA_THROW(cudaMemcpy(d_mat, mat.data(), sizeof(double) * n2, cudaMemcpyHostToDevice));
             CUDA_THROW(cudaMemset(d_psd_info_, 0, sizeof(int)));
             CUSOLVER_THROW(cusolverDnSetStream(cusolverH_, stream));
-            CUSOLVER_THROW(cusolverDnDsyevd(cusolverH_,
-                            CUSOLVER_EIG_MODE_NOVECTOR, CUBLAS_FILL_MODE_LOWER,
-                            n, d_mat, n, d_eig,
-                            d_psd_syevd_work_, psd_syevd_work_size_,
-                            d_psd_info_));
+            CUSOLVER_THROW(dsyevd_zeroed_workspace(cusolverH_,
+                                   CUSOLVER_EIG_MODE_NOVECTOR, CUBLAS_FILL_MODE_LOWER,
+                                   n, d_mat, n, d_eig,
+                                   d_psd_syevd_work_, psd_syevd_work_size_,
+                                   d_psd_info_));
             CUDA_THROW(cudaDeviceSynchronize());
 
             std::vector<double> eigs(n);

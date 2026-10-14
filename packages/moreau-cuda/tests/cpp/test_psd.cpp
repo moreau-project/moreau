@@ -12,6 +12,7 @@
 
 #include "moreau/solver/solver.hpp"
 #include "moreau/cones/cones.hpp"
+#include "moreau/cuda/cusolver_utils.hpp"
 #include "moreau/diff/diff.hpp"
 
 using namespace moreau;
@@ -93,6 +94,79 @@ TEST_F(PsdForwardTest, Psd1) {
     auto r = solve_problem(n, m, P_ro, P_ci, P_val, A_ro, A_ci, A_val, q, b, cones);
     EXPECT_EQ(r.status, 1);  // Solved
     EXPECT_NEAR(r.x[0], 1.0, TOL_SOL);
+}
+
+// cusolverDnDsyevd (cuSOLVER 11.7) returns NaN eigenvalues for a zero matrix
+// whose workspace holds NaN, as it does after a call on a non-finite matrix.
+// dsyevd_zeroed_workspace must return zero for it, with and without
+// eigenvectors.
+TEST(DsyevdZeroedWorkspaceTest, ZeroMatrixIgnoresStaleWorkspace) {
+    constexpr int n = 3;
+    cusolverDnHandle_t handle;
+    ASSERT_EQ(cusolverDnCreate(&handle), CUSOLVER_STATUS_SUCCESS);
+    double *d_A, *d_W, *d_work;
+    int* d_info;
+    int lwork = 0;
+    ASSERT_EQ(cudaMalloc(&d_A, sizeof(double) * n * n), cudaSuccess);
+    ASSERT_EQ(cudaMalloc(&d_W, sizeof(double) * n), cudaSuccess);
+    ASSERT_EQ(cudaMalloc(&d_info, sizeof(int)), cudaSuccess);
+    ASSERT_EQ(cusolverDnDsyevd_bufferSize(handle, CUSOLVER_EIG_MODE_VECTOR, CUBLAS_FILL_MODE_LOWER,
+                                          n, d_A, n, d_W, &lwork), CUSOLVER_STATUS_SUCCESS);
+    ASSERT_EQ(cudaMalloc(&d_work, sizeof(double) * lwork), cudaSuccess);
+
+    for (cusolverEigMode_t mode : {CUSOLVER_EIG_MODE_NOVECTOR, CUSOLVER_EIG_MODE_VECTOR}) {
+        std::vector<double> nans(lwork, std::nan(""));
+        ASSERT_EQ(cudaMemcpy(d_work, nans.data(), sizeof(double) * lwork,
+                             cudaMemcpyHostToDevice), cudaSuccess);
+        ASSERT_EQ(cudaMemset(d_A, 0, sizeof(double) * n * n), cudaSuccess);
+        ASSERT_EQ(dsyevd_zeroed_workspace(handle, mode, CUBLAS_FILL_MODE_LOWER,
+                                          n, d_A, n, d_W, d_work, lwork, d_info),
+                  CUSOLVER_STATUS_SUCCESS);
+        std::vector<double> W(n);
+        int info = -1;
+        ASSERT_EQ(cudaMemcpy(W.data(), d_W, sizeof(double) * n, cudaMemcpyDeviceToHost),
+                  cudaSuccess);
+        ASSERT_EQ(cudaMemcpy(&info, d_info, sizeof(int), cudaMemcpyDeviceToHost), cudaSuccess);
+        EXPECT_EQ(info, 0);
+        EXPECT_EQ(W, std::vector<double>(n, 0.0)) << "mode " << mode;
+    }
+
+    cudaFree(d_A);
+    cudaFree(d_W);
+    cudaFree(d_work);
+    cudaFree(d_info);
+    cusolverDnDestroy(handle);
+}
+
+// The symmetric-cone default start shifts a zero PSD block by 1 onto the
+// identity. A stale NaN in the shared syevd workspace, which makes
+// cusolverDnDsyevd return NaN eigenvalues for a zero matrix, must not change
+// that.
+TEST_F(PsdForwardTest, ShiftOfZeroIgnoresStaleEigWorkspace) {
+    int64_t n = 2, m = 3;
+    std::vector<int64_t> P_ro = {0, 0, 0}, P_ci = {};
+    std::vector<int64_t> A_ro = {0, 1, 1, 2}, A_ci = {0, 1};
+
+    Cones cones{}; cones.psdConeDims = {2};
+    Settings settings;
+    settings.verbose = false;
+    CompiledSolver solver(n, m, 1, P_ro.data(), P_ci.data(), 0,
+                          A_ro.data(), A_ci.data(), 2, cones, settings);
+
+    Cones& c = solver.data.cones;
+    ASSERT_NE(c.d_psd_syevd_work_, nullptr);
+    std::vector<double> nans(c.psd_syevd_work_size_, std::nan(""));
+    ASSERT_EQ(cudaMemcpy(c.d_psd_syevd_work_, nans.data(), sizeof(double) * nans.size(),
+                         cudaMemcpyHostToDevice), cudaSuccess);
+
+    BatchedVector& z = solver.variables.z;
+    z.setToConstant(0.0);
+    c.psd_shift_to_interior(z, static_cast<double>(c.degree()));
+
+    std::vector<double> z_h(m);
+    ASSERT_EQ(cudaMemcpy(z_h.data(), z.data(), sizeof(double) * m, cudaMemcpyDeviceToHost),
+              cudaSuccess);
+    EXPECT_EQ(z_h, (std::vector<double>{1.0, 0.0, 1.0}));
 }
 
 // PSD(2): min x0 + x1
