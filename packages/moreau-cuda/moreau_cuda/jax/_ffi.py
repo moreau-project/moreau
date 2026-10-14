@@ -6,10 +6,6 @@ import os
 
 import jax
 
-# Enable 64-bit mode for JAX (required for the solver's numerical precision)
-jax.config.update("jax_enable_x64", True)
-
-
 # =============================================================================
 # Load the FFI shared library
 # =============================================================================

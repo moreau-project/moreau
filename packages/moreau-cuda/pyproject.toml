@@ -38,6 +38,7 @@ dependencies = [
 
 [project.optional-dependencies]
 torch = ["torch>=2.4.0"]
+jax = ["jax>=0.8.0"]
 
 [project.urls]
 Homepage = "https://github.com/moreau-project/moreau"
