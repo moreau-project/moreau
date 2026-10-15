@@ -226,8 +226,8 @@ H100, B200) are roughly 2–4x faster, so their crossover points shift lower.
 
 Moreau's CPU backend is not a fallback — it is a high-performance Rust
 implementation that is often the best choice. The CPU solver uses optimized
-sparse direct factorizations (QDLDL for small systems, faer for large ones with
-automatic multi-threading) and has near-zero per-solve overhead, making it
+sparse direct factorizations (faer's supernodal LDL by default, with QDLDL
+available explicitly) and has near-zero per-solve overhead, making it
 especially efficient for batched workloads.
 
 For problems with $n \le 500$, the CPU backend solves a 200-variable QP in under
