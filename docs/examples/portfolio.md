@@ -55,10 +55,12 @@ def portfolio_optimize(mu, Sigma, gamma=1.0):
     P = sparse.csr_array(gamma * Sigma)
     q = -mu
 
-    # Constraints: sum(w) = 1, w >= 0
+    # Constraints (Moreau form A w + s = b, s in K):
+    #   sum(w) = 1    ->  1'w + s0 = 1, s0 in zero cone
+    #   w >= 0        -> -w + s = 0,   s >= 0
     A = sparse.vstack([
         sparse.csr_array(np.ones((1, n))),  # sum = 1
-        sparse.eye(n, format='csr'),         # w >= 0
+        -sparse.eye(n, format='csr'),        # w >= 0
     ])
     b = np.concatenate([[1.0], np.zeros(n)])
 
@@ -126,7 +128,7 @@ def batch_portfolio_optimize(mu, Sigma, gammas):
     # Build CSR structure
     P_csr = sparse.csr_array(Sigma)
     A_eq = sparse.csr_array(np.ones((1, n)))
-    A_ineq = sparse.eye(n, format='csr')
+    A_ineq = -sparse.eye(n, format='csr')  # -w + s = 0, s >= 0  =>  w >= 0
     A_csr = sparse.vstack([A_eq, A_ineq])
 
     # Extract CSR components
@@ -190,7 +192,7 @@ true_weights = torch.softmax(true_mu / 0.1, dim=0)
 # Setup solver structure
 P_csr = torch.eye(n, dtype=torch.float64)  # Will scale by gamma
 A_eq = torch.ones(1, n, dtype=torch.float64)
-A_ineq = torch.eye(n, dtype=torch.float64)
+A_ineq = -torch.eye(n, dtype=torch.float64)  # -w + s = 0, s >= 0  =>  w >= 0
 
 # CSR indices
 P_ro = torch.tensor([i for i in range(n+1)])
@@ -207,7 +209,7 @@ optimizer = torch.optim.Adam([mu_learned], lr=0.1)
 
 gamma = 2.0
 P_values = gamma * torch.ones(n, dtype=torch.float64)
-A_values = torch.ones(2*n, dtype=torch.float64)
+A_values = torch.cat([torch.ones(n), -torch.ones(n)]).double()  # [1'; -I]
 b = torch.cat([torch.ones(1), torch.zeros(n)]).double()
 
 # Training loop
