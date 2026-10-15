@@ -8,6 +8,8 @@ machinery from the public Solver API.
 
 import torch
 
+from moreau._types import _no_solution_mask, _raise_backward_without_solution
+
 # ---------------------------------------------------------------------------
 # Custom op: moreau::solve_backward
 #
@@ -46,6 +48,34 @@ def _get_impl(handle: int):
     return impl
 
 
+def _status_tensor(status) -> torch.Tensor:
+    """Per-problem status codes as an int64 CPU tensor (0-d for one problem)."""
+    if isinstance(status, (list, tuple)) or getattr(status, "ndim", 0) > 0:
+        return torch.tensor([int(st) for st in status], dtype=torch.int64)
+    return torch.tensor(int(status), dtype=torch.int64)
+
+
+def _check_backward_statuses_torch(status: torch.Tensor, *upstreams: torch.Tensor) -> None:
+    """Raise if a problem without a solution has a nonzero upstream gradient.
+
+    Each upstream has shape (..., *status.shape, dim); None or empty
+    upstreams are ignored. The upstreams are only inspected (one device
+    sync) when some problem failed.
+    """
+    codes = status.numpy()
+    if not _no_solution_mask(codes).any():
+        return
+    used = torch.zeros(status.shape, dtype=torch.bool)
+    for g in upstreams:
+        if g is None or g.numel() == 0:
+            continue
+        nz = (torch.as_tensor(g) != 0).any(dim=-1)
+        while nz.dim() > status.dim():
+            nz = nz.any(dim=0)
+        used |= nz.cpu()
+    _raise_backward_without_solution(codes, used.numpy())
+
+
 @torch.library.custom_op("moreau::solve_backward", mutates_args=())
 def _solve_backward_op(
     dx: torch.Tensor,
@@ -53,6 +83,7 @@ def _solve_backward_op(
     ds: torch.Tensor,
     impl_handle: torch.Tensor,
     solve_mode: torch.Tensor,
+    status: torch.Tensor,
     state_rinv: torch.Tensor,
     state_rinv_diag: torch.Tensor,
     state_use_rinv_diag: torch.Tensor,
@@ -74,8 +105,10 @@ def _solve_backward_op(
 
     `z_x` (the saved direct dual) and `dz_x` (the upstream gradient on
     Solution.z_x) may be empty tensors when the solver has no direct
-    cones; the impl handles either case.
+    cones; the impl handles either case. `status` holds the per-problem
+    solver status codes; see `_check_backward_statuses_torch`.
     """
+    _check_backward_statuses_torch(status, dx, dz, ds, dz_x)
     impl = _get_impl(impl_handle.item())
     mode_str = "single" if solve_mode.item() == 0 else "batch"
     dP, dq, dA, db = impl.backward_with_mode(
@@ -117,6 +150,7 @@ def _solve_backward_op_fake(
     ds,
     impl_handle,
     solve_mode,
+    status,
     state_rinv,
     state_rinv_diag,
     state_use_rinv_diag,
@@ -151,6 +185,7 @@ def _solve_backward_op_vmap(
     ds,
     impl_handle,
     solve_mode,
+    status,
     state_rinv,
     state_rinv_diag,
     state_use_rinv_diag,
@@ -174,6 +209,7 @@ def _solve_backward_op_vmap(
         ds_bd,
         h_bd,
         m_bd,
+        status_bd,
         state_rinv_bd,
         state_rinv_diag_bd,
         state_use_rinv_diag_bd,
@@ -192,6 +228,8 @@ def _solve_backward_op_vmap(
         dz_x_bd,
     ) = in_dims
     N = info.batch_size
+    if status_bd is not None:
+        status = status.movedim(status_bd, 0)
 
     # Expand all tensors to (N, ...), replicating if not batched by vmap.
     def _expand(t, bd):
@@ -231,6 +269,7 @@ def _solve_backward_op_vmap(
         ds,
         impl_handle,
         batch_mode,
+        status,
         state_rinv,
         state_rinv_diag,
         state_use_rinv_diag,
@@ -317,6 +356,7 @@ class _SolveFunction(torch.autograd.Function):
         ctx.save_for_backward(
             torch.tensor(solver._impl_handle, dtype=torch.int64),
             torch.tensor(mode, dtype=torch.int64),
+            _status_tensor(cached["status"]),
             state_rinv,
             state_rinv_diag,
             state_use_rinv_diag,
@@ -339,6 +379,7 @@ class _SolveFunction(torch.autograd.Function):
         (
             impl_handle,
             solve_mode,
+            status,
             state_rinv,
             state_rinv_diag,
             state_use_rinv_diag,
@@ -376,6 +417,7 @@ class _SolveFunction(torch.autograd.Function):
             ds,
             impl_handle,
             solve_mode,
+            status,
             state_rinv,
             state_rinv_diag,
             state_use_rinv_diag,
