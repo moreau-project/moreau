@@ -48,11 +48,36 @@ settings = moreau.Settings(solver='active_set')
 ```
 
 When `solver='auto'`, the active-set solver is selected for problems with:
-- Only zero and nonneg cones (pure QPs/LPs)
+- Only zero and nonneg cones, and a nonzero `P` (QPs; LPs use the IPM)
 - n <= 500 variables
-- m <= max(500, 2n) constraints
+- 0 < m <= max(500, 2n) constraints
+- no direct cones, `yolo=False`, and no smoothed IPM differentiation
+  (`IPMSettings(diff_method='smoothed')`), since active-set can't honour those
 
 Otherwise the IPM solver is used.
+
+### Verification and IPM fallback
+
+When `solver='auto'` picks active-set, every result is checked before it is
+returned. A problem fails the check if its status is not `Solved`, or if its
+primal residual, dual residual, cone membership or complementarity exceeds
+1e-6 relative to the problem scale. Each failing problem is re-solved with the
+IPM, and Moreau warns that it "fell back to the IPM". In a batch only the
+failing problems are re-solved, and their gradients come from the IPM while
+the rest keep their active-set gradients.
+
+This catches the cases where active-set alone gives a wrong answer: unbounded
+problems, redundant equality constraints, singular `P`, badly scaled data, and
+infeasible problems (the IPM also returns an infeasibility certificate). On
+well-posed problems nothing falls back and the check costs roughly 0-20% of an
+active-set solve.
+
+The check is controlled by `ActiveSetSettings.ipm_fallback`. `solver='auto'`
+turns it on unless you set it yourself; an explicit `solver='active_set'`
+leaves it off, so you get the raw active-set result. Pass
+`ActiveSetSettings(ipm_fallback=True)` to verify an explicit active-set solve
+too, or `ipm_fallback=False` to disable the check under `auto`. IPM settings
+such as tolerances apply to the fallback solve.
 
 !!! warning "Auto + gradients: gradient quality changes at the threshold"
     Active-set produces non-smooth (combinatorial) derivatives. When

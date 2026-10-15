@@ -316,7 +316,7 @@ Settings
 
    Solver configuration.
 
-   :param solver: Solver algorithm. ``'auto'`` (default) picks the active-set solver for small QPs and IPM otherwise. Other options: ``'ipm'`` or ``'active_set'`` (CPU only, zero+nonneg cones).
+   :param solver: Solver algorithm. ``'auto'`` (default) picks the active-set solver for small QPs, verifies each result and falls back to the IPM for any that fail, and uses the IPM otherwise. Other options: ``'ipm'`` or ``'active_set'`` (CPU only, zero+nonneg cones).
    :param device: Device selection (``'auto'``, ``'cpu'``, ``'cuda'``)
    :param device_id: CUDA device ID. ``-1`` (default) uses the current device. Ignored when ``device='cpu'``.
    :param batch_size: Batch size for CompiledSolver (default 1)
@@ -334,7 +334,7 @@ Settings
 ActiveSetSettings
 -----------------
 
-.. py:class:: ActiveSetSettings(primal_tol=1e-6, dual_tol=1e-12, iter_limit=10000, diff_method='exact', diff_smoothing_mu=1e-4)
+.. py:class:: ActiveSetSettings(primal_tol=1e-6, dual_tol=1e-12, iter_limit=10000, diff_method='exact', diff_smoothing_mu=1e-4, ipm_fallback=False)
 
    Active-set solver settings (CPU only, zero + nonnegative cones).
 
@@ -346,6 +346,10 @@ ActiveSetSettings
        small μ-regularizer so gradients are well-defined on the active-set boundary.
    :param diff_smoothing_mu: Smoothing parameter μ for ``diff_method='smoothed'``
        (default 1e-4, must be > 0). Ignored when ``diff_method='exact'``.
+   :param ipm_fallback: Verify each active-set result and re-solve any problem that
+       fails the check with the IPM, with a warning (default ``False``).
+       ``solver='auto'`` turns this on unless set explicitly. See
+       :doc:`../guide/solver-settings`.
 
 
 IPMSettings

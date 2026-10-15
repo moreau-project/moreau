@@ -6,7 +6,7 @@ configuration is supported on the requested device.
 
 import warnings
 
-from ._types import Settings, SolverType
+from ._types import ActiveSetSettings, Settings, SolverType
 from ._backend import (
     _choose_device,
     available_devices,
@@ -107,10 +107,18 @@ def _resolve_solver_type(settings, n, m, cones, device, nnz_P=None):
         has_dir_cones = bool(getattr(cones, "dir_cones", None))
         has_quadratic = nnz_P is None or nnz_P > 0
         m_limit = max(500, 2 * n)
+        # yolo and smoothed IPM differentiation change results in ways
+        # active-set cannot honour, so asking for them selects the IPM. Other
+        # IPM settings (e.g. tolerances) still apply to any IPM fallback.
+        ipm = getattr(settings, "ipm_settings", None)
+        wants_ipm_options = bool(getattr(settings, "yolo", False)) or (
+            ipm is not None and getattr(ipm, "diff_method", None) == "smoothed"
+        )
         if (
             is_qp_only
             and not has_dir_cones
             and has_quadratic
+            and not wants_ipm_options
             and n <= 500
             and m > 0
             and m <= m_limit
@@ -118,6 +126,12 @@ def _resolve_solver_type(settings, n, m, cones, device, nnz_P=None):
         ):
             settings = settings.model_copy(deep=True)
             settings.solver = SolverType.ACTIVE_SET
+            # auto verifies active-set results and re-solves failures with the
+            # IPM, unless the caller chose ipm_fallback explicitly.
+            as_settings = settings.active_set_settings or ActiveSetSettings()
+            if "ipm_fallback" not in as_settings.model_fields_set:
+                as_settings = as_settings.model_copy(update={"ipm_fallback": True})
+            settings.active_set_settings = as_settings
             if settings.enable_grad:
                 _warn_auto_active_set_with_grad()
         else:
