@@ -160,7 +160,7 @@ def cones_to_cpu(cones) -> List:
         cpu_cones.append(_cpu_solver.NonnegativeConeT(cones.num_nonneg_cones))
     for dim in cones.so_cone_dims:
         cpu_cones.append(_cpu_solver.SecondOrderConeT(dim))
-    # PSD cones must come before exp/power to match CVXPY/Clarabel cone ordering
+    # Documented slack row order (docs/guide/basic-usage.md): PSD before exp/power
     for dim in getattr(cones, "psd_dims", []):
         cpu_cones.append(_cpu_solver.PSDTriangleConeT(dim))
     for _ in range(cones.num_exp_cones):

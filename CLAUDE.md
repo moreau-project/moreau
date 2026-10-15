@@ -60,7 +60,7 @@ minimize    (1/2)x'Px + q'x
 subject to  Ax + s = b
             x ∈ K1,  s ∈ K2
 ```
-K1, K2 = products of cones (zero, nonneg, SOC, exp, power, generalized power, PSD).
+K1, K2 = products of cones (zero, nonneg, SOC, PSD, exp, power, generalized power — the required slack row order).
 K2 constrains the slack s; K1 constrains x directly (direct-x cones).
 
 ## Python API
