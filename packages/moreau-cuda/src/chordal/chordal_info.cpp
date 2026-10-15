@@ -7,6 +7,7 @@
  */
 
 #include "moreau/chordal/chordal_info.hpp"
+#include "moreau/chordal/merge_strategy.hpp"
 #include "moreau/chordal/sparsity_pattern.hpp"
 #include "moreau/chordal/symbolic_ldl.hpp"
 
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <stdexcept>
 #include <unordered_map>
@@ -80,11 +82,71 @@ std::vector<bool> ChordalInfo::find_aggregate_sparsity_mask(
 }
 
 // ============================================================================
+// merge_cliques — run the CPU backend's merge strategies on a supernode tree
+//
+// The strategies in merge_strategy.hpp are ports of the Rust ones and operate
+// on chordal::SuperNodeTree, whose vertex sets keep insertion order as Rust's
+// IndexSet does; clique-graph merging depends on that order. Before merging
+// every set is ascending, so copying the sorted sets over loses nothing, and
+// copying back loses nothing either: the strategies leave separators sorted
+// or untouched, reorder_snode_consecutively re-sorts the supernodes, and
+// post_order sorts the children.
+// ============================================================================
+
+static_assert(NO_PARENT == chordal::NO_PARENT && INACTIVE_NODE == chordal::INACTIVE_NODE,
+              "supernode tree sentinels must agree");
+
+void merge_cliques(SuperNodeTree& sntree, const std::string& merge_method) {
+    std::unique_ptr<chordal::MergeStrategy> strategy;
+    if (merge_method == "none") {
+        strategy = std::make_unique<chordal::NoMergeStrategy>();
+    } else if (merge_method == "parent_child") {
+        strategy = std::make_unique<chordal::ParentChildMergeStrategy>();
+    } else if (merge_method == "clique_graph") {
+        strategy = std::make_unique<chordal::CliqueGraphMergeStrategy>();
+    } else {
+        throw std::invalid_argument(
+            "chordal decomposition merge method must be 'clique_graph', "
+            "'parent_child', or 'none', got '" + merge_method + "'");
+    }
+
+    auto to_chordal = [](const std::vector<VertexSet>& sets) {
+        std::vector<chordal::VertexSet> out(sets.size());
+        for (size_t i = 0; i < sets.size(); ++i) out[i].extend(sets[i].begin(), sets[i].end());
+        return out;
+    };
+    auto from_chordal = [](const std::vector<chordal::VertexSet>& sets) {
+        std::vector<VertexSet> out(sets.size());
+        for (size_t i = 0; i < sets.size(); ++i) out[i].extend(sets[i].begin(), sets[i].end());
+        return out;
+    };
+
+    chordal::SuperNodeTree t;
+    t.snode = to_chordal(sntree.snode);
+    t.snode_post = sntree.snode_post;
+    t.snode_parent = sntree.snode_parent;
+    t.snode_children = to_chordal(sntree.snode_children);
+    t.post = sntree.post;
+    t.separators = to_chordal(sntree.separators);
+    t.n_cliques = sntree.n_cliques;
+
+    strategy->merge_cliques(t);
+
+    sntree.snode = from_chordal(t.snode);
+    sntree.snode_post = std::move(t.snode_post);
+    sntree.snode_parent = std::move(t.snode_parent);
+    sntree.snode_children = from_chordal(t.snode_children);
+    sntree.separators = from_chordal(t.separators);
+    sntree.n_cliques = t.n_cliques;
+}
+
+// ============================================================================
 // analyse_psd_sparsity — analyze one PSD cone
 // ============================================================================
 
 void ChordalInfo::analyse_psd_sparsity(
-    std::vector<bool>& nz_mask, int64_t conedim, int64_t coneidx)
+    std::vector<bool>& nz_mask, int64_t conedim, int64_t coneidx,
+    const std::string& merge_method)
 {
     int64_t tri_len = conedim * (conedim + 1) / 2;
 
@@ -138,88 +200,9 @@ void ChordalInfo::analyse_psd_sparsity(
     // Build SuperNodeTree from L factor
     SuperNodeTree sntree(ldl.L_colptr.data(), ldl.L_rowind.data(), ldl.n);
 
-    // Apply parent-child merge strategy (default)
-    // This is a simplified version: merge child into parent when the
-    // merged clique would be no larger than the sum of components.
+    // Clique merging only if more than one clique present
     if (sntree.n_cliques > 1) {
-        // Parent-child merge: process in post-order, merge if fill-in is zero
-        bool merged = true;
-        while (merged && sntree.n_cliques > 1) {
-            merged = false;
-            // Rebuild post-order after each merge pass
-            sntree.snode_post.resize(sntree.snode_parent.size());
-            SuperNodeTree::post_order(sntree.snode_post, sntree.snode_parent,
-                                       sntree.snode_children,
-                                       sntree.n_cliques);
-
-            for (int64_t i = 0; i < sntree.n_cliques; ++i) {
-                int64_t c = sntree.get_post_order(i);
-                int64_t p = sntree.snode_parent[c];
-                if (p == NO_PARENT || p == INACTIVE_NODE) continue;
-
-                auto [dim_c_snode, dim_c_sep] = sntree.clique_dim(c);
-                auto [dim_p_snode, dim_p_sep] = sntree.clique_dim(p);
-
-                int64_t fi = SuperNodeTree::fill_in(dim_c_snode, dim_c_sep,
-                                                     dim_p_snode, dim_p_sep);
-                if (fi == 0) {
-                    sntree.merge_two_cliques_parent_child(p, c);
-                    merged = true;
-                    break;  // restart post-order iteration
-                }
-            }
-        }
-
-        // Post-process: rebuild post-order for remaining active cliques
-        // Filter out inactive/empty nodes
-        std::vector<int64_t> active_parents;
-        std::vector<VertexSet> active_children;
-        std::vector<VertexSet> active_snodes;
-        std::vector<VertexSet> active_separators;
-
-        // Build map from old index to new index
-        std::vector<int64_t> old_to_new(sntree.snode_parent.size(), -1);
-        int64_t new_idx = 0;
-        for (size_t i = 0; i < sntree.snode.size(); ++i) {
-            if (!sntree.snode[i].empty() && sntree.snode_parent[i] != INACTIVE_NODE) {
-                old_to_new[i] = new_idx++;
-            }
-        }
-
-        active_snodes.resize(new_idx);
-        active_separators.resize(new_idx);
-        active_parents.resize(new_idx, NO_PARENT);
-        active_children.resize(new_idx);
-
-        for (size_t i = 0; i < sntree.snode.size(); ++i) {
-            if (old_to_new[i] < 0) continue;
-            int64_t ni = old_to_new[i];
-            active_snodes[ni] = std::move(sntree.snode[i]);
-            active_separators[ni] = std::move(sntree.separators[i]);
-
-            int64_t op = sntree.snode_parent[i];
-            if (op != NO_PARENT && op != INACTIVE_NODE && old_to_new[op] >= 0) {
-                active_parents[ni] = old_to_new[op];
-            }
-        }
-
-        // Rebuild children
-        for (int64_t i = 0; i < new_idx; ++i) {
-            if (active_parents[i] != NO_PARENT) {
-                active_children[active_parents[i]].insert(i);
-            }
-        }
-
-        sntree.snode = std::move(active_snodes);
-        sntree.separators = std::move(active_separators);
-        sntree.snode_parent = std::move(active_parents);
-        sntree.snode_children = std::move(active_children);
-        sntree.n_cliques = new_idx;
-
-        // Rebuild post-order
-        sntree.snode_post.resize(new_idx);
-        SuperNodeTree::post_order(sntree.snode_post, sntree.snode_parent,
-                                   sntree.snode_children, new_idx);
+        merge_cliques(sntree, merge_method);
     }
 
     if (sntree.n_cliques <= 1) return;  // not decomposed, or everything merged
@@ -328,6 +311,7 @@ ChordalInfo ChordalInfo::analyze(
     const int64_t* psd_dims, int64_t num_psd,
     int64_t num_zero_, int64_t num_nonneg_,
     int64_t total_soc_, int64_t num_exp_, int64_t num_power_,
+    const std::string& merge_method,
     const bool* b_sparsity_pattern)
 {
     ChordalInfo info;
@@ -360,7 +344,7 @@ ChordalInfo ChordalInfo::analyze(
                                      nz_mask.begin() + psd_row_start + tri);
 
         // For chordal decomposition, only the PSD-cone index is tracked.
-        info.analyse_psd_sparsity(cone_mask, dim, pi);
+        info.analyse_psd_sparsity(cone_mask, dim, pi, merge_method);
 
         psd_row_start += tri;
     }

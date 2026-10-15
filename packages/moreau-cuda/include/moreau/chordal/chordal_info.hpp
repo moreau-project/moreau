@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <numeric>
+#include <string>
 #include <vector>
 #include <cmath>
 
@@ -52,6 +53,15 @@ struct ConeMapEntry {
 
     bool is_decomposed() const { return pattern_index >= 0; }
 };
+
+/**
+ * @brief Merge the cliques of a supernode tree in place, as the CPU backend does
+ *
+ * @param sntree Supernode tree of one PSD cone's chordal extension
+ * @param merge_method "clique_graph", "parent_child", or "none"; anything
+ *        else throws std::invalid_argument
+ */
+void merge_cliques(SuperNodeTree& sntree, const std::string& merge_method);
 
 // ============================================================================
 // ChordalInfo — main coordinator
@@ -111,6 +121,9 @@ struct ChordalInfo {
      * @param total_soc_ Total SOC dimension
      * @param num_exp_ Number of exp cones
      * @param num_power_ Number of power cones
+     * @param merge_method Clique merge strategy: "clique_graph", "parent_child",
+     *        or "none", as on the CPU backend; anything else throws
+     *        std::invalid_argument
      */
     static ChordalInfo analyze(
         const int64_t* A_colptr, const int64_t* A_rowind,
@@ -118,6 +131,7 @@ struct ChordalInfo {
         const int64_t* psd_dims, int64_t num_psd,
         int64_t num_zero_, int64_t num_nonneg_,
         int64_t total_soc_, int64_t num_exp_, int64_t num_power_,
+        const std::string& merge_method,
         const bool* b_sparsity_pattern = nullptr
     );
 
@@ -182,7 +196,8 @@ private:
 
     /// Analyze one PSD cone's sparsity pattern
     void analyse_psd_sparsity(
-        std::vector<bool>& nz_mask, int64_t conedim, int64_t coneidx);
+        std::vector<bool>& nz_mask, int64_t conedim, int64_t coneidx,
+        const std::string& merge_method);
 
     /// Build compact augmented problem structure
     void build_compact_augmentation(
