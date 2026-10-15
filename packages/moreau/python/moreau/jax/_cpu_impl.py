@@ -96,6 +96,14 @@ class JaxSolverCpu:
         )
 
         # Register this solver in the global registry
+        # Active-set backward needs the working-set snapshot of the solve being
+        # differentiated. It travels through JAX residuals as one flat float64
+        # row per problem: rinv, rinv_diag, use_rinv_diag, n_active, ws, sense,
+        # lam_star. The IPM needs no state, so its length is 0.
+        solver_type = getattr(self._settings, "solver", None)
+        self._use_active_set = solver_type is not None and "active_set" in str(solver_type).lower()
+        self._state_len = n * (n + 1) // 2 + n + 2 + 3 * m if self._use_active_set else 0
+
         self._solver_id = _get_next_solver_id()
         _SOLVER_REGISTRY[self._solver_id] = self
 
@@ -330,7 +338,71 @@ def _solve_cpu_callback(
         setup_time = np.full(batch_size, setup_time_val, dtype=np.float64)
         construction_time = np.full(batch_size, construction_time_val, dtype=np.float64)
 
-    return (x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time)
+    state = _flatten_backward_state(solver_wrapper, result.get("_backward_state"), batch_size)
+    if squeeze_output:
+        state = state.squeeze(0)
+
+    return (
+        x,
+        z,
+        s,
+        z_x,
+        status,
+        obj_val,
+        iterations,
+        solve_time,
+        setup_time,
+        construction_time,
+        state,
+    )
+
+
+# Order and per-problem sizes of the active-set state fields in a flat row.
+def _state_fields(n: int, m: int):
+    return (
+        ("rinv", n * (n + 1) // 2),
+        ("rinv_diag", n),
+        ("use_rinv_diag", 1),
+        ("n_active", 1),
+        ("ws", m),
+        ("sense", m),
+        ("lam_star", m),
+    )
+
+
+def _flatten_backward_state(solver_wrapper, backward_state, batch_size: int) -> np.ndarray:
+    """One float64 row per problem holding the active-set backward state."""
+    if solver_wrapper._state_len == 0:
+        return np.zeros((batch_size, 0), dtype=np.float64)
+    flat = backward_state._to_flat_dict()
+    columns = []
+    for name, size in _state_fields(solver_wrapper._n, solver_wrapper._m):
+        values = np.asarray(flat[name], dtype=np.float64)
+        if values.size != batch_size * size:
+            raise RuntimeError(
+                f"active-set backward state field {name!r} has {values.size} entries, "
+                f"expected {batch_size * size}"
+            )
+        columns.append(values.reshape(batch_size, size))
+    return np.hstack(columns)
+
+
+def _unflatten_backward_state(cpu_solver, solver_wrapper, state: np.ndarray):
+    """Rebuild the native active-set backward state from flat rows."""
+    fields, offset = {}, 0
+    for name, size in _state_fields(solver_wrapper._n, solver_wrapper._m):
+        fields[name] = state[:, offset : offset + size].ravel()
+        offset += size
+    ints = lambda a: np.rint(a).astype(np.int32)  # noqa: E731 (exact integers in float64)
+    return cpu_solver._solver._make_backward_state_from_flat(
+        fields["rinv"],
+        fields["rinv_diag"],
+        ints(fields["use_rinv_diag"]),
+        ints(fields["n_active"]),
+        ints(fields["ws"]),
+        ints(fields["sense"]),
+        fields["lam_star"],
+    )
 
 
 def _backward_cpu_callback(
@@ -347,10 +419,12 @@ def _backward_cpu_callback(
     z: np.ndarray,
     s: np.ndarray,
     z_x: np.ndarray,
+    state: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Callback function for backward pass.
 
-    Returns 4 arrays: dP, dA, dq, db
+    ``state`` is the active-set backward state saved by the forward solve being
+    differentiated (empty for the IPM). Returns 4 arrays: dP, dA, dq, db
     """
     solver_wrapper = _SOLVER_REGISTRY[solver_id]
 
@@ -367,6 +441,7 @@ def _backward_cpu_callback(
     z = np.asarray(z, dtype=np.float64)
     s = np.asarray(s, dtype=np.float64)
     z_x = np.asarray(z_x, dtype=np.float64)
+    state = np.asarray(state, dtype=np.float64)
 
     # Determine batch size
     if dx.ndim == 1:
@@ -384,6 +459,7 @@ def _backward_cpu_callback(
         z = z.reshape(1, -1)
         s = s.reshape(1, -1)
         z_x = z_x.reshape(1, -1)
+        state = state.reshape(1, -1)
         squeeze_output = True
     else:
         batch_size = dx.shape[0]
@@ -400,12 +476,12 @@ def _backward_cpu_callback(
         if has_dz_x:
             kw["dz_x_flat"] = dz_x.ravel()
             kw["z_x_flat"] = z_x.ravel()
-        if hasattr(cpu_solver, "_last_backward_state"):
-            backward_state = getattr(cpu_solver, "_last_backward_state", None)
-            if backward_state is None:
-                raise RuntimeError(
-                    "Active-set backward requires cached backward state from the forward solve"
-                )
+        if solver_wrapper._use_active_set:
+            # Use the state of the solve being differentiated, not the solver's
+            # most recent one: a Solver reused inside jax.grad has solved again
+            # since (#57). jacrev/vmap backward also runs on a different batch
+            # size, whose solver has no saved state at all.
+            backward_state = _unflatten_backward_state(cpu_solver, solver_wrapper, state)
             grad_result = cpu_solver.backward_with_data_flat(
                 dx.ravel(),
                 ds.ravel(),
@@ -475,15 +551,14 @@ def _backward_cpu_callback(
     return dP, dA, dq, db
 
 
-@partial(custom_vjp, nondiff_argnums=(0,))
-def _solve_cpu_raw(
+def _solve_cpu_with_state(
     solver_id: int,
     P_data: jnp.ndarray,
     A_data: jnp.ndarray,
     q: jnp.ndarray,
     b: jnp.ndarray,
 ) -> Tuple[jnp.ndarray, ...]:
-    """Solve conic QP on CPU. Returns (x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time)."""
+    """The 10 solve outputs plus the flat active-set backward state."""
     solver_wrapper = _SOLVER_REGISTRY[solver_id]
     n, m = solver_wrapper._n, solver_wrapper._m
     total_xn = solver_wrapper._total_x_dim
@@ -517,30 +592,43 @@ def _solve_cpu_raw(
         setup_time_shape = batch_scalar_shape
         construction_time_shape = batch_scalar_shape
 
-    x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time = (
-        jax.pure_callback(
-            partial(_solve_cpu_callback, solver_id),
-            (
-                x_shape,
-                z_shape,
-                s_shape,
-                z_x_shape,
-                status_shape,
-                obj_val_shape,
-                iterations_shape,
-                solve_time_shape,
-                setup_time_shape,
-                construction_time_shape,
-            ),
-            P_data,
-            A_data,
-            q,
-            b,
-            vmap_method="broadcast_all",
-        )
+    state_len = solver_wrapper._state_len
+    state_shape = jax.ShapeDtypeStruct(
+        (state_len,) if q.ndim == 1 else (q.shape[0], state_len), jnp.float64
+    )
+    return jax.pure_callback(
+        partial(_solve_cpu_callback, solver_id),
+        (
+            x_shape,
+            z_shape,
+            s_shape,
+            z_x_shape,
+            status_shape,
+            obj_val_shape,
+            iterations_shape,
+            solve_time_shape,
+            setup_time_shape,
+            construction_time_shape,
+            state_shape,
+        ),
+        P_data,
+        A_data,
+        q,
+        b,
+        vmap_method="broadcast_all",
     )
 
-    return (x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time)
+
+@partial(custom_vjp, nondiff_argnums=(0,))
+def _solve_cpu_raw(
+    solver_id: int,
+    P_data: jnp.ndarray,
+    A_data: jnp.ndarray,
+    q: jnp.ndarray,
+    b: jnp.ndarray,
+) -> Tuple[jnp.ndarray, ...]:
+    """Solve conic QP on CPU. Returns (x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time)."""
+    return _solve_cpu_with_state(solver_id, P_data, A_data, q, b)[:10]
 
 
 def _solve_cpu_fwd(
@@ -551,12 +639,13 @@ def _solve_cpu_fwd(
     b: jnp.ndarray,
 ) -> Tuple[Tuple[jnp.ndarray, ...], Any]:
     """Forward pass with saved residuals for backward."""
-    x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time = (
-        _solve_cpu_raw(solver_id, P_data, A_data, q, b)
+    x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time, state = (
+        _solve_cpu_with_state(solver_id, P_data, A_data, q, b)
     )
 
-    # Save everything needed for backward (including z_x for direct dz_x).
-    residuals = (P_data, A_data, q, b, x, z, s, z_x)
+    # Save everything needed for backward (including z_x for direct dz_x, and
+    # this solve's own active-set state).
+    residuals = (P_data, A_data, q, b, x, z, s, z_x, state)
     return (
         x,
         z,
@@ -573,7 +662,7 @@ def _solve_cpu_fwd(
 
 def _solve_cpu_bwd(solver_id: int, residuals, g):
     """Backward pass via implicit differentiation."""
-    P_data, A_data, q, b, x, z, s, z_x = residuals
+    P_data, A_data, q, b, x, z, s, z_x, state = residuals
     # g contains gradients for all 10 outputs.
     # x, z, s, z_x carry meaningful gradients into the implicit-diff KKT.
     (
@@ -621,6 +710,7 @@ def _solve_cpu_bwd(solver_id: int, residuals, g):
         z,
         s,
         z_x,
+        state,
         vmap_method="broadcast_all",
     )
 
