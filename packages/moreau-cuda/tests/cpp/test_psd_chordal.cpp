@@ -177,6 +177,85 @@ TEST_F(ChordalTest, MixedConeOrderKeepsPsdBeforeExpAndPower) {
     }
 }
 
+// ============================================================================
+// complete_z on a 4x4 PSD cone with pattern K4 minus the edge (2,3): cliques
+// {0,1,2} and {0,1,3}, separator {0,1}, and one structural entry, (2,3).
+// ============================================================================
+
+class CompleteZTest : public ::testing::Test {
+protected:
+    static constexpr int64_t kDim = 4;
+    static constexpr int64_t kSvec = 10;  // svec rows: (0,0) (0,1) (1,1) (0,2) (1,2) (2,2) (0,3) (1,3) (2,3) (3,3)
+    static constexpr int64_t kFill = 8;   // svec row of (2,3)
+
+    static ChordalInfo analyze_k4_minus_edge() {
+        // One variable on each specified off-diagonal entry; b on the diagonal.
+        std::vector<int64_t> A_colptr = {0, 1, 2, 3, 4, 5};
+        std::vector<int64_t> A_rowind = {1, 3, 4, 6, 7};
+        std::vector<int64_t> psd_dims = {kDim};
+        std::unique_ptr<bool[]> b_mask(new bool[kSvec]);
+        for (int64_t i = 0; i < kSvec; ++i) b_mask[i] = (i == 0 || i == 2 || i == 5 || i == 9);
+        return ChordalInfo::analyze(A_colptr.data(), A_rowind.data(), 5, kSvec,
+                                    psd_dims.data(), 1, 0, 0, 0, 0, 0, b_mask.get());
+    }
+
+    // svec of a symmetric row-major matrix, off-diagonal entries scaled by sqrt(2)
+    static std::vector<double> svec(const std::vector<double>& M) {
+        std::vector<double> v;
+        for (int64_t col = 0; col < kDim; ++col) {
+            for (int64_t row = 0; row <= col; ++row) {
+                v.push_back(row == col ? M[row * kDim + col] : M[row * kDim + col] * std::sqrt(2.0));
+            }
+        }
+        return v;
+    }
+};
+
+// M is its own max-determinant completion: M[{0,1},{0,1}] = I and
+// M[2,3] = M[2,{0,1}] * M[{0,1},3] = 0.5 * 0.3 + 0.2 * (-0.4) = 0.07.
+// Completing M without M[2,3] must give M back, svec scaling included.
+TEST_F(CompleteZTest, RestoresMaxDeterminantCompletion) {
+    auto info = analyze_k4_minus_edge();
+    ASSERT_TRUE(info.is_decomposed());
+
+    std::vector<double> M = {1.0, 0.0, 0.5, 0.3,
+                             0.0, 1.0, 0.2, -0.4,
+                             0.5, 0.2, 1.0, 0.07,
+                             0.3, -0.4, 0.07, 1.0};
+    std::vector<double> expected = svec(M);
+    std::vector<double> z = expected;
+    z[kFill] = 0.0;
+    info.complete_z(z.data(), 0);
+    for (int64_t i = 0; i < kSvec; ++i) EXPECT_NEAR(z[i], expected[i], 1e-14) << "svec row " << i;
+}
+
+// Z = 1 1^T has a singular separator block [[1, 1], [1, 1]], whose second
+// Cholesky pivot is exactly 0, so this takes the pseudoinverse path. The only
+// PSD completion has Z[2,3] = 1.
+TEST_F(CompleteZTest, SingularSeparatorBlock) {
+    auto info = analyze_k4_minus_edge();
+    ASSERT_TRUE(info.is_decomposed());
+
+    std::vector<double> expected = svec(std::vector<double>(kDim * kDim, 1.0));
+    std::vector<double> z = expected;
+    z[kFill] = 0.0;
+    info.complete_z(z.data(), 0);
+    for (int64_t i = 0; i < kSvec; ++i) EXPECT_NEAR(z[i], expected[i], 1e-14) << "svec row " << i;
+}
+
+// A separator block with eigenvalues 3 and -1 has no PSD completion.
+TEST_F(CompleteZTest, IndefiniteSeparatorBlockThrows) {
+    auto info = analyze_k4_minus_edge();
+    ASSERT_TRUE(info.is_decomposed());
+
+    std::vector<double> M = {1.0, 2.0, 0.5, 0.3,
+                             2.0, 1.0, 0.2, -0.4,
+                             0.5, 0.2, 1.0, 0.0,
+                             0.3, -0.4, 0.0, 1.0};
+    std::vector<double> z = svec(M);
+    EXPECT_THROW(info.complete_z(z.data(), 0), std::runtime_error);
+}
+
 // Non-PSD cones should pass through unchanged
 TEST_F(ChordalTest, NonPsdConesUnchanged) {
     // 2 nonneg + PSD(3) = m = 2 + 6 = 8
