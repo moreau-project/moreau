@@ -205,6 +205,62 @@ class TestCones:
         assert cones.total_constraints() == 6  # 2 * 3
 
 
+def _box_qp(n):
+    """min 0.5||x||^2 - 10 * sum(x)  s.t.  x <= 1.  Optimum x = 1, all n bounds active.
+
+    Active-set adds one constraint per iteration, so it needs at least n iterations.
+    """
+    P = sparse.eye(n, format="csr")
+    q = -10.0 * np.ones(n)
+    A = sparse.eye(n, format="csr")
+    b = np.ones(n)
+    return P, q, A, b, moreau.Cones(num_nonneg_cones=n)
+
+
+class TestActiveSetIterationLimit:
+    """Regression for #45: the IPM's max_iter default (200) capped active-set."""
+
+    N = 300  # more active constraints than the IPM default max_iter
+
+    def _solve(self, **settings_kwargs):
+        P, q, A, b, cones = _box_qp(self.N)
+        settings = moreau.Settings(device="cpu", verbose=False, **settings_kwargs)
+        solver = moreau.Solver(P, q, A, b, cones, settings)
+        solution = solver.solve()
+        assert solver._settings.solver == moreau.SolverType.ACTIVE_SET
+        return solver, solution
+
+    def test_default_settings_are_not_capped_at_ipm_max_iter(self):
+        solver, solution = self._solve()
+        assert solver.info.status == moreau.SolverStatus.Solved
+        assert solver.info.iterations > 200
+        np.testing.assert_allclose(solution.x, np.ones(self.N), atol=1e-8)
+
+    def test_auto_selection_is_not_capped_at_ipm_max_iter(self):
+        solver, _ = self._solve(solver="auto")
+        assert solver.info.status == moreau.SolverStatus.Solved
+
+    def test_max_iter_does_not_limit_active_set(self):
+        # Settings.max_iter is the IPM's limit only.
+        solver, _ = self._solve(solver="active_set", max_iter=50)
+        assert solver.info.status == moreau.SolverStatus.Solved
+        assert solver.info.iterations > 50
+
+    def test_iter_limit_limits_active_set(self):
+        solver, _ = self._solve(
+            solver="active_set",
+            max_iter=1000,
+            active_set_settings=moreau.ActiveSetSettings(iter_limit=50),
+        )
+        assert solver.info.status == moreau.SolverStatus.MaxIterations
+        assert solver.info.iterations <= 50
+
+    def test_default_active_set_settings_object_uses_active_set_default(self):
+        solver, _ = self._solve(solver="active_set", active_set_settings=moreau.ActiveSetSettings())
+        assert solver.info.status == moreau.SolverStatus.Solved
+        assert solver.info.iterations > 200
+
+
 class TestSolverNumpy:
     """Tests for unified numpy Solver (matrix-based interface)."""
 
