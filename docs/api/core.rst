@@ -316,7 +316,7 @@ Settings
 
    Solver configuration.
 
-   :param solver: Solver algorithm. ``'auto'`` (default) picks the active-set solver for small QPs and IPM otherwise. Other options: ``'ipm'`` or ``'active_set'`` (CPU only, zero+nonneg cones).
+   :param solver: Solver algorithm. ``'auto'`` (default) uses the IPM. Other options: ``'ipm'`` or ``'active_set'`` (opt-in; CPU only, zero+nonneg cones).
    :param device: Device selection (``'auto'``, ``'cpu'``, ``'cuda'``)
    :param device_id: CUDA device ID. ``-1`` (default) uses the current device. Ignored when ``device='cpu'``.
    :param batch_size: Batch size for CompiledSolver (default 1)
