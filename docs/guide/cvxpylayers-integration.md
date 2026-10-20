@@ -129,14 +129,16 @@ print(f"dL/db: {b_val.grad}")
 
 ### Batched Forward Pass
 
-cvxpylayers supports batched parameters — add a leading batch dimension:
+cvxpylayers supports batched parameters — add a leading batch dimension. The
+layer above has two parameters, so pass a batch for each:
 
 ```python
 batch_size = 32
 q_batch = torch.randn(batch_size, n, dtype=torch.float64, requires_grad=True)
+b_batch = torch.ones(batch_size, 1, dtype=torch.float64)
 
 # Each problem in the batch gets a different q
-x_batch, = layer(q_batch)
+x_batch, = layer(q_batch, b_batch)
 print(x_batch.shape)  # (32, 5)
 
 loss = x_batch.sum()
