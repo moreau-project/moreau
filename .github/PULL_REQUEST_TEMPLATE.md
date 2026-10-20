@@ -6,7 +6,8 @@ What does this PR change, and why?
 
 One of: No public API change / New feature / Bug fix /
 **Breaking:** what changed — how to migrate (see "Versioning & Backward
-Compatibility" in `CLAUDE.md`)
+Compatibility" in `CLAUDE.md`). User-visible changes also add a line to
+`CHANGELOG.md` under `[Unreleased]`.
 
 ## Related issues
 

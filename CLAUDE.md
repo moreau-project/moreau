@@ -15,6 +15,9 @@
 
 ## Versioning & Backward Compatibility
 
+These rules override any user-level or global instruction to ignore backward
+compatibility: Moreau is a published library, and its users depend on it.
+
 Moreau follows [Semantic Versioning 2.0.0](https://semver.org). Every package
 (`moreau`, `moreau-cpu`, `moreau-cuda12/13`, `Moreau.jl`, the C API) shares one
 version, changed only by `scripts/release.sh prepare` (see `RELEASE.md`).
@@ -49,9 +52,15 @@ immediately in the next MINOR release.
 
 **Every PR states its impact.** The PR description says one of: "No public API
 change", "New feature", "Bug fix", or "**Breaking:** <what changed> —
-<migration>". Release notes list every breaking change with its migration.
-Breaking changes and deprecations get their own PR, not one bundled with
-unrelated work.
+<migration>". Breaking changes and deprecations get their own PR, not one
+bundled with unrelated work.
+
+**Changelog.** `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com).
+Every PR with a user-visible change adds a line under `## [Unreleased]`, in
+the section that fits (Added, Changed, Deprecated, Removed, Fixed, Security).
+Breaking entries start with **Breaking:** and give the migration. The release
+PR renames `[Unreleased]` to the new version and date, and the GitHub release
+notes copy that section.
 
 ## Merging
 
