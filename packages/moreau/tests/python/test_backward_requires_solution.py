@@ -230,7 +230,10 @@ class TestJax:
         solver = self._solver(solver_type)
         P, A, q = jnp.asarray(P_VALS), jnp.asarray(A_VALS), jnp.asarray(Q)
         with pytest.raises(Exception, match=MATCH):
-            jax_x64.grad(lambda b: solver.solve(P, A, q, b).x.sum())(jnp.asarray(B_INFEAS))
+            # Block: on a GPU backend the callback's error surfaces only on materialization.
+            jax_x64.block_until_ready(
+                jax_x64.grad(lambda b: solver.solve(P, A, q, b).x.sum())(jnp.asarray(B_INFEAS))
+            )
 
     def test_vmap_used_failure_raises(self, jax_x64, solver_type):
         jnp = jax_x64.numpy
@@ -239,7 +242,9 @@ class TestJax:
         qs = jnp.zeros((2, N))
         bs = jnp.asarray(np.stack([B_FEAS, B_INFEAS]))
         with pytest.raises(Exception, match=MATCH):
-            jax_x64.grad(lambda b: jax_x64.vmap(solver.solve)(qs, b).x.sum())(bs)
+            jax_x64.block_until_ready(
+                jax_x64.grad(lambda b: jax_x64.vmap(solver.solve)(qs, b).x.sum())(bs)
+            )
 
     def test_vmap_masked_failure_passes(self, jax_x64, solver_type):
         jnp = jax_x64.numpy
