@@ -10,6 +10,66 @@
 6. **Prefer C++/Rust tests during active development**: Use C++ (CUDA) and Rust (CPU) tests for verifying correctness — they compile and run faster than the Python round-trip. Use Python tests for integration/API-level validation.
 7. **Keep STATE.md, README.md, and docs/ current**: When adding or changing features, update `STATE.md` (project map and architecture), `README.md`, and `docs/` in the same PR. `STATE.md` is the source of truth for codebase layout — if you add files, move modules, or change architecture, reflect it there.
 8. **Always run `git status` first**: Before starting work, run `git status` to know the current branch, uncommitted changes, and working state. Do not assume branch context.
+9. **Never break the public API without a version bump and a deprecation**: follow the rules below.
+10. **Never merge your own work**: follow the merging rules below.
+
+## Versioning & Backward Compatibility
+
+Moreau follows [Semantic Versioning 2.0.0](https://semver.org). Every package
+(`moreau`, `moreau-cpu`, `moreau-cuda12/13`, `Moreau.jl`, the C API) shares one
+version, changed only by `scripts/release.sh prepare` (see `RELEASE.md`).
+
+**Public API**: everything a user can reach without a leading underscore:
+names exported from `moreau`, `moreau.torch` and `moreau.jax`; `Settings`,
+`IPMSettings` and `ActiveSetSettings` fields and their **defaults**;
+`SolverStatus` values; solution/info fields, shapes and dtypes; `backward()`
+keys; `include/moreau.h`; `Moreau.jl` and its MOI options. `_`-prefixed names
+are private and may change in any release.
+
+**Breaking change**: removing or renaming public API, changing a default
+(including which solver or method `'auto'` picks), changing a return type,
+shape or key, newly rejecting input that used to be accepted, or raising a
+minimum supported Python, JAX, torch, CUDA or Julia version.
+
+| Release | While 0.x (`0.MINOR.PATCH`) | From 1.0 (`MAJOR.MINOR.PATCH`) |
+|---|---|---|
+| PATCH | Bug fixes only. No public API or default changes. | Same |
+| MINOR | New features **and** breaking changes | New backward-compatible features |
+| MAJOR | — | Breaking changes |
+
+Exception: a fix that stops returning a **wrong result** (for example, raising
+on NaN input instead of returning `Solved`) may ship in a PATCH, even though
+it rejects input that used to be accepted.
+
+**Deprecation before removal.** A public API is removed only after at least one
+released MINOR version in which using it emits a `DeprecationWarning` (Python)
+or `Base.depwarn` (Julia). The warning names the replacement and the version
+that removes it. Exception: an API that returns wrong results may raise
+immediately in the next MINOR release.
+
+**Every PR states its impact.** The PR description says one of: "No public API
+change", "New feature", "Bug fix", or "**Breaking:** <what changed> —
+<migration>". Release notes list every breaking change with its migration.
+Breaking changes and deprecations get their own PR, not one bundled with
+unrelated work.
+
+## Merging
+
+- All changes reach `main` through a pull request; never push to `main`
+  directly or force-push it.
+- A PR merges only when all of these hold:
+  - it is not a draft;
+  - every CI check is green, including the GPU job (CI DGX Spark);
+  - it has at least one approving review from a maintainer other than the author;
+  - no review thread is unresolved;
+  - the branch is up to date with `main`.
+- Claude never merges, approves, or enables auto-merge on a PR; a human does.
+- Merge with a merge commit (the repository's convention). Before review, keep
+  the branch as one or a few self-contained commits. After review starts, add
+  commits rather than rewrite history; if a rebase is unavoidable, use
+  `git push --force-with-lease` and say so on the PR.
+- Merge a fix and its regression test in the same PR. Merge stacked or dependent
+  PRs in order, and rerun CI on the later ones after each merge.
 
 ## Project Overview
 
