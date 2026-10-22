@@ -161,7 +161,7 @@ TEST_F(PsdForwardTest, ShiftOfZeroIgnoresStaleEigWorkspace) {
 
     BatchedVector& z = solver.variables.z;
     z.setToConstant(0.0);
-    c.psd_shift_to_interior(z, static_cast<double>(c.degree()));
+    c.fused_margins_and_shift(z, /*is_primal_cone=*/false, static_cast<double>(c.degree()));
 
     std::vector<double> z_h(m);
     ASSERT_EQ(cudaMemcpy(z_h.data(), z.data(), sizeof(double) * m, cudaMemcpyDeviceToHost),
@@ -192,7 +192,6 @@ TEST_F(PsdForwardTest, StartShiftUsesMarginsOfAllCones) {
     ASSERT_EQ(cudaMemcpy(z.data(), z0.data(), sizeof(double) * m, cudaMemcpyHostToDevice),
               cudaSuccess);
     c.fused_margins_and_shift(z, /*is_primal_cone=*/false, static_cast<double>(c.degree()));
-    if (c.numPsdCones > 0) c.psd_shift_to_interior(z, static_cast<double>(c.degree()));
 
     std::vector<double> z_h(m);
     ASSERT_EQ(cudaMemcpy(z_h.data(), z.data(), sizeof(double) * m, cudaMemcpyDeviceToHost),
