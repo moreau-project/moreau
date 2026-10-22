@@ -24,6 +24,7 @@ python/moreau/
 ├── _types.py          # Cones, Settings, IPMSettings, ActiveSetSettings,
 │                      # Solution, BatchedSolution, WarmStart, BatchedWarmStart
 ├── _validation.py     # Input shape/dtype/sparsity validation
+├── _jax_config.py     # Explicit 64-bit policy shared by CPU/CUDA JAX
 ├── testing.py         # Public test helpers
 ├── torch/             # torch.Solver — PyTorch autograd + torch.compile
 │   ├── __init__.py    # Solver API, eager/compiled dispatch

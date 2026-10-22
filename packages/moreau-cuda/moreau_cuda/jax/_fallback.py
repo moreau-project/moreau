@@ -10,6 +10,7 @@ import jax.numpy as jnp
 from jax import custom_vjp
 
 from moreau._types import JaxSolution, JaxSolveInfo
+from moreau._jax_config import _pure_callback
 
 from ._solver import _SOLVER_REGISTRY
 
@@ -28,6 +29,8 @@ def _solve_fallback_callback(
     warm_z: Optional[np.ndarray] = None,
     warm_s: Optional[np.ndarray] = None,
     warm_z_x: Optional[np.ndarray] = None,
+    *,
+    result_dtype: np.dtype,
 ) -> Tuple[np.ndarray, ...]:
     """Callback function for pure_callback fallback.
 
@@ -64,11 +67,11 @@ def _solve_fallback_callback(
     cuda_solver = solver_wrapper._get_or_create_cuda_solver(batch_size, enable_grad=True)
 
     if warm_x is not None:
-        warm_x = np.ascontiguousarray(warm_x.reshape(batch_size, -1))
-        warm_z = np.ascontiguousarray(warm_z.reshape(batch_size, -1))
-        warm_s = np.ascontiguousarray(warm_s.reshape(batch_size, -1))
+        warm_x = np.ascontiguousarray(warm_x.reshape(batch_size, -1), dtype=np.float64)
+        warm_z = np.ascontiguousarray(warm_z.reshape(batch_size, -1), dtype=np.float64)
+        warm_s = np.ascontiguousarray(warm_s.reshape(batch_size, -1), dtype=np.float64)
         if warm_z_x is not None:
-            warm_z_x = np.ascontiguousarray(warm_z_x.reshape(batch_size, -1))
+            warm_z_x = np.ascontiguousarray(warm_z_x.reshape(batch_size, -1), dtype=np.float64)
         result = cuda_solver.solve_warm_start(
             P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x
         )
@@ -119,7 +122,21 @@ def _solve_fallback_callback(
         setup_time = setup_time[0]
         construction_time = construction_time[0]
 
-    return (x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time)
+    return tuple(
+        np.asarray(v, dtype=result_dtype)
+        for v in (
+            x,
+            z,
+            s,
+            z_x,
+            status,
+            obj_val,
+            iterations,
+            solve_time,
+            setup_time,
+            construction_time,
+        )
+    )
 
 
 def _backward_fallback_callback(
@@ -139,6 +156,7 @@ def _backward_fallback_callback(
     """Callback function for backward pass fallback."""
     solver_wrapper = _SOLVER_REGISTRY[solver_id]
 
+    input_dtypes = tuple(v.dtype for v in (P_data, A_data, q, b))
     dx = np.asarray(dx, dtype=np.float64)
     dz = np.asarray(dz, dtype=np.float64)
     ds = np.asarray(ds, dtype=np.float64)
@@ -187,7 +205,7 @@ def _backward_fallback_callback(
         dq = dq.squeeze(0) if dq.ndim > 1 else dq
         db = db.squeeze(0) if db.ndim > 1 else db
 
-    return dP, dA, dq, db
+    return tuple(np.asarray(v, dtype=dtype) for v, dtype in zip((dP, dA, dq, db), input_dtypes))
 
 
 @partial(custom_vjp, nondiff_argnums=(0,))
@@ -211,13 +229,15 @@ def _solve_fallback(
     n, m = solver_wrapper._n, solver_wrapper._m
     total_xn = solver_wrapper._total_xn
 
+    dtype = jnp.result_type(P_data, A_data, q, b, jnp.float32)
+
     if q.ndim == 1:
-        x_shape = jax.ShapeDtypeStruct((n,), jnp.float64)
-        z_shape = jax.ShapeDtypeStruct((m,), jnp.float64)
-        s_shape = jax.ShapeDtypeStruct((m,), jnp.float64)
-        z_x_shape = jax.ShapeDtypeStruct((total_xn,), jnp.float64)
+        x_shape = jax.ShapeDtypeStruct((n,), dtype)
+        z_shape = jax.ShapeDtypeStruct((m,), dtype)
+        s_shape = jax.ShapeDtypeStruct((m,), dtype)
+        z_x_shape = jax.ShapeDtypeStruct((total_xn,), dtype)
         # Scalars for unbatched
-        scalar_shape = jax.ShapeDtypeStruct((), jnp.float64)
+        scalar_shape = jax.ShapeDtypeStruct((), dtype)
         status_shape = scalar_shape
         obj_val_shape = scalar_shape
         iterations_shape = scalar_shape
@@ -226,21 +246,21 @@ def _solve_fallback(
         construction_time_shape = scalar_shape
     else:
         batch_size = q.shape[0]
-        x_shape = jax.ShapeDtypeStruct((batch_size, n), jnp.float64)
-        z_shape = jax.ShapeDtypeStruct((batch_size, m), jnp.float64)
-        s_shape = jax.ShapeDtypeStruct((batch_size, m), jnp.float64)
-        z_x_shape = jax.ShapeDtypeStruct((batch_size, total_xn), jnp.float64)
+        x_shape = jax.ShapeDtypeStruct((batch_size, n), dtype)
+        z_shape = jax.ShapeDtypeStruct((batch_size, m), dtype)
+        s_shape = jax.ShapeDtypeStruct((batch_size, m), dtype)
+        z_x_shape = jax.ShapeDtypeStruct((batch_size, total_xn), dtype)
         # Per-batch scalars
-        status_shape = jax.ShapeDtypeStruct((batch_size,), jnp.float64)
-        obj_val_shape = jax.ShapeDtypeStruct((batch_size,), jnp.float64)
-        iterations_shape = jax.ShapeDtypeStruct((batch_size,), jnp.float64)
-        solve_time_shape = jax.ShapeDtypeStruct((batch_size,), jnp.float64)
-        setup_time_shape = jax.ShapeDtypeStruct((batch_size,), jnp.float64)
-        construction_time_shape = jax.ShapeDtypeStruct((batch_size,), jnp.float64)
+        status_shape = jax.ShapeDtypeStruct((batch_size,), dtype)
+        obj_val_shape = jax.ShapeDtypeStruct((batch_size,), dtype)
+        iterations_shape = jax.ShapeDtypeStruct((batch_size,), dtype)
+        solve_time_shape = jax.ShapeDtypeStruct((batch_size,), dtype)
+        setup_time_shape = jax.ShapeDtypeStruct((batch_size,), dtype)
+        construction_time_shape = jax.ShapeDtypeStruct((batch_size,), dtype)
 
     x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time = (
-        jax.pure_callback(
-            partial(_solve_fallback_callback, solver_id),
+        _pure_callback(
+            partial(_solve_fallback_callback, solver_id, result_dtype=dtype),
             (
                 x_shape,
                 z_shape,
@@ -326,18 +346,18 @@ def _solve_fallback_bwd(solver_id: int, residuals, g):
     nnzP, nnzA = solver_wrapper._nnzP, solver_wrapper._nnzA
 
     if dx.ndim == 1:
-        dP_shape = jax.ShapeDtypeStruct((nnzP,), jnp.float64)
-        dA_shape = jax.ShapeDtypeStruct((nnzA,), jnp.float64)
-        dq_shape = jax.ShapeDtypeStruct((n,), jnp.float64)
-        db_shape = jax.ShapeDtypeStruct((m,), jnp.float64)
+        dP_shape = jax.ShapeDtypeStruct((nnzP,), P_data.dtype)
+        dA_shape = jax.ShapeDtypeStruct((nnzA,), A_data.dtype)
+        dq_shape = jax.ShapeDtypeStruct((n,), q.dtype)
+        db_shape = jax.ShapeDtypeStruct((m,), b.dtype)
     else:
         batch_size = dx.shape[0]
-        dP_shape = jax.ShapeDtypeStruct((batch_size, nnzP), jnp.float64)
-        dA_shape = jax.ShapeDtypeStruct((batch_size, nnzA), jnp.float64)
-        dq_shape = jax.ShapeDtypeStruct((batch_size, n), jnp.float64)
-        db_shape = jax.ShapeDtypeStruct((batch_size, m), jnp.float64)
+        dP_shape = jax.ShapeDtypeStruct((batch_size, nnzP), P_data.dtype)
+        dA_shape = jax.ShapeDtypeStruct((batch_size, nnzA), A_data.dtype)
+        dq_shape = jax.ShapeDtypeStruct((batch_size, n), q.dtype)
+        db_shape = jax.ShapeDtypeStruct((batch_size, m), b.dtype)
 
-    dP, dA, dq, db = jax.pure_callback(
+    dP, dA, dq, db = _pure_callback(
         partial(_backward_fallback_callback, solver_id),
         (dP_shape, dA_shape, dq_shape, db_shape),
         dx,
@@ -390,7 +410,7 @@ def _solve_fallback_with_solution(
         iterations=iterations,
         solve_time=solve_time,
         setup_time=setup_time,
-        construction_time=jnp.asarray(wrapper_construction_time, dtype=jnp.float64),
+        construction_time=jnp.asarray(wrapper_construction_time, dtype=x.dtype),
     )
     return solution, info
 
@@ -427,6 +447,6 @@ def _solve_fallback_warm_with_solution(
         iterations=iterations,
         solve_time=solve_time,
         setup_time=setup_time,
-        construction_time=jnp.asarray(wrapper_construction_time, dtype=jnp.float64),
+        construction_time=jnp.asarray(wrapper_construction_time, dtype=x.dtype),
     )
     return solution, info
