@@ -187,8 +187,7 @@ class Solver:
         batch_size = settings.batch_size
         enable_grad = settings.enable_grad
 
-        # Resolve 'auto' to best device with torch support FIRST,
-        # so active-set auto-select can see the actual target device
+        # Resolve 'auto' to the best device with torch support.
         if device == "auto":
             device = "cpu"
             for dev in [default_device()]:
@@ -196,11 +195,10 @@ class Solver:
                     device = dev
                     break
 
-        # Now resolve solver='auto' with the actual device known
+        # Resolve solver='auto' (active-set forces device='cpu')
         from moreau import _resolve_solver_type
 
-        nnz_P = len(P_col_indices)
-        settings, device = _resolve_solver_type(settings, n, m, cones, device, nnz_P=nnz_P)
+        settings, device = _resolve_solver_type(settings, device)
 
         # Validate device availability before doing any tensor .to(device) calls,
         # which would otherwise raise inscrutable PyTorch internals errors (e.g.

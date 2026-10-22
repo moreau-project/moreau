@@ -8,9 +8,14 @@
  * - Block-diagonal PSD cones ARE decomposed into smaller cliques
  * - Augmentation structure is correct (dimensions, nnz)
  * - Reverse mapping correctly reconstructs original-dimension solution
+ * - Each clique merge method gives the CPU backend's cliques
  */
 
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <memory>
+#include <stdexcept>
+#include <string>
 #include <vector>
 #include <cmath>
 #include <numeric>
@@ -67,7 +72,8 @@ TEST_F(ChordalTest, DensePsdNoDecomposition) {
     auto info = ChordalInfo::analyze(
         A_colptr.data(), A_rowind.data(), n, m,
         psd_dims.data(), 1,
-        0, 0, 0, 0, 0  // no other cones
+        0, 0, 0, 0, 0,  // no other cones
+        "clique_graph"
     );
 
     EXPECT_FALSE(info.is_decomposed()) << "Dense PSD should not be decomposed";
@@ -104,6 +110,7 @@ TEST_F(ChordalTest, BlockDiagonalDecomposition) {
         A_colptr.data(), A_rowind.data(), n, m,
         psd_dims.data(), 1,
         0, 0, 0, 0, 0,
+        "clique_graph",
         b_mask.get()
     );
 
@@ -146,6 +153,7 @@ TEST_F(ChordalTest, MixedConeOrderKeepsPsdBeforeExpAndPower) {
         A_colptr.data(), A_rowind.data(), n, m,
         psd_dims.data(), 1,
         1, 1, 3, 1, 1,
+        "clique_graph",
         b_mask.get()
     );
     ASSERT_TRUE(info.is_decomposed());
@@ -190,7 +198,8 @@ TEST_F(ChordalTest, NonPsdConesUnchanged) {
     auto info = ChordalInfo::analyze(
         A_colptr.data(), A_rowind.data(), n, m,
         psd_dims.data(), 1,
-        0, 2, 0, 0, 0  // 2 nonneg cones
+        0, 2, 0, 0, 0,  // 2 nonneg cones
+        "clique_graph"
     );
 
     // Dense PSD with all rows active → no decomposition
@@ -258,4 +267,92 @@ TEST_F(SuperNodeTreeTest, ConstructFromLDL) {
 
     EXPECT_GT(tree.n_cliques, 0);
     std::cout << "Chain graph: n_cliques=" << tree.n_cliques << std::endl;
+}
+
+// ============================================================================
+// Clique merging
+// ============================================================================
+
+// Strictly lower CSC pattern of the Cholesky factor of an n×n banded matrix
+// with the given bandwidth, in natural order (no fill).
+void banded_L(int64_t n, int64_t bandwidth,
+              std::vector<int64_t>& colptr, std::vector<int64_t>& rowind) {
+    colptr.assign(1, 0);
+    rowind.clear();
+    for (int64_t j = 0; j < n; ++j) {
+        for (int64_t i = j + 1; i <= std::min(j + bandwidth, n - 1); ++i) rowind.push_back(i);
+        colptr.push_back(rowind.size());
+    }
+}
+
+// The cliques (supernode plus separator) of a merged tree, each sorted, in
+// lexicographic order.
+std::vector<std::vector<int64_t>> cliques_of(const SuperNodeTree& tree) {
+    std::vector<std::vector<int64_t>> out;
+    for (int64_t i = 0; i < tree.n_cliques; ++i) {
+        int64_t c = tree.get_post_order(i);
+        std::vector<int64_t> clique(tree.snode[c].begin(), tree.snode[c].end());
+        clique.insert(clique.end(), tree.separators[c].begin(), tree.separators[c].end());
+        std::sort(clique.begin(), clique.end());
+        out.push_back(clique);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+// Analyze a PSD(dim) cone whose only nonzeros are the diagonal and first
+// superdiagonal, as in #83's example.
+ChordalInfo analyze_tridiagonal_psd(int64_t dim, const std::string& merge_method) {
+    // svec is the column-major upper triangle: (i, j), i <= j, is j(j+1)/2 + i
+    std::vector<int64_t> rows;
+    for (int64_t j = 0; j < dim; ++j) {
+        if (j > 0) rows.push_back(j * (j + 1) / 2 + j - 1);
+        rows.push_back(j * (j + 1) / 2 + j);
+    }
+    int64_t n = rows.size(), m = dim * (dim + 1) / 2;
+    std::vector<int64_t> A_colptr(n + 1);
+    std::iota(A_colptr.begin(), A_colptr.end(), 0);
+    std::unique_ptr<bool[]> b_mask(new bool[m]());
+    std::vector<int64_t> psd_dims = {dim};
+    return ChordalInfo::analyze(A_colptr.data(), rows.data(), n, m, psd_dims.data(), 1,
+                                0, 0, 0, 0, 0, merge_method, b_mask.get());
+}
+
+class MergeMethodTest : public ::testing::Test {};
+
+// #83: on a tridiagonal PSD(8) the CPU gives 7 cones of size 2 with
+// clique_graph and none, and merges everything with parent_child.
+TEST_F(MergeMethodTest, TridiagonalPsd8) {
+    for (const std::string method : {"clique_graph", "none"}) {
+        auto info = analyze_tridiagonal_psd(8, method);
+        ASSERT_TRUE(info.is_decomposed()) << method;
+        EXPECT_EQ(info.decomposed_psd_dims, std::vector<int64_t>(7, 2)) << method;
+    }
+    auto info = analyze_tridiagonal_psd(8, "parent_child");
+    EXPECT_FALSE(info.is_decomposed());
+}
+
+TEST_F(MergeMethodTest, UnknownMethodThrows) {
+    EXPECT_THROW(analyze_tridiagonal_psd(8, "parent-child"), std::invalid_argument);
+}
+
+// Bandwidth 4 on 7 vertices gives the cliques {0..4}, {1..5}, {2..6} in a
+// path. Both clique-graph edges weigh 34, and the CPU (Rust's max_by_key
+// takes the last maximum) merges the last two.
+TEST_F(MergeMethodTest, CliqueGraphTieBreak) {
+    std::vector<int64_t> colptr, rowind;
+    banded_L(7, 4, colptr, rowind);
+    using Cliques = std::vector<std::vector<int64_t>>;
+
+    SuperNodeTree none(colptr.data(), rowind.data(), 7);
+    merge_cliques(none, "none");
+    EXPECT_EQ(cliques_of(none), (Cliques{{0, 1, 2, 3, 4}, {1, 2, 3, 4, 5}, {2, 3, 4, 5, 6}}));
+
+    SuperNodeTree clique_graph(colptr.data(), rowind.data(), 7);
+    merge_cliques(clique_graph, "clique_graph");
+    EXPECT_EQ(cliques_of(clique_graph), (Cliques{{0, 1, 2, 3, 4}, {1, 2, 3, 4, 5, 6}}));
+
+    SuperNodeTree parent_child(colptr.data(), rowind.data(), 7);
+    merge_cliques(parent_child, "parent_child");
+    EXPECT_EQ(cliques_of(parent_child), (Cliques{{0, 1, 2, 3, 4, 5, 6}}));
 }

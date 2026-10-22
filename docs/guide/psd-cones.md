@@ -143,14 +143,18 @@ Chordal decomposition is fully automatic in both `Solver` and
 exploitable sparsity from the constraint matrix structure.
 
 The clique merge strategy is controlled by
-`IPMSettings.chordal_decomposition_merge_method` (default `'clique_graph'`;
-also accepts `'parent_child'` and `'none'`).
+`IPMSettings.chordal_decomposition_merge_method`, which both backends honor:
 
-CPU honors this setting today. CUDA currently hardcodes a fill_in==0
-parent-child variant regardless of the setting — so a sparse PSD problem
-may decompose differently on CPU than CUDA at present. The setting field
-exists on `_CudaSettings` as forward-compatibility scaffolding while the
-CUDA chordal path is wired through to honor it (tracked in #176).
+- `'clique_graph'` (default): merge neighboring cliques while that lowers
+  the cubic cost estimate of Garstka et al. (2019)
+- `'parent_child'`: merge a supernode into its parent when the fill is at
+  most 8 or both supernodes have at most 8 vertices
+- `'none'`: keep the cliques of the chordal extension as they are
+
+The backends order the PSD cone's sparsity graph differently before finding
+cliques (the CPU uses AMD, CUDA its own minimum-degree ordering), so a
+sparse PSD problem can still decompose into different cliques on CPU and
+CUDA. Both are exact reformulations of the same problem.
 :::
 
 ---
@@ -230,8 +234,7 @@ solver = Solver(
     A_row_offsets=A_ro, A_col_indices=A_ci,
     cones=moreau.Cones(psd_dims=[3]),
 )
-solver.setup(P_values_tensor, A_values_tensor)
-solution = solver.solve(q_tensor, b_tensor)
+solution = solver.solve(P_values_tensor, A_values_tensor, q_tensor, b_tensor)
 solution.x.sum().backward()  # gradients flow through PSD projection
 ```
 

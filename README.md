@@ -72,8 +72,8 @@ print(solver.info.status)  # SolverStatus.Solved
 print(solver.info.obj_val) # objective value
 ```
 
-> On the GPU backend, `P` must be a **full symmetric** matrix (both triangles),
-> not just the upper triangle. The CPU backend accepts either.
+> `P` must be a **full symmetric** matrix (both triangles), not just the upper
+> triangle, on every backend.
 
 ## Differentiable optimization
 

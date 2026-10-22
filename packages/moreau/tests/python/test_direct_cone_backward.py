@@ -488,3 +488,59 @@ def test_cuda_jax_fallback_duals_and_gradients(monkeypatch, direct, batched):
     warm_grad = jax.jit(jax.grad(lambda q: warm_solve(q, *warm_args).z_x.sum()))(q)
     expected_warm_grad = jnp.array([0.0, 1.0 if direct else 0.0, 0.0])
     np.testing.assert_allclose(warm_grad, jnp.broadcast_to(expected_warm_grad, q.shape), atol=1e-6)
+
+
+@pytest.mark.parametrize("ffi", [True, False])
+@pytest.mark.parametrize("direct", [False, True])
+@pytest.mark.parametrize("batched", [False, True])
+def test_cuda_jax_solve_warm_without_z_x(monkeypatch, ffi, direct, batched):
+    """solve_warm takes seven arguments on both routes, with zeros for warm_z_x (#91).
+
+    cvxpylayers calls it this way, as its docstring describes.
+    """
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    cuda_solver = pytest.importorskip("moreau_cuda.jax._solver")
+    if not moreau.device_available("cuda"):
+        pytest.skip("CUDA not available")
+    if ffi and not cuda_solver.ffi_available():
+        pytest.skip("JAX FFI not available")
+    from moreau.jax import Solver
+
+    jax.config.update("jax_enable_x64", True)
+    if not ffi:
+        monkeypatch.setattr(cuda_solver, "_get_ffi_lib", lambda: None)
+        monkeypatch.setattr(cuda_solver, "ffi_available", lambda: False)
+    cones = moreau.Cones(
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[0, 1, 2])] if direct else []
+    )
+    solver = Solver(
+        n=3,
+        m=0,
+        P_row_offsets=[0, 1, 2, 3],
+        P_col_indices=[0, 1, 2],
+        A_row_offsets=[0],
+        A_col_indices=[],
+        cones=cones,
+        settings=moreau.Settings(device="cuda", solver="ipm", enable_grad=True),
+    )
+    assert solver._impl._use_ffi == ffi
+    P = jnp.array([2.0, 3.0, 4.0])
+    A = b = jnp.empty(0)
+    q = jnp.array([-3.0, 2.0, -1.0])
+    solve = lambda q: solver.solve(P, A, q, b)
+    warm_solve = lambda q, x, z, s: solver._impl.solve_warm(P, A, q, b, x, z, s)[0]
+    if batched:
+        q = jnp.stack([q, 2 * q])
+        solve, warm_solve = jax.vmap(solve), jax.vmap(warm_solve)
+    solution = jax.jit(solve)(q)
+
+    warm_args = (solution.x, solution.z, solution.s)
+    warmed = jax.jit(warm_solve)(q, *warm_args)
+    expected_x = jnp.maximum(-q / P, 0) if direct else -q / P
+    np.testing.assert_allclose(warmed.x, expected_x, atol=1e-7)
+    assert warmed.z_x.shape == q.shape[:-1] + ((3,) if direct else (0,))
+    np.testing.assert_allclose(warmed.z_x, solution.z_x, atol=1e-7)
+    grad = jax.jit(jax.grad(lambda q: warm_solve(q, *warm_args).x.sum()))(q)
+    expected_grad = jnp.array([-0.5, 0.0 if direct else -1.0 / 3, -0.25])
+    np.testing.assert_allclose(grad, jnp.broadcast_to(expected_grad, q.shape), atol=1e-6)

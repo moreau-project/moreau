@@ -32,12 +32,12 @@ The `solver` parameter controls which algorithm is used:
 
 | Solver | Cones | Device | Best For |
 |--------|-------|--------|----------|
-| `'auto'` | any | auto | Default — picks best solver for the problem |
+| `'auto'` | all | CPU / CUDA | Default — same as `'ipm'` |
 | `'ipm'` | all | CPU / CUDA | General conic problems, high accuracy |
 | `'active_set'` | zero + nonneg only | CPU | Small QPs, very fast forward/backward |
 
 ```python
-# Auto-select (default): uses active-set for small QPs, IPM otherwise
+# Default: the IPM
 settings = moreau.Settings(solver='auto')
 
 # Force IPM (interior-point method)
@@ -47,28 +47,9 @@ settings = moreau.Settings(solver='ipm')
 settings = moreau.Settings(solver='active_set')
 ```
 
-When `solver='auto'`, the active-set solver is selected for problems with:
-- Only zero and nonneg cones (pure QPs/LPs)
-- n <= 500 variables
-- m <= max(500, 2n) constraints
-
-Otherwise the IPM solver is used.
-
-!!! warning "Auto + gradients: gradient quality changes at the threshold"
-    Active-set produces non-smooth (combinatorial) derivatives. When
-    `solver='auto'` picks active-set, gradient quality changes
-    discontinuously the moment a problem grows past the n=500 /
-    m=max(500, 2n) threshold (above which auto picks IPM, with smooth
-    gradients). For ML training loops where problem size varies along a
-    sweep, that's a silent footgun: bumping `n` from 499 to 501 invisibly
-    switches you between non-smooth active-set gradients and smooth IPM
-    gradients, changing outer-loop convergence behaviour.
-
-    When `solver='auto'` resolves to active-set on a problem with
-    `enable_grad=True`, Moreau emits a one-time `UserWarning` naming the
-    cliff and the workaround. For smooth gradients regardless of size, pass
-    `solver='ipm'` explicitly. If you've already chosen
-    `solver='active_set'` deliberately, the warning won't fire.
+`solver='auto'` always uses the IPM. Active-set is opt-in: it is faster on
+small dense QPs but less robust (it can misreport infeasible, unbounded or
+rank-deficient problems), and its gradients are non-smooth.
 
 ---
 
@@ -281,8 +262,7 @@ The active-set solver stores `P` and `A` as dense matrices, so its memory grows
 with `n² + m·n` rather than with the number of nonzeros. A solve typically needs
 about twice one dense copy, and more with `enable_grad=True` or per-problem
 matrices. Constructing an active-set solver warns when one dense copy alone
-would exceed 1 GiB. `solver='auto'` only selects active-set for problems with
-`n <= 500`; use `solver='ipm'` for large sparse problems.
+would exceed 1 GiB. Use the IPM for large sparse problems.
 
 ### Active-Set Differentiation
 
