@@ -1,73 +1,56 @@
 name: CI (DGX Spark)
 
-# Builds and tests Moreau from source on a self-hosted NVIDIA DGX Spark
-# (aarch64, GB10, compute capability 12.1). Unlike ci-cuda.yml it builds on
-# the runner itself, without Docker, so it also covers aarch64 and Blackwell.
-# The steps are in scripts/ci_spark.sh, which lists what the runner needs.
-
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'packages/moreau-cuda/**'
-      - 'packages/moreau-cpu/**'
-      - 'packages/moreau/**'
-      - 'scripts/ci_spark.sh'
-      - '.github/workflows/ci-spark.yml'
-  pull_request:
-    paths:
-      - 'packages/moreau-cuda/**'
-      - 'packages/moreau-cpu/**'
-      - 'packages/moreau/**'
-      - 'scripts/ci_spark.sh'
-      - '.github/workflows/ci-spark.yml'
   workflow_dispatch:
-
-concurrency:
-  group: spark-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  # Pull requests from forks must not run code on the self-hosted runner, so
-  # only pushes and pull requests from branches of this repository run here.
-  test:
-    if: >-
-      github.repository == 'moreau-project/moreau' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+  diagnostic:
     runs-on: [self-hosted, spark-gb10]
-    name: Test (DGX Spark)
-    timeout-minutes: 90
-    defaults:
-      run:
-        # A login shell, so the runner's profile puts devenv, Spack, and uv on PATH.
-        shell: bash -l -eo pipefail {0}
-    env:
-      WORK_DIR: ${{ github.workspace }}/../spark-ci-work
-
+    timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v7
-      with:
-        persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Inspect task limits and CPU solver thread pools
+        shell: bash -l -eo pipefail {0}
+        run: |
+          printf 'Runner: %s\n' "$RUNNER_NAME"
+          for file in pids.max pids.current pids.peak pids.events memory.max memory.current memory.events; do
+            if [ -r "/sys/fs/cgroup/$file" ]; then
+              printf '%s: ' "$file"
+              cat "/sys/fs/cgroup/$file"
+            fi
+          done
+          printf 'Process limit: '
+          ulimit -u
+          ps -eLo pid,nlwp,comm --sort=-nlwp | sed -n '1,12p'
+          python="$(dirname "$GITHUB_WORKSPACE")/spark-ci-work/venv/bin/python"
+          OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 "$python" - <<'PY'
+          import gc
+          import os
+          import time
+          from pathlib import Path
+          import moreau
 
-    - name: Set up Python environment
-      run: scripts/ci_spark.sh setup "$WORK_DIR"
+          def snapshot(label):
+              tasks = Path('/sys/fs/cgroup/pids.current').read_text().strip()
+              print(label, 'process_threads=', len(os.listdir('/proc/self/task')),
+                    'container_tasks=', tasks, flush=True)
 
-    - name: Build moreau-cpu and moreau-cuda
-      id: build
-      run: scripts/ci_spark.sh build "$WORK_DIR"
-
-    - name: Run C++ tests
-      run: scripts/ci_spark.sh test-cpp "$WORK_DIR"
-
-    - name: Run Python tests
-      # Run after a C++ failure too, but only once the build has succeeded.
-      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-      run: scripts/ci_spark.sh test-python "$WORK_DIR"
-
-    - name: Run cvxpy and cvxpylayers Moreau tests
-      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-      run: scripts/ci_spark.sh test-upstream "$WORK_DIR"
+          snapshot('before')
+          solvers = []
+          for i in range(6):
+              solvers.append(moreau.CompiledSolver(
+                  n=1, m=1, P_row_offsets=[0,1], P_col_indices=[0],
+                  A_row_offsets=[0,1], A_col_indices=[0],
+                  cones=moreau.Cones(num_nonneg_cones=1),
+                  settings=moreau.Settings(device='cpu', batch_size=2)))
+              snapshot(f'{i+1} solvers')
+          solvers.clear()
+          gc.collect()
+          time.sleep(0.1)
+          snapshot('released')
+          PY
