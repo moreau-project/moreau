@@ -151,10 +151,9 @@ The clique merge strategy is controlled by
   most 8 or both supernodes have at most 8 vertices
 - `'none'`: keep the cliques of the chordal extension as they are
 
-The backends order the PSD cone's sparsity graph differently before finding
-cliques (the CPU uses AMD, CUDA its own minimum-degree ordering), so a
-sparse PSD problem can still decompose into different cliques on CPU and
-CUDA. Both are exact reformulations of the same problem.
+Both backends order the PSD cone's sparsity graph with SuiteSparse AMD
+before finding cliques, so a sparse PSD problem decomposes into the same
+cliques on CPU and CUDA.
 :::
 
 ---
