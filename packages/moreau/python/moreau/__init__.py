@@ -254,14 +254,10 @@ class Solver:
         _warn_cvxpy_soc_if_needed(cones)
 
         n = len(q)
-        nnz_P = P.nnz if sparse.issparse(P) else np.count_nonzero(P)
         nnz_A = A.nnz if sparse.issparse(A) else np.count_nonzero(A)
         settings, device = _resolve_settings_and_device(
             settings,
             n=n,
-            m=len(b),
-            cones=cones,
-            nnz_P=nnz_P,
             nnz_A=nnz_A,
             batch_size=1,
         )
@@ -704,9 +700,6 @@ class CompiledSolver:
         settings, device = _resolve_settings_and_device(
             settings,
             n=n,
-            m=m,
-            cones=cones,
-            nnz_P=len(P_col_indices),
             nnz_A=len(A_col_indices),
             batch_size=peek_batch_size,
         )
