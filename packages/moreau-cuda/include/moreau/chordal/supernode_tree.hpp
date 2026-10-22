@@ -22,7 +22,7 @@ static constexpr int64_t INACTIVE_NODE = INT64_MAX - 1;
 // VertexSet -- ordered set of unique int64_t values backed by std::vector.
 //
 // Maintains sorted order so that iteration is deterministic and set operations
-// (union, intersection, subset, etc.) can be done in linear time via merges.
+// (such as union) can be done in linear time via merges.
 // ---------------------------------------------------------------------------
 class VertexSet {
 public:
@@ -38,27 +38,8 @@ public:
         }
     }
 
-    // Remove v if present, maintaining sorted order.
-    void remove(int64_t v) {
-        auto it = std::lower_bound(data_.begin(), data_.end(), v);
-        if (it != data_.end() && *it == v) {
-            data_.erase(it);
-        }
-    }
-
     bool contains(int64_t v) const {
         return std::binary_search(data_.begin(), data_.end(), v);
-    }
-
-    bool is_subset_of(const VertexSet& other) const {
-        // Every element in *this must be in other.
-        size_t j = 0;
-        for (int64_t v : data_) {
-            while (j < other.data_.size() && other.data_[j] < v) ++j;
-            if (j >= other.data_.size() || other.data_[j] != v) return false;
-            ++j;
-        }
-        return true;
     }
 
     void clear() { data_.clear(); }
@@ -93,28 +74,6 @@ public:
         return out;
     }
 
-    // Compute intersection with other into a new VertexSet.
-    VertexSet intersection(const VertexSet& other) const {
-        VertexSet out;
-        out.data_.resize(std::min(data_.size(), other.data_.size()));
-        auto end = std::set_intersection(
-            data_.begin(), data_.end(),
-            other.data_.begin(), other.data_.end(),
-            out.data_.begin());
-        out.data_.erase(end, out.data_.end());
-        return out;
-    }
-
-    // Compute difference (*this \ other) into a new VertexSet.
-    VertexSet difference(const VertexSet& other) const {
-        VertexSet out;
-        out.data_.reserve(data_.size());
-        std::set_difference(
-            data_.begin(), data_.end(),
-            other.data_.begin(), other.data_.end(),
-            std::back_inserter(out.data_));
-        return out;
-    }
 
     bool operator==(const VertexSet& other) const { return data_ == other.data_; }
     bool operator!=(const VertexSet& other) const { return data_ != other.data_; }
@@ -322,74 +281,6 @@ public:
                                      + snode[static_cast<size_t>(c)].size());
         }
         nblk = std::move(blk);
-    }
-
-    // -----------------------------------------------------------------------
-    // Merge helpers (used by merge strategies operating on the tree)
-    // -----------------------------------------------------------------------
-
-    // Merge supernode c2 into c1 in the parent-child merge pattern:
-    //   - Union snode[p] |= snode[ch], clear ch.
-    //   - Clear separator[ch].
-    //   - Re-parent grandchildren of ch to p.
-    //   - Update snode_children.
-    //   - Decrement n_cliques.
-    void merge_two_cliques_parent_child(int64_t parent_idx, int64_t child_idx) {
-        size_t p = static_cast<size_t>(parent_idx);
-        size_t ch = static_cast<size_t>(child_idx);
-
-        // Merge child's vertices into parent's vertex set.
-        snode[p].extend(snode[ch]);
-        snode[ch].clear();
-        separators[ch].clear();
-
-        // Re-parent grandchildren.
-        for (int64_t grandch : snode_children[ch]) {
-            snode_parent[static_cast<size_t>(grandch)] = parent_idx;
-        }
-        snode_parent[ch] = INACTIVE_NODE;
-
-        // Update children: remove ch from parent's children, add ch's children to parent.
-        snode_children[p].remove(child_idx);
-        snode_children[p].extend(snode_children[ch]);
-        snode_children[ch].clear();
-
-        --n_cliques;
-    }
-
-    // Merge clique c2 into c1 for clique-graph merge pattern (no separator update).
-    void merge_two_cliques_graph(int64_t c1, int64_t c2) {
-        size_t i1 = static_cast<size_t>(c1);
-        size_t i2 = static_cast<size_t>(c2);
-
-        snode[i1].extend(snode[i2]);
-        snode[i2].clear();
-
-        --n_cliques;
-    }
-
-    // Determine which of two cliques is the parent and which is the child.
-    // Returns (parent, child).
-    std::pair<int64_t, int64_t> determine_parent(int64_t c1, int64_t c2) const {
-        if (snode_children[static_cast<size_t>(c1)].contains(c2)) {
-            return {c1, c2};
-        }
-        return {c2, c1};
-    }
-
-    // Clique dimensions (snode_size, separator_size) for a raw index (not post-ordered).
-    std::pair<int64_t, int64_t> clique_dim(int64_t i) const {
-        size_t idx = static_cast<size_t>(i);
-        return {static_cast<int64_t>(snode[idx].size()),
-                static_cast<int64_t>(separators[idx].size())};
-    }
-
-    // Compute fill-in from merging two cliques with given dimensions.
-    static int64_t fill_in(int64_t dim_clique_snode, int64_t dim_clique_sep,
-                           int64_t dim_parent_snode, int64_t dim_parent_sep) {
-        int64_t dim_parent = dim_parent_snode + dim_parent_sep;
-        int64_t dim_clique = dim_clique_snode + dim_clique_sep;
-        return (dim_parent - dim_clique_sep) * (dim_clique - dim_clique_sep);
     }
 
     // -----------------------------------------------------------------------
