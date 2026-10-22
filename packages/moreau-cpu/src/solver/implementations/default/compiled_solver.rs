@@ -10,10 +10,29 @@ use crate::solver::core::traits::*;
 use crate::solver::SupportedConeT;
 use crate::utils::banner;
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Instant;
+
+/// One rayon pool per thread count for the whole process, so live solvers
+/// don't each hold their own OS threads.
+fn shared_thread_pool(num_threads: usize) -> Result<Arc<rayon::ThreadPool>, SolverError> {
+    static POOLS: OnceLock<Mutex<HashMap<usize, Arc<rayon::ThreadPool>>>> = OnceLock::new();
+    let mut pools = POOLS.get_or_init(Default::default).lock().unwrap();
+    if let Some(pool) = pools.get(&num_threads) {
+        return Ok(Arc::clone(pool));
+    }
+    let pool = Arc::new(
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build()
+            .map_err(|_e| SolverError::BadInputData("Failed to configure thread pool"))?,
+    );
+    pools.insert(num_threads, Arc::clone(&pool));
+    Ok(pool)
+}
 
 // Keep smoothing away from a numerically singular cone boundary. This floor
 // controls the interior perturbation, not whether the warm point has converged.
@@ -198,8 +217,8 @@ pub struct CompiledSolver<T: FloatT> {
     dir_cones: Vec<SupportedXConeT>,
     /// Solver settings
     settings: DefaultSettings<T>,
-    /// Thread pool for parallel processing
-    thread_pool: rayon::ThreadPool,
+    /// Thread pool for parallel processing, shared by all solvers with the same thread count
+    thread_pool: Arc<rayon::ThreadPool>,
     /// Pre-allocated solvers - one per problem slot for correct solution caching
     solver_pool: Vec<Mutex<DefaultSolver<T>>>,
     /// Current batch size (number of solvers in pool)
@@ -397,11 +416,7 @@ impl<T: FloatT> CompiledSolver<T> {
         // (and thus the dir_cones index set) is preserved. We thread dir_cones
         // through the augmented solver below.
 
-        // Create a local thread pool (not global)
-        let thread_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .build()
-            .map_err(|_e| SolverError::BadInputData("Failed to configure thread pool"))?;
+        let thread_pool = shared_thread_pool(num_threads)?;
 
         // Ensure settings are appropriate for batch mode.
         settings.core_mut().ipm.presolve_enable = false;
