@@ -372,7 +372,9 @@ class JaxSolverCuda:
         Falls back to pure_callback with solve_warm_start when FFI is not available.
 
         Returns a function:
-            (P_data, A_data, q, b, warm_x, warm_z, warm_s) -> (JaxSolution, JaxSolveInfo)
+            (P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x=None)
+                -> (JaxSolution, JaxSolveInfo)
+        where ``warm_z_x`` is the warm direct-cone dual, zeros when omitted.
         """
         if self._use_ffi:
             if self._ffi_solve_warm_fn is None:
