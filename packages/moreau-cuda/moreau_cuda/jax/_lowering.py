@@ -962,8 +962,14 @@ def _make_ffi_solve_warm_fn(
     _solve_warm_with_grad.defvjp(_solve_warm_fwd, _solve_warm_bwd)
 
     # Final wrapper returning (JaxSolution, JaxSolveInfo)
-    def _solve_warm_with_solution(P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x):
-        """Warm-start solve returning (JaxSolution, JaxSolveInfo)."""
+    def _solve_warm_with_solution(P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x=None):
+        """Warm-start solve returning (JaxSolution, JaxSolveInfo).
+
+        ``warm_z_x`` defaults to zeros, as in the fallback, so callers that
+        don't use direct cones can pass seven arguments.
+        """
+        if warm_z_x is None:
+            warm_z_x = jnp.zeros(warm_x.shape[:-1] + (total_xn,), dtype=jnp.float64)
         (
             x,
             z,
