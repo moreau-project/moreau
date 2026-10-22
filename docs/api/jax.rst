@@ -61,14 +61,14 @@ Solver
       solver.setup(P_data, A_data)  # Set matrices once
       solution = solver.solve(q, b)  # Solve with 2 args
 
-   .. py:method:: setup(P_data, A_data)
+   .. py:method:: setup(P_values, A_values)
 
       Set P and A matrix values for subsequent ``solve()`` calls.
 
       Gradients w.r.t. P and A are still computed when using the 2-arg ``solve()``.
 
-      :param P_data: P matrix values, shape (nnzP,)
-      :param A_data: A matrix values, shape (nnzA,)
+      :param P_values: P matrix values, shape (nnzP,)
+      :param A_values: A matrix values, shape (nnzA,)
 
    .. py:method:: solve(*args, warm_start=None)
 
