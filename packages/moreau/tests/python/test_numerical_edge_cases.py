@@ -21,10 +21,13 @@ def _solve_qp(P, q, A, b, cones, **settings_kw):
     return sol, solver.info
 
 
-def _assert_close_to_scale(x, expected, rtol=1e-6):
-    """Compare to a known optimum, with absolute error measured against its scale."""
+def _assert_optimal(x, expected, P, q, rtol=1e-6):
+    """Compare to a known optimum. IPM accuracy is relative to the problem's scale, so
+    coordinates are checked against the optimum's scale and the objective against its value."""
     expected = np.asarray(expected, dtype=float)
     np.testing.assert_allclose(x, expected, rtol=rtol, atol=rtol * np.abs(expected).max())
+    obj = lambda v: 0.5 * v @ (P @ v) + q @ v
+    assert abs(obj(x) - obj(expected)) <= rtol * max(1.0, abs(obj(expected)))
 
 
 class TestIllConditionedP:
@@ -41,7 +44,7 @@ class TestIllConditionedP:
         sol, info = _solve_qp(P, q, A, b, cones)
         assert info.status == moreau.SolverStatus.Solved
         # Unconstrained minimizer x = -q / diag(P) = (-1e6, -1e-6) satisfies x <= 0.
-        _assert_close_to_scale(sol.x, [-1e6, -1e-6])
+        _assert_optimal(sol.x, [-1e6, -1e-6], P, q)
 
     @pytest.mark.xfail(
         strict=True,
@@ -63,7 +66,7 @@ class TestIllConditionedP:
 
         sol, info = _solve_qp(P, q, A, b, cones, device="cpu")
         assert info.status == moreau.SolverStatus.Solved
-        _assert_close_to_scale(sol.x, [-1e10, 10.0])
+        _assert_optimal(sol.x, [-1e10, 10.0], P, q)
 
     def test_large_P_values(self):
         """P with very large entries."""
@@ -93,7 +96,7 @@ class TestIllConditionedP:
         sol, info = _solve_qp(P, q, A, b, cones)
         assert info.status == moreau.SolverStatus.Solved
         # Unconstrained minimizer x = -q / diag(P) satisfies x <= 0.
-        _assert_close_to_scale(sol.x, [-1e4, -1.0, -1e-4])
+        _assert_optimal(sol.x, [-1e4, -1.0, -1e-4], P, q)
 
 
 class TestBadlyScaledData:
@@ -118,7 +121,7 @@ class TestBadlyScaledData:
 
         sol, info = _solve_qp(P, q, A, b, cones, device="cpu")
         assert info.status == moreau.SolverStatus.Solved
-        _assert_close_to_scale(sol.x, [-1e10, -1e10])
+        _assert_optimal(sol.x, [-1e10, -1e10], P, q)
 
     def test_tiny_q(self):
         """q with very small values."""
