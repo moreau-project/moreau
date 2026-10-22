@@ -211,18 +211,25 @@ def settings_to_cpu(settings) -> "_cpu_solver.DefaultSettings":
             "chordal_decomposition_enable",
             "chordal_decomposition_merge_method",
         ]:
-            # Only copy if both source has the attribute AND dest can accept it
-            if hasattr(ipm_src, attr) and hasattr(ipm_dst, attr):
-                value = getattr(ipm_src, attr)
-                try:
-                    setattr(ipm_dst, attr, value)
-                except (AttributeError, TypeError) as e:
-                    # Log warning instead of silently ignoring
-                    warnings.warn(
-                        f"Failed to set IPM setting '{attr}' = {value!r}: {e}",
-                        RuntimeWarning,
-                        stacklevel=3,
-                    )
+            if not hasattr(ipm_src, attr):
+                continue
+            # A setting the CPU binding doesn't expose would otherwise be
+            # dropped without a trace, and the solver would use its default
+            if not hasattr(ipm_dst, attr):
+                raise AttributeError(
+                    f"CPU IPMSettings has no attribute '{attr}'; "
+                    "the setting can't be passed to the CPU solver"
+                )
+            value = getattr(ipm_src, attr)
+            try:
+                setattr(ipm_dst, attr, value)
+            except (AttributeError, TypeError) as e:
+                # Log warning instead of silently ignoring
+                warnings.warn(
+                    f"Failed to set IPM setting '{attr}' = {value!r}: {e}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
         cpu_settings.ipm = ipm_dst
 
     return cpu_settings
