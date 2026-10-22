@@ -125,8 +125,9 @@ struct SimpleCsc {
     SimpleCsc(int64_t nrow, int64_t ncol)
         : colptr(static_cast<size_t>(ncol + 1), 0), nrow(nrow), ncol(ncol) {}
 
-    // Build from COO triplets. Duplicates at the same (row, col) are overwritten
-    // (last value wins). Assumes row > col (lower triangular).
+    // Build from COO triplets. Duplicates at the same (row, col) are summed,
+    // as in the Rust CscMatrix::new_from_triplets. Assumes row > col (lower
+    // triangular).
     static SimpleCsc from_triplets(int64_t nrow, int64_t ncol,
                                    const std::vector<int64_t>& rows,
                                    const std::vector<int64_t>& cols,
@@ -135,7 +136,6 @@ struct SimpleCsc {
         m.nrow = nrow;
         m.ncol = ncol;
 
-        // Deduplicate: keep last value for each (row, col)
         struct Entry { int64_t row, col, val; };
         std::vector<Entry> entries;
         entries.reserve(rows.size());
@@ -144,17 +144,17 @@ struct SimpleCsc {
         }
 
         // Sort by (col, row)
-        std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+        std::stable_sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
             return a.col < b.col || (a.col == b.col && a.row < b.row);
         });
 
-        // Deduplicate (keep last)
+        // Consolidate repeated entries by summing them
         std::vector<Entry> unique;
         unique.reserve(entries.size());
         for (size_t i = 0; i < entries.size(); ++i) {
             if (!unique.empty() && unique.back().row == entries[i].row &&
                 unique.back().col == entries[i].col) {
-                unique.back().val = entries[i].val;
+                unique.back().val += entries[i].val;
             } else {
                 unique.push_back(entries[i]);
             }
@@ -198,19 +198,20 @@ struct SimpleCsc {
         return std::nullopt;
     }
 
-    // Set value at (row, col). If the entry exists, update it. If not, insert.
+    // Set value at (row, col). If the entry exists, update it. If not, insert
+    // it in row order, unless the value is zero (as in the Rust set_entry).
     void set_entry(int64_t row, int64_t col, int64_t val) {
         if (col < 0 || col >= ncol) return;
         int64_t start = colptr[static_cast<size_t>(col)];
         int64_t end = colptr[static_cast<size_t>(col + 1)];
-        for (int64_t i = start; i < end; ++i) {
-            if (rowind[static_cast<size_t>(i)] == row) {
-                values[static_cast<size_t>(i)] = val;
-                return;
-            }
+        int64_t i = start;
+        while (i < end && rowind[static_cast<size_t>(i)] < row) ++i;
+        if (i < end && rowind[static_cast<size_t>(i)] == row) {
+            values[static_cast<size_t>(i)] = val;
+            return;
         }
-        // Insert new entry: we need to shift everything
-        auto pos = static_cast<size_t>(end); // insert at end of this column
+        if (val == 0) return;
+        auto pos = static_cast<size_t>(i);
         rowind.insert(rowind.begin() + static_cast<ptrdiff_t>(pos), row);
         values.insert(values.begin() + static_cast<ptrdiff_t>(pos), val);
         for (int64_t c = col + 1; c <= ncol; ++c) {
@@ -667,7 +668,9 @@ inline bool is_permissible(
             snode[static_cast<size_t>(neighbor)]);
         VertexSet int2 = snode[static_cast<size_t>(c2)].intersection(
             snode[static_cast<size_t>(neighbor)]);
-        if (int1 != int2) {
+        // Rust compares the two intersections as sequences (Iterator::eq),
+        // in the order of the cliques' vertex sets, not as sets
+        if (int1.data() != int2.data()) {
             return false;
         }
     }
@@ -675,13 +678,14 @@ inline bool is_permissible(
 }
 
 // Find the (row, col) of the element with the maximum value in the CSC matrix.
+// Ties go to the last maximum, as Rust's Iterator::max_by_key does.
 inline std::pair<int64_t, int64_t> max_elem(const SimpleCsc& A) {
     if (A.values.empty()) return {0, 0};
 
     size_t max_idx = 0;
     int64_t max_val = A.values[0];
     for (size_t i = 1; i < A.values.size(); ++i) {
-        if (A.values[i] > max_val) {
+        if (A.values[i] >= max_val) {
             max_val = A.values[i];
             max_idx = i;
         }
@@ -689,11 +693,12 @@ inline std::pair<int64_t, int64_t> max_elem(const SimpleCsc& A) {
     return A.index_to_coord(static_cast<int64_t>(max_idx));
 }
 
-// Return a permutation that sorts values in descending order.
+// Return a permutation that sorts values in descending order, keeping ties in
+// index order (Rust's sort_by is stable).
 inline std::vector<int64_t> sortperm_rev(const std::vector<int64_t>& values) {
     std::vector<int64_t> p(values.size());
     std::iota(p.begin(), p.end(), int64_t(0));
-    std::sort(p.begin(), p.end(), [&values](int64_t a, int64_t b) {
+    std::stable_sort(p.begin(), p.end(), [&values](int64_t a, int64_t b) {
         return values[static_cast<size_t>(a)] > values[static_cast<size_t>(b)];
     });
     return p;

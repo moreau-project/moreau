@@ -371,21 +371,12 @@ public:
                 }
             }
 
-            // NOTE: settings.ipm.chordalDecompositionMergeMethod is plumbed
-            // through Python -> _CudaSettings but is currently NOT honored
-            // on CUDA — chordal_info.cpp hardcodes a fill_in==0 parent-child
-            // merge regardless. Wiring it through requires an adapter between
-            // moreau::SuperNodeTree (the type analyse_psd_sparsity uses) and
-            // moreau::chordal::SuperNodeTree (the data-only struct the
-            // strategy classes in merge_strategy.hpp operate on); the two
-            // have parallel-but-incompatible VertexSet implementations. The
-            // banded-PSD parity test in test_psd_cpu_cuda_parity.py is
-            // marked xfail until that adapter lands. #176 stays open.
             auto chordal = std::make_unique<ChordalInfo>(ChordalInfo::analyze(
                 A_csc_colptr.data(), A_csc_rowind.data(), n, m,
                 cones.psdConeDims.data(), cones.psdConeDims.size(),
                 cones.numZeroCones, cones.numNonnegCones,
                 total_soc, cones.numExpCones, cones.numPowerCones,
+                settings.ipm.chordalDecompositionMergeMethod,
                 b_mask_storage.get()
             ));
 
@@ -2046,8 +2037,8 @@ NB_MODULE(_moreau_cuda, m) {
             "Enable chordal decomposition of sparse PSD cones")
         .def_rw("chordal_decomposition_merge_method",
             &IPMSettings::chordalDecompositionMergeMethod,
-            "Chordal merge strategy for sparse PSD: 'clique_graph' (default, "
-            "matches CPU), 'parent_child', or 'none'.");
+            "Chordal merge strategy for sparse PSD: 'clique_graph' (default), "
+            "'parent_child', or 'none', as on the CPU backend.");
 
     // SolverType enum
     nb::enum_<SolverType>(m, "SolverType")
