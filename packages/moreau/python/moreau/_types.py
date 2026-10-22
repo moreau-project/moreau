@@ -496,11 +496,9 @@ class IPMSettings(BaseModel):
     # x[J] partitions and the augmentation map doesn't yet thread them).
     chordal_decomposition_enable: bool = True
 
-    # Chordal decomposition merge strategy for sparse PSD cones. Must match
-    # across CPU and CUDA so the same problem produces the same decomposition
-    # (and the same Solved iterate of the same reformulation) regardless of
-    # backend. Accepted values: 'clique_graph' (default; Garstka et al. 2019),
-    # 'parent_child', or 'none'. (#176)
+    # Chordal decomposition merge strategy for sparse PSD cones, honored by
+    # both backends. Accepted values: 'clique_graph' (default; Garstka et al.
+    # 2019), 'parent_child', or 'none'. (#83)
     chordal_decomposition_merge_method: str = "clique_graph"
 
     @field_validator("direct_solve_method")
@@ -581,8 +579,8 @@ class Settings(BaseModel):
 
     Attributes:
         solver: Solver algorithm - 'auto' (default), 'ipm', or 'active_set'.
-                'auto' uses active-set for small QPs (n <= 500, zero+nonneg only),
-                IPM otherwise. 'active_set' is CPU-only, zero+nonneg cones only.
+                'auto' uses the IPM. 'active_set' is opt-in, CPU-only, zero+nonneg
+                cones only.
         device: Device selection - 'auto' (default), 'cuda', or 'cpu'
         device_id: CUDA device ID to use (-1 = use current device, default: -1)
         batch_size: Number of problems in batch for CompiledSolver (default: 1)

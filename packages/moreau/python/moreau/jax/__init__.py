@@ -148,16 +148,14 @@ class Solver:
         if settings is None:
             settings = Settings()
 
-        # Resolve device FIRST so active-set auto-select sees actual target
         device = settings.device
         if device == "auto":
             device = default_device()
 
-        # Now resolve solver='auto' with the actual device known
+        # Resolve solver='auto' (active-set forces device='cpu')
         from moreau import _resolve_solver_type
 
-        nnz_P = len(P_col_indices)
-        settings, device = _resolve_solver_type(settings, n, m, cones, device, nnz_P=nnz_P)
+        settings, device = _resolve_solver_type(settings, device)
 
         # Resolve the JAX class for the requested device. If unavailable, fall
         # back to CPU and update `device` so downstream consumers (self._device,
