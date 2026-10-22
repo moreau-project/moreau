@@ -34,7 +34,7 @@ def _ipm_settings_with_distinctive_values() -> IPMSettings:
         reduced_tol_ktratio=6.5e-5,
         diff_method="smoothed",
         diff_smoothing_mu=1.234e-3,
-        diff_smoothing_step_factor=0.42,
+        diff_smoothing_step_factor=4.2,
         max_lu_nnz=987654,
         cudss_ir_steps=3,
         cudss_pivot_enable=False,
