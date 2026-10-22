@@ -30,7 +30,7 @@ def _preload_nvidia_libs():
     like cuBLAS and cuSOLVER mapped in the process, and their per-process
     internal state ends up split between the copies, producing silent
     numerical failures. cuDSS is the exception: its configuration enum values
-    change between minor versions despite keeping the same soname, so use the
+    have changed between minor versions without a soname change, so use the
     package dependency matching the wheel's build.
     """
     try:
