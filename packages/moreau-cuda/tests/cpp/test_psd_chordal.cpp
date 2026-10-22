@@ -204,7 +204,8 @@ protected:
         std::unique_ptr<bool[]> b_mask(new bool[kSvec]);
         for (int64_t i = 0; i < kSvec; ++i) b_mask[i] = (i == 0 || i == 2 || i == 5 || i == 9);
         return ChordalInfo::analyze(A_colptr.data(), A_rowind.data(), 5, kSvec,
-                                    psd_dims.data(), 1, 0, 0, 0, 0, 0, b_mask.get());
+                                    psd_dims.data(), 1, 0, 0, 0, 0, 0, "clique_graph",
+                                    b_mask.get());
     }
 
     // svec of a symmetric row-major matrix, off-diagonal entries scaled by sqrt(2)
