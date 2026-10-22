@@ -338,126 +338,26 @@ class TestSolverNumpy:
         # For small problems (n < 500), expect CPU
         assert solver.device == "cpu"
 
-    def test_solver_auto_picks_active_set_for_small_qp_without_grad(self, simple_qp_matrices):
-        """Baseline: small QP + auto + no grad => ACTIVE_SET, no warning."""
-        import warnings as _w
-        from moreau import _dispatch
-
-        _dispatch._auto_active_set_with_grad_warning_issued = False
-
-        d = simple_qp_matrices
-        settings = moreau.Settings(solver="auto", device="cpu", enable_grad=False)
-        with _w.catch_warnings(record=True) as caught:
-            _w.simplefilter("always")
-            solver = moreau.Solver(
-                d["P"],
-                d["q"],
-                d["A"],
-                d["b"],
-                d["cones"],
-                settings,
-            )
-        assert solver._settings.solver == moreau.SolverType.ACTIVE_SET
-        assert not any(
-            "ACTIVE_SET" in str(w.message) and "enable_grad" in str(w.message) for w in caught
-        ), "Should not warn when enable_grad=False"
-
-    def test_solver_auto_warns_when_active_set_picked_with_grad(self, simple_qp_matrices):
-        """Regression #185: when auto picks ACTIVE_SET on a small QP with
-        enable_grad=True, emit a one-time UserWarning. Default still resolves
-        to ACTIVE_SET (we don't silently override to IPM — that breaks
-        downstream torch.compile users), but the warning surfaces the
-        gradient-cliff footgun.
-        """
-        import warnings as _w
-        from moreau import _dispatch
-
-        _dispatch._auto_active_set_with_grad_warning_issued = False
-
-        d = simple_qp_matrices
-        settings = moreau.Settings(solver="auto", device="cpu", enable_grad=True)
-        with _w.catch_warnings(record=True) as caught:
-            _w.simplefilter("always")
-            solver = moreau.Solver(
-                d["P"],
-                d["q"],
-                d["A"],
-                d["b"],
-                d["cones"],
-                settings,
-            )
-
-        # Default unchanged: still ACTIVE_SET for backward compat.
-        assert solver._settings.solver == moreau.SolverType.ACTIVE_SET
-        # But a warning was emitted naming the cliff and the IPM workaround.
-        msgs = [str(w.message) for w in caught if issubclass(w.category, UserWarning)]
-        assert any(
-            "ACTIVE_SET" in m and "enable_grad" in m for m in msgs
-        ), f"Expected an ACTIVE_SET + enable_grad warning, got: {msgs}"
-        assert any(
-            "solver='ipm'" in m for m in msgs
-        ), "Warning must point users to solver='ipm' for smooth gradients"
-
-    def test_solver_auto_grad_warning_only_once_per_process(self, simple_qp_matrices):
-        """The ACTIVE_SET-with-grad warning is emitted at most once."""
-        import warnings as _w
-        from moreau import _dispatch
-
-        _dispatch._auto_active_set_with_grad_warning_issued = False
-
-        d = simple_qp_matrices
-        settings = moreau.Settings(solver="auto", device="cpu", enable_grad=True)
-        with _w.catch_warnings(record=True) as caught:
-            _w.simplefilter("always")
-            for _ in range(3):
-                moreau.Solver(
-                    d["P"],
-                    d["q"],
-                    d["A"],
-                    d["b"],
-                    d["cones"],
-                    settings,
-                )
-        active_set_warnings = [
-            w
-            for w in caught
-            if issubclass(w.category, UserWarning)
-            and "ACTIVE_SET" in str(w.message)
-            and "enable_grad" in str(w.message)
-        ]
-        assert len(active_set_warnings) == 1, (
-            f"Expected exactly 1 warning across 3 Solver constructions, "
-            f"got {len(active_set_warnings)}"
+    def test_auto_uses_ipm_for_small_qp(self):
+        """Regression for #43/#48: auto sent small QPs to active-set, which
+        reported an unbounded QP as Solved. min 1/2 x0^2 - x1 s.t. x0 <= 1."""
+        solver = moreau.Solver(
+            sparse.csr_matrix(np.diag([1.0, 0.0])),
+            np.array([0.0, -1.0]),
+            sparse.csr_matrix([[1.0, 0.0]]),
+            np.array([1.0]),
+            moreau.Cones(num_nonneg_cones=1),
+            moreau.Settings(device="cpu"),
         )
+        solver.solve()
+        assert solver._settings.solver == moreau.SolverType.IPM
+        assert solver.info.status == moreau.SolverStatus.DualInfeasible
 
-    def test_solver_explicit_active_set_with_grad_no_warning(self, simple_qp_matrices):
-        """When the user explicitly picks solver='active_set' they've made
-        a deliberate choice; no warning should fire."""
-        import warnings as _w
-        from moreau import _dispatch
-
-        _dispatch._auto_active_set_with_grad_warning_issued = False
-
+    def test_explicit_active_set_is_kept(self, simple_qp_matrices):
         d = simple_qp_matrices
-        settings = moreau.Settings(
-            solver="active_set",
-            device="cpu",
-            enable_grad=True,
-        )
-        with _w.catch_warnings(record=True) as caught:
-            _w.simplefilter("always")
-            solver = moreau.Solver(
-                d["P"],
-                d["q"],
-                d["A"],
-                d["b"],
-                d["cones"],
-                settings,
-            )
+        settings = moreau.Settings(solver="active_set", device="cpu")
+        solver = moreau.Solver(d["P"], d["q"], d["A"], d["b"], d["cones"], settings)
         assert solver._settings.solver == moreau.SolverType.ACTIVE_SET
-        assert not any(
-            "ACTIVE_SET" in str(w.message) and "enable_grad" in str(w.message) for w in caught
-        ), "Explicit solver='active_set' must not trigger the auto-resolution warning"
 
 
 class TestTorchSolver:
