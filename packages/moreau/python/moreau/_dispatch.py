@@ -1,10 +1,8 @@
 """Solver-selection and direct cone dispatch helpers for moreau (private).
 
-Decides between active-set and IPM, and validates that a direct cone
+Resolves the solver and device, and validates that a direct cone
 configuration is supported on the requested device.
 """
-
-import warnings
 
 from ._types import Settings, SolverType
 from ._backend import (
@@ -19,16 +17,13 @@ def _resolve_settings_and_device(
     settings,
     *,
     n: int,
-    m: int,
-    cones,
-    nnz_P: int,
     nnz_A: int,
     batch_size: int,
 ):
     """Resolve settings/device for Solver and CompiledSolver init.
 
-    Defaults settings, resolves solver='auto' (may force device='cpu'
-    for active-set), resolves device='auto' to a concrete device via
+    Defaults settings, resolves solver='auto' (active-set forces
+    device='cpu'), resolves device='auto' to a concrete device via
     `_choose_device`, then validates the result. Single source of
     truth — the two top-level __init__s only differ in how they
     measure `nnz_A` / `batch_size`.
@@ -42,14 +37,7 @@ def _resolve_settings_and_device(
     """
     if settings is None:
         settings = Settings()
-    settings, device = _resolve_solver_type(
-        settings,
-        n,
-        m,
-        cones,
-        settings.device,
-        nnz_P=nnz_P,
-    )
+    settings, device = _resolve_solver_type(settings, settings.device)
     if device == "auto":
         device = _choose_device(n, nnz_A, batch_size=batch_size)
     if not device_available(device):
@@ -73,79 +61,18 @@ _CUDA_SUPPORTED_DIR_CONE_KINDS = frozenset(
     }
 )
 
-_auto_active_set_with_grad_warning_issued = False
 
+def _resolve_solver_type(settings, device):
+    """Resolve solver='auto' to the IPM; active-set (opt-in only) forces device='cpu'.
 
-def _resolve_solver_type(settings, n, m, cones, device, nnz_P=None):
-    """Resolve solver='auto' to active-set or IPM.
-
-    Returns a (possibly copied) settings object with solver resolved,
-    and the device (forced to 'cpu' for active-set).
-
-    Args:
-        nnz_P: Number of nonzeros in P. If 0, the problem is an LP and
-            active-set is not used. If None, assumed nonzero (QP).
-
-    When ``solver='auto'`` resolves to ACTIVE_SET for a problem with
-    ``enable_grad=True``, a one-time UserWarning is emitted. Active-set
-    produces non-smooth derivatives whose quality changes discontinuously
-    at the n/m threshold below. For smooth gradients, pass ``solver='ipm'``
-    explicitly.
+    Returns a copy of settings with solver resolved, and the device.
     """
+    settings = settings.model_copy(deep=True)
     if settings.solver == SolverType.AUTO or settings.solver == "auto":
-        is_qp_only = (
-            cones.num_exp_cones == 0
-            and len(cones.power_alphas) == 0
-            and len(cones.so_cone_dims) == 0
-            and len(getattr(cones, "gen_power_cone_params", [])) == 0
-            and len(getattr(cones, "psd_dims", [])) == 0
-        )
-        # Active-set CPU solver only knows zero+nonneg slack cones; direct
-        # cones (any kind) require IPM. Routing direct problems through
-        # active-set silently drops `dir_cones`, returning a wrong (constraint-
-        # violating) solution and zero z_x.
-        has_dir_cones = bool(getattr(cones, "dir_cones", None))
-        has_quadratic = nnz_P is None or nnz_P > 0
-        m_limit = max(500, 2 * n)
-        if (
-            is_qp_only
-            and not has_dir_cones
-            and has_quadratic
-            and n <= 500
-            and m > 0
-            and m <= m_limit
-            and device != "cuda"
-        ):
-            settings = settings.model_copy(deep=True)
-            settings.solver = SolverType.ACTIVE_SET
-            if settings.enable_grad:
-                _warn_auto_active_set_with_grad()
-        else:
-            settings = settings.model_copy(deep=True)
-            settings.solver = SolverType.IPM
-
+        settings.solver = SolverType.IPM
     if settings.solver == SolverType.ACTIVE_SET:
         device = "cpu"
-
     return settings, device
-
-
-def _warn_auto_active_set_with_grad():
-    """Warn once when solver='auto' picks ACTIVE_SET with gradients enabled."""
-    global _auto_active_set_with_grad_warning_issued
-    if _auto_active_set_with_grad_warning_issued:
-        return
-    _auto_active_set_with_grad_warning_issued = True
-    warnings.warn(
-        "solver='auto' resolved to ACTIVE_SET for a problem with "
-        "enable_grad=True. Active-set gradients are non-smooth "
-        "(combinatorial), and gradient quality changes discontinuously when "
-        "the problem crosses the n=500 / m=max(500, 2n) threshold (above "
-        "which auto picks IPM, with smooth gradients). For smooth gradients "
-        "regardless of size, pass solver='ipm' explicitly. (#185)",
-        UserWarning,
-        stacklevel=3,
-    )
 
 
 def _require_dir_cones_compatible(cones, settings=None) -> None:

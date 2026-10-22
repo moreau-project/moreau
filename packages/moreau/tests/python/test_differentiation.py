@@ -487,7 +487,7 @@ class TestBatchedDifferentiation:
     "method,storage,interface",
     [
         (method, storage, interface)
-        for method in ("auto", "active_set", "ipm")
+        for method in ("active_set", "ipm")
         for storage in ("full", "full_unsorted")
         for interface in ("numpy", "torch", "jax")
     ],

@@ -29,6 +29,10 @@ source_dir=$(cd "$(dirname "$0")/.." && pwd)
 export MOREAU_CUDA_ARCH=${MOREAU_CUDA_ARCH:-121}
 export UV_LINK_MODE=${UV_LINK_MODE:-copy}
 export CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}
+# torch.compile's default cache (/tmp/torchinductor_$USER) is shared by every
+# runner and run on the machine; on #74 a graph cached by an earlier run called
+# a changed moreau op with its old arguments. Keep it per run.
+export TORCHINDUCTOR_CACHE_DIR=$work/torchinductor
 venv=$work/venv
 python=$venv/bin/python
 cuda_env=(devenv run cuda12 openblas-omp --)
@@ -37,7 +41,7 @@ uv=$(command -v uv)
 
 setup() {
     nvidia-smi
-    rm -rf "$venv"
+    rm -rf "$venv" "$TORCHINDUCTOR_CACHE_DIR"
     uv venv --python 3.13 "$venv"
     # torch first, so its PyPI build and CUDA 13 libraries never enter.
     uv pip install --python "$python" torch --index-url https://download.pytorch.org/whl/cu129
