@@ -29,10 +29,11 @@ names exported from `moreau`, `moreau.torch` and `moreau.jax`; `Settings`,
 keys; `include/moreau.h`; `Moreau.jl` and its MOI options. `_`-prefixed names
 are private and may change in any release.
 
-**Breaking change**: removing or renaming public API, changing a default
-(including which solver or method `'auto'` picks), changing a return type,
-shape or key, newly rejecting input that used to be accepted, or raising a
-minimum supported Python, JAX, torch, CUDA or Julia version.
+**Breaking change**: removing or renaming public API, changing a default,
+changing a return type, shape or key, newly rejecting input that used to be
+accepted, or raising a minimum supported Python, JAX, torch, CUDA or Julia
+version. What an `'auto'` setting resolves to is not a breaking change: it may
+change in any MINOR release, noted under Changed in `CHANGELOG.md`.
 
 | Release | While 0.x (`0.MINOR.PATCH`) | From 1.0 (`MAJOR.MINOR.PATCH`) |
 |---|---|---|
