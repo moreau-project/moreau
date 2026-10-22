@@ -54,3 +54,29 @@ jobs:
           time.sleep(0.1)
           snapshot('released')
           PY
+      - name: Measure one upstream test job in isolation
+        shell: bash -l -eo pipefail {0}
+        env:
+          XLA_PYTHON_CLIENT_PREALLOCATE: 'false'
+        run: |
+          python="$(dirname "$GITHUB_WORKSPACE")/spark-ci-work/venv/bin/python"
+          "$python" - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import time
+
+          cgroup = Path('/sys/fs/cgroup')
+          def denials():
+              return int(dict(line.split() for line in (cgroup/'pids.events').read_text().splitlines())['max'])
+
+          before = denials()
+          peak = 0
+          work = str(Path(os.environ['GITHUB_WORKSPACE']).parent / 'spark-ci-work')
+          proc = subprocess.Popen(['scripts/ci_spark.sh', 'test-upstream', work])
+          while proc.poll() is None:
+              peak = max(peak, int((cgroup/'pids.current').read_text()))
+              time.sleep(0.05)
+          print(f'ISOLATED_SUITE peak_tasks={peak} denied_task_creations={denials()-before} exit_code={proc.returncode}', flush=True)
+          raise SystemExit(proc.returncode)
+          PY
