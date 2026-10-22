@@ -581,8 +581,8 @@ class Settings(BaseModel):
 
     Attributes:
         solver: Solver algorithm - 'auto' (default), 'ipm', or 'active_set'.
-                'auto' uses active-set for small QPs (n <= 500, zero+nonneg only),
-                IPM otherwise. 'active_set' is CPU-only, zero+nonneg cones only.
+                'auto' uses the IPM. 'active_set' is opt-in, CPU-only, zero+nonneg
+                cones only.
         device: Device selection - 'auto' (default), 'cuda', or 'cpu'
         device_id: CUDA device ID to use (-1 = use current device, default: -1)
         batch_size: Number of problems in batch for CompiledSolver (default: 1)
