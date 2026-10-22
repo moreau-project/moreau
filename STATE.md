@@ -129,6 +129,14 @@ Julia MOI wrapper. Links against `moreau-c`. Released under Apache 2.0.
 Critical Rule 6 in CLAUDE.md: prefer C++/Rust tests for fast inner-loop
 verification; use Python tests for API/integration validation.
 
+## Documentation
+
+`docs/` contains the Sphinx user guides and API reference. The illustrated
+[chordal decomposition guide](docs/guide/chordal-decomposition.md) covers
+sparse PSD conversion, counterexamples, and CPU/CUDA execution paths.
+Its checked-in SVG figures live in `docs/_static/figures/` and are generated
+by `docs/_scripts/chordal_figures.py` (NumPy and Matplotlib).
+
 ## Build commands
 
 See CLAUDE.md "Build Commands" section. Headline:
