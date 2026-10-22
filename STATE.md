@@ -35,6 +35,7 @@ python/moreau/
 
 tests/python/          # Unified API integration tests
 tests/python/bench/    # Decision-gate benchmarks (checked in)
+tests/python/data/     # Regression problem data (.npz)
 ```
 
 The public direct cone API uses `DirectConeSpec` entries in `Cones.dir_cones`.
@@ -149,6 +150,7 @@ Julia MOI wrapper. Links against `moreau-c`. Released under Apache 2.0.
 | `packages/moreau-cuda/tests/cpp/*.cpp` | GPU gtest binaries (per-kernel + end-to-end) |
 | `packages/moreau/tests/python/*.py` | Unified-API integration tests |
 | `packages/moreau/tests/python/bench/*.py` | Decision-gate benchmarks (checked-in artifacts) |
+| `packages/moreau/tests/python/data/*.npz` | Regression problem data loaded by tests |
 
 Critical Rule 6 in CLAUDE.md: prefer C++/Rust tests for fast inner-loop
 verification; use Python tests for API/integration validation.
