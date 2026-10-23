@@ -13,25 +13,61 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use std::time::Instant;
 
-/// One rayon pool per thread count for the whole process, so live solvers
-/// don't each hold their own OS threads.
+/// Share rayon workers between live solvers with the same thread count.
+/// Only solvers own the pools: after the last solver is dropped, a later
+/// constructor must create fresh workers, including after a subsequent fork.
 fn shared_thread_pool(num_threads: usize) -> Result<Arc<rayon::ThreadPool>, SolverError> {
-    static POOLS: OnceLock<Mutex<HashMap<usize, Arc<rayon::ThreadPool>>>> = OnceLock::new();
+    static POOLS: OnceLock<Mutex<HashMap<usize, Weak<rayon::ThreadPool>>>> = OnceLock::new();
     let mut pools = POOLS.get_or_init(Default::default).lock().unwrap();
-    if let Some(pool) = pools.get(&num_threads) {
-        return Ok(Arc::clone(pool));
+    if let Some(pool) = pools.get(&num_threads).and_then(Weak::upgrade) {
+        return Ok(pool);
     }
+    pools.retain(|_, pool| pool.strong_count() > 0);
     let pool = Arc::new(
         rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .build()
             .map_err(|_e| SolverError::BadInputData("Failed to configure thread pool"))?,
     );
-    pools.insert(num_threads, Arc::clone(&pool));
+    pools.insert(num_threads, Arc::downgrade(&pool));
     Ok(pool)
+}
+
+#[cfg(test)]
+mod thread_pool_tests {
+    use super::*;
+
+    #[test]
+    fn live_solvers_share_workers_only_for_matching_thread_counts() {
+        let make_solver = |num_threads| {
+            CompiledSolver::new(
+                1,
+                1,
+                &[0, 0],
+                &[],
+                &[0, 1],
+                &[0],
+                &[SupportedConeT::NonnegativeConeT(1)],
+                DefaultSettings::<f64> {
+                    verbose: false,
+                    ..DefaultSettings::default()
+                },
+                num_threads,
+                false,
+            )
+            .unwrap()
+        };
+        let first = make_solver(2);
+        let second = make_solver(2);
+        let different = make_solver(3);
+        assert!(Arc::ptr_eq(&first.thread_pool, &second.thread_pool));
+        assert!(!Arc::ptr_eq(&first.thread_pool, &different.thread_pool));
+        assert_eq!(first.num_threads(), 2);
+        assert_eq!(different.num_threads(), 3);
+    }
 }
 
 // Keep smoothing away from a numerically singular cone boundary. This floor

@@ -1095,32 +1095,3 @@ fn test_compiled_solver_variable_soc_batched() {
         assert!(x[0] >= tail_norm - 1e-6, "SOC violated in batch {}", i);
     }
 }
-
-#[test]
-fn test_many_live_compiled_solvers_share_threads() {
-    // 300 solvers x 64 threads is 19200 threads if each solver owns a pool,
-    // past macOS's 16384-per-process limit.
-    let cones = [SupportedConeT::NonnegativeConeT(1)];
-    let settings = DefaultSettings::<f64> {
-        verbose: false,
-        ..DefaultSettings::default()
-    };
-    let solvers: Vec<_> = (0..300)
-        .map(|_| {
-            CompiledSolver::new(
-                1,
-                1,
-                &[0, 0],
-                &[],
-                &[0, 1],
-                &[0],
-                &cones,
-                settings.clone(),
-                64,
-                false,
-            )
-            .unwrap()
-        })
-        .collect();
-    assert_eq!(solvers[299].num_threads(), 64);
-}
