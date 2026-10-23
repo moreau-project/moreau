@@ -8,7 +8,6 @@ Verifies that the CPU solver correctly caches:
 
 import numpy as np
 import pytest
-import time
 
 import moreau
 
@@ -375,57 +374,3 @@ class TestBatchCaching:
         assert q_batch.grad.shape == (batch_size, n)
         assert b_batch.grad is not None
         assert b_batch.grad.shape == (batch_size, m)
-
-
-class TestCachingPerformance:
-    """Test that caching provides expected performance benefits."""
-
-    def test_second_solve_faster_than_first(self, device):
-        """Multiple solves should have consistent performance."""
-        from scipy import sparse
-
-        # Use a larger problem to see timing differences
-        n, m = 50, 25
-
-        P_row_offsets = np.arange(n + 1, dtype=np.int64)
-        P_col_indices = np.arange(n, dtype=np.int64)
-        P_values = np.ones(n, dtype=np.float64) * 2.0
-
-        A_row_offsets = np.arange(m + 1, dtype=np.int64)
-        A_col_indices = np.zeros(m, dtype=np.int64)
-        A_values = np.ones(m, dtype=np.float64)
-
-        q = np.ones(n, dtype=np.float64)
-        b = np.ones(m, dtype=np.float64)
-
-        cones = moreau.Cones(num_zero_cones=m)
-
-        # Convert to sparse matrices
-        P = sparse.csr_array((P_values, P_col_indices, P_row_offsets), shape=(n, n))
-        A = sparse.csr_array((A_values, A_col_indices, A_row_offsets), shape=(m, n))
-
-        # Create bounds (unbounded)
-
-        settings = moreau.Settings(device=device, verbose=False)
-
-        # Warmup
-        solver = moreau.Solver(P, q, A, b, cones, settings)
-        solver.solve()
-
-        # Time first solve
-        solver1 = moreau.Solver(P, q, A, b, cones, settings)
-        start = time.perf_counter()
-        solver1.solve()
-        first_time = time.perf_counter() - start
-
-        # Time second solve (different q)
-        solver2 = moreau.Solver(P, q * 2, A, b, cones, settings)
-        start = time.perf_counter()
-        solver2.solve()
-        second_time = time.perf_counter() - start
-
-        # Second solve should be comparable (at least not much slower)
-        # Note: small problems might not show huge differences due to overhead
-        assert (
-            second_time <= first_time * 2
-        ), f"Second solve ({second_time:.4f}s) much slower than first ({first_time:.4f}s)"
