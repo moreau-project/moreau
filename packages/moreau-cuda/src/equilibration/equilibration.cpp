@@ -31,11 +31,7 @@ void equilibration(
     BatchedVector dInfNormQ(1, batchSize);
 
     for (int iter = 0; iter < settings.max_iter; iter++) {
-        // For LP (empty P), skip P row norms computation
-        if (nnzP > 0) {
-            compute_batch_row_norms_P(P, matrixPRowOf, equil.dwork, stream);
-        }
-
+        compute_batch_row_norms_P(P, matrixPRowOf, equil.dwork, stream);
         compute_batch_col_norms_A_noreset(A, equil.dwork, stream);
 
         compute_batch_row_norms_A(A, matrixARowOf, equil.ework, stream);

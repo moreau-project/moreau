@@ -150,6 +150,11 @@ bs = np.tile([1.0, 0.7, 0.7], (1024, 1))
 result = solver.solve(qs, bs)              # result.x has shape (1024, 2)
 ```
 
+On CPU, live compiled solvers with the same thread count share a worker pool.
+The pool is released when its last solver is destroyed. See the
+[batching guide](docs/guide/batching.md#cpu-workers-and-multiprocessing) for
+multiprocessing guidance.
+
 ## Performance
 
 Benchmarks on real optimization problems (February 2026).
