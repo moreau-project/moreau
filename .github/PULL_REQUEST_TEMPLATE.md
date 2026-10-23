@@ -2,6 +2,13 @@
 
 What does this PR change, and why?
 
+## Impact
+
+One of: No public API change / New feature / Bug fix /
+**Breaking:** what changed — how to migrate (see "Versioning & Backward
+Compatibility" in `CLAUDE.md`). User-visible changes also add a line to
+`CHANGELOG.md` under `[Unreleased]`.
+
 ## Related issues
 
 Closes #... (if applicable)
