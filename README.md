@@ -125,6 +125,9 @@ q, b = jnp.array([2.0, 1.0]), jnp.array([1.0, 0.7, 0.7])
 grad_q = jax.grad(lambda q: solver.solve(P_data, A_data, q, b).x.sum())(q)
 ```
 
+CUDA gradient calls can reuse a solver across sequential JAX executions on
+different execution streams; the backend handles the stream dependencies.
+
 ## Batching
 
 `CompiledSolver` reuses one sparsity pattern across a batch of problems and

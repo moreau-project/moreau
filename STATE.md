@@ -99,6 +99,14 @@ src/
 Headers in `include/moreau/**` mirror the `src/` tree. Tests in
 `tests/cpp/` (gtest binaries built with the main CMake config).
 
+`diff/diff_kkt.cu` keeps cuDSS analysis, factorization, and solves on an owned
+CUDA stream. Preallocated events order each phase with the caller's stream,
+including when JAX reuses a cached differentiation system on a different stream.
+Backward vectors and CSR storage initialize on the caller's stream, including
+lazy workspace allocation and direct-cone resizes.
+`tests/cpp/test_diff.cpp` covers stream changes for single and batched gradients,
+matrix updates, cold unconstrained solves, and forward/adjoint solves with cached factors.
+
 ### Direct conic constraints and slack cones
 
 Python specifies these with `DirectConeSpec` and `Cones.dir_cones`. Unknown
