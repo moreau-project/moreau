@@ -187,3 +187,57 @@ def test_inactive_exp_cone_gradient_matches_finite_differences():
     fd = _central_difference(lambda d: _solve(P, d, 1.0, b, "exp")[1].x.sum(), 1e-4)
     np.testing.assert_allclose(analytic, fd, atol=1e-5)
     np.testing.assert_allclose(analytic, -1.0 / np.asarray(P), atol=1e-6)
+
+
+@pytest.mark.parametrize("equilibrate", [True, False])
+def test_ipm_nearly_active_qp_rhs_derivative(equilibrate):
+    """IPM backward must not shrink a well-defined, large QP sensitivity.
+
+    This is the final constrained stage in CVXPYgen's power-system PGD
+    regression (cvxpy/cvxpylayers#248). With q>0 and positive dual slack,
+    qplus=0, s=S, and g=L-S-q/h. Hence dg/dq = -1/h = -20.
+    """
+    h = 0.05
+    L = 0.6530733729460362
+    S = 0.10727486
+    Q = 0.72107762
+    qstate = 0.01751148141201503
+    c = 0.9431851652578136
+
+    P = sparse.csr_array(np.diag([0., 0., 2., 2.]))
+    A = sparse.csr_array(np.array([
+        [1., 1., 1., 0.],
+        [0., 0., h, 1.],
+        [-1., 0., 0., 0.],
+        [0., -1., 0., 0.],
+        [0., 1., 0., 0.],
+        [0., 0., -1., 0.],
+        [0., 0., 1., 0.],
+        [0., 0., 0., -1.],
+        [0., 0., 0., 1.],
+    ]))
+    q = np.array([c, 0., 0., -1.6*Q])
+    cones = moreau.Cones(num_zero_cones=2, num_nonneg_cones=7)
+    settings = moreau.Settings(
+        device="cpu", solver="ipm", enable_grad=True,
+        ipm_settings=moreau.IPMSettings(
+            equilibrate_enable=equilibrate, diff_method="exact",
+            tol_gap_abs=1e-10, tol_gap_rel=1e-10, tol_feas=1e-10,
+        ),
+    )
+    def solve(q_state, gradients=False):
+        b = np.array([L, q_state, 0., 0., S, Q/(10*h),
+                      Q/(10*h), 0., Q])
+        solver = moreau.Solver(P, q, A, b, cones, settings)
+        result = solver.solve()
+        assert solver.info.status == moreau.SolverStatus.Solved
+        return solver, result
+
+    solver, result = solve(qstate, gradients=True)
+    np.testing.assert_allclose(result.x[0], L-S-qstate/h, atol=1e-7, rtol=0)
+    actual = solver.backward(np.array([1., 0., 0., 0.]))["db"].ravel()[1]
+    assert np.isfinite(actual)
+    np.testing.assert_allclose(actual, -1/h, atol=1e-3, rtol=0)
+    eps = 1e-5
+    fd = (solve(qstate+eps)[1].x[0]-solve(qstate-eps)[1].x[0])/(2*eps)
+    np.testing.assert_allclose(fd, -1/h, atol=1e-4, rtol=0)
