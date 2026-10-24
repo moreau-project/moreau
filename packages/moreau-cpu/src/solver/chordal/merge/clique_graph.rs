@@ -733,3 +733,30 @@ fn edge_metric(c_a: &VertexSet, c_b: &VertexSet, edge_weight: EdgeWeightMethod) 
         EdgeWeightMethod::Cubic => n_1.pow(3) + n_2.pow(3) - n_m.pow(3),
     }
 }
+
+#[test]
+fn test_kruskal_spanning_tree() {
+    // In decreasing weight, Kruskal accepts the first seven edges, rejects (6, 4)
+    // because 6 - 0 - 4 already connects them, and accepts (1, 0) to finish the tree.
+    let edges = [
+        (5, 2),
+        (4, 3),
+        (8, 7),
+        (7, 5),
+        (6, 0),
+        (4, 0),
+        (6, 5),
+        (6, 4),
+        (1, 0),
+    ];
+    let n = edges.len() as isize;
+    let I = edges.iter().map(|e| e.0).collect();
+    let J = edges.iter().map(|e| e.1).collect();
+    let V = (0..n).map(|k| n - k).collect();
+    let mut E = CscMatrix::<isize>::new_from_triplets(9, 9, I, J, V);
+
+    kruskal(&mut E, 9);
+
+    assert_eq!(E.get_entry((6, 4)), Some(2));
+    assert_eq!(E.get_entry((1, 0)), Some(-1));
+}
