@@ -287,9 +287,7 @@ def test_all_cones_delayed_chained_backward(device, theta_value):
         return torch.tensor(value, dtype=torch.float64, device=device)
 
     P, A = [tensor(v) for v in (problem.P.data, problem.A.data)]
-    reference = {
-        name: tensor(getattr(problem.optimum, name)) for name in ("x", "s", "z", "z_x")
-    }
+    reference = {name: tensor(getattr(problem.optimum, name)) for name in ("x", "s", "z", "z_x")}
     indices = torch.tensor(
         np.concatenate([c.indices for c in problem.cones.dir_cones]), device=device
     )
@@ -333,7 +331,11 @@ def test_all_cones_delayed_chained_backward(device, theta_value):
         # The coupling vanishes on the known path but retains the autograd
         # dependency of the second solve on the first solve's x.
         second, _ = planted_solve(
-            theta, 1.2, 0.9, second_scales, second_rates,
+            theta,
+            1.2,
+            0.9,
+            second_scales,
+            second_rates,
             coupling=first.x - first_expected["x"],
         )
         return sum(
