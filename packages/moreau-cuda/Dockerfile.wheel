@@ -102,9 +102,11 @@ RUN python --version && pip --version
 RUN pip install --upgrade pip setuptools wheel && \
     pip install "nanobind>=2.11.0" scikit-build-core numpy auditwheel cmake
 
-# JAX supplies the XLA FFI headers; CUDA plugins and PyTorch are runtime-only.
-RUN pip install jax && \
-    python -c "from jax._src import ffi; from pathlib import Path; assert (Path(ffi.include_dir()) / 'xla/ffi/api/ffi.h').is_file()"
+# Build against the oldest supported FFI ABI (0.1), not the latest JAX headers.
+# Newer headers can produce handlers that older JAX runtimes silently reject.
+# This is a build-only pin; CUDA plugins and PyTorch are runtime-only.
+RUN pip install 'jax==0.6.1' 'jaxlib==0.6.1' && \
+    python -c "from jax import ffi; from pathlib import Path; assert '#define XLA_FFI_API_MINOR 1' in (Path(ffi.include_dir()) / 'xla/ffi/api/c_api.h').read_text()"
 
 WORKDIR /workspace
 COPY . .

@@ -263,13 +263,17 @@ if(MOREAU_BUILD_PYTHON)
         endif()
 
         # JAX FFI bindings (optional - requires JAX with XLA FFI headers)
-        execute_process(
-            COMMAND ${Python_EXECUTABLE} -c "from jax._src import ffi; print(ffi.include_dir())"
-            OUTPUT_VARIABLE JAX_FFI_INCLUDE_DIR
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE jax_ffi_result
-        )
-        if(jax_ffi_result EQUAL 0 AND EXISTS "${JAX_FFI_INCLUDE_DIR}")
+        # Allow builds to use compatibility headers independently of runtime JAX.
+        set(JAX_FFI_INCLUDE_DIR "" CACHE PATH "Directory containing XLA FFI headers")
+        if(NOT JAX_FFI_INCLUDE_DIR)
+            execute_process(
+                COMMAND ${Python_EXECUTABLE} -c "from jax import ffi; print(ffi.include_dir())"
+                OUTPUT_VARIABLE JAX_FFI_INCLUDE_DIR
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+            )
+        endif()
+        if(EXISTS "${JAX_FFI_INCLUDE_DIR}/xla/ffi/api/ffi.h")
             add_library(_moreau_jax_ffi SHARED bindings/jax_ffi.cu)
             target_link_libraries(_moreau_jax_ffi PRIVATE moreau_cuda_lib)
             target_include_directories(_moreau_jax_ffi PRIVATE
