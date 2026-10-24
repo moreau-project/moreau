@@ -20,6 +20,7 @@ import moreau
 
 pytestmark = pytest.mark.skipif(not moreau.device_available("cuda"), reason="CUDA not available")
 
+
 def test_e8_chordal_rarely_stalls():
     D = np.load(Path(__file__).parent / "data" / "membership-e8.npz")
     A = sp.csr_array(
