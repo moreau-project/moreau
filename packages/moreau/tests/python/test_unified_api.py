@@ -205,6 +205,32 @@ class TestCones:
         assert cones.total_constraints() == 6  # 2 * 3
 
 
+class TestActiveSetIterationLimit:
+    """Regression for #45: Settings.max_iter (the IPM's limit) capped active-set."""
+
+    def _solve(self, **settings_kwargs):
+        # min 0.5||x||^2 - 10 sum(x) s.t. x <= 1: all n bounds end up active and
+        # active-set adds one per iteration, so it needs more than 200 iterations.
+        n = 300
+        eye = sparse.eye(n, format="csr")
+        cones = moreau.Cones(num_nonneg_cones=n)
+        settings = moreau.Settings(device="cpu", solver="active_set", **settings_kwargs)
+        solver = moreau.Solver(eye, -10.0 * np.ones(n), eye, np.ones(n), cones, settings)
+        solution = solver.solve()
+        return solver.info, solution
+
+    def test_max_iter_does_not_limit_active_set(self):
+        info, solution = self._solve()
+        assert info.status == moreau.SolverStatus.Solved
+        assert info.iterations > 200
+        np.testing.assert_allclose(solution.x, 1.0, atol=1e-8)
+
+    def test_iter_limit_limits_active_set(self):
+        info, _ = self._solve(active_set_settings=moreau.ActiveSetSettings(iter_limit=50))
+        assert info.status == moreau.SolverStatus.MaxIterations
+        assert info.iterations <= 50
+
+
 class TestSolverNumpy:
     """Tests for unified numpy Solver (matrix-based interface)."""
 
