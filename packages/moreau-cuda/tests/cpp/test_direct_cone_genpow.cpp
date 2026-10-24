@@ -317,3 +317,87 @@ TEST(XConeGenPowDirectXTest, ZeroPlusDirectXGenPowAutoSelectsCuDSS) {
     cudaFree(d_q);
     cudaFree(d_b);
 }
+
+// The dense scaling regression is checked at a fixed noncentral point, rather
+// than inferred from CPU/CUDA iteration counts (which depend on refinement).
+// Cover both dense dimensions and stacked cones with different exponents.
+TEST(XConeGenPowDirectXTest, DenseScalingSatisfiesBothSecants) {
+    for (int dim2 : {1, 2}) {
+        SCOPED_TRACE(dim2);
+        const int dim = 2 + dim2;
+        const std::vector<std::vector<double>> alphas = {{0.3, 0.7}, {0.4, 0.6}};
+        Cones cones;
+        std::vector<double> x, zx;
+        for (int c = 0; c < 2; ++c) {
+            SupportedXConeT xc;
+            xc.kind = XConeKind::GenPower;
+            for (int i = 0; i < dim; ++i) xc.indices.push_back(c * dim + i);
+            xc.gen_power_alphas = alphas[c];
+            xc.gen_power_dim2 = dim2;
+            cones.dir_cones.push_back(xc);
+            x.insert(x.end(), {2.0, 3.0, 0.5});
+            zx.insert(zx.end(), {0.8, 1.4, -0.2});
+            if (dim2 == 2) {
+                x.push_back(-0.3);
+                zx.push_back(0.1);
+            }
+        }
+        cones.initialize(1);
+        Variables vars(2 * dim, 0, 1, cones.totalXConeNumel);
+        vars.x.cpuToGpu(x.data());
+        vars.z_x.cpuToGpu(zx.data());
+        BatchedVector mu(1, 1);
+        mu.setToConstant(1.0);
+        ASSERT_TRUE(vars.scale_cones(cones, mu, ScalingStrategy::PrimalDual));
+        ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        std::vector<double> hs(cones.totalXConeHsEntries);
+        cones.xcone_Hs.gpuToCpu(hs.data());
+        ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+        // Gradient of the primal or dual logarithmic barrier. Using the
+        // barrier directly keeps the oracle independent of the Hs assembly.
+        auto gradient = [dim](const double* v, const std::vector<double>& a,
+                              bool dual) {
+            double phi = 1.0, norm2 = 0.0;
+            for (int i = 0; i < 2; ++i)
+                phi *= std::pow(v[i] / (dual ? a[i] : 1.0), 2.0 * a[i]);
+            for (int i = 2; i < dim; ++i) norm2 += v[i] * v[i];
+            const double zeta = phi - norm2;
+            std::vector<double> g(dim);
+            for (int i = 0; i < 2; ++i)
+                g[i] = -2.0 * a[i] * phi / (v[i] * zeta) - (1.0 - a[i]) / v[i];
+            for (int i = 2; i < dim; ++i) g[i] = 2.0 * v[i] / zeta;
+            return g;
+        };
+        for (int c = 0; c < 2; ++c) {
+            SCOPED_TRACE(c);
+            const double* xc = x.data() + c * dim;
+            const double* zc = zx.data() + c * dim;
+            const auto gx = gradient(xc, alphas[c], false);
+            const auto gz = gradient(zc, alphas[c], true);
+            const double degree = alphas[c].size() + 1;
+            const double mu_local = std::inner_product(xc, xc + dim, zc, 0.0) / degree;
+            std::vector<double> dx(dim), dz(dim), hx(dim, 0.0), hdx(dim, 0.0);
+            for (int i = 0; i < dim; ++i) {
+                dx[i] = xc[i] + mu_local * gz[i];
+                dz[i] = zc[i] + mu_local * gx[i];
+            }
+            int k = c * dim * (dim + 1) / 2;
+            for (int col = 0; col < dim; ++col) {
+                for (int row = 0; row <= col; ++row) {
+                    const double h = hs[k++];
+                    hx[row] += h * xc[col];
+                    hdx[row] += h * dx[col];
+                    if (row != col) {
+                        hx[col] += h * xc[row];
+                        hdx[col] += h * dx[row];
+                    }
+                }
+            }
+            for (int i = 0; i < dim; ++i) {
+                EXPECT_NEAR(hx[i], zc[i], 1e-10) << "Hs*x = z_x, component " << i;
+                EXPECT_NEAR(hdx[i], dz[i], 1e-10) << "Hs*delta_x = delta_z, component " << i;
+            }
+        }
+    }
+}

@@ -167,10 +167,16 @@ struct KKTData : public KKTSolver {
     cudssMatrix_t rhs2_matrix_ = nullptr;
     cudssMatrix_t sol2_matrix_ = nullptr;
     bool cudss_initialized_ = false;
-    int ir_n_steps_ = 0;  // Iterative refinement steps (affects diagonal restore behavior)
     int64_t maxLuNnz_ = -1;  // cuDSS max LU fill-in (-1 = use cuDSS default of 100*nnz)
     bool cudss_pivot_enable_ = false;
-    int cudss_ir_steps_ = 0;
+    int cudss_ir_steps_ = 0;  // iterative refinement steps per solve (see refine)
+
+    // Iterative refinement workspace (allocated when cudss_ir_steps_ > 0)
+    device_unique_ptr<double> refine_e_;       // [batchSize * N] residual of refine_x_
+    device_unique_ptr<double> refine_x_;       // [batchSize * N] refined solution
+    device_unique_ptr<double> refine_dx_;      // [batchSize * N] correction
+    device_unique_ptr<double> refine_norms_;   // [2 * batchSize] smallest residual norm, that of refine_x_
+    device_unique_ptr<int8_t> refine_accept_;  // [batchSize] refine_x_ has the smallest residual
     double dynamic_reg_eps_ = 0.0;  // analog of qdldl's regularize_eps (CPU). 0 disables.
 
     bool populated_ = false;                            // Debug flag: true after populate() called
@@ -2347,8 +2353,8 @@ struct KKTData : public KKTSolver {
 
     // Solve the KKT system: sol = KKT^{-1} * rhs
     // rhs and sol are device pointers to batched vectors [batchSize * (n+m)]
-    // NOTE: rhs and sol MUST be different buffers when IR (iterative refinement)
-    // is enabled, because IR reads the original RHS during residual computation.
+    // NOTE: rhs and sol MUST be different buffers when iterative refinement is
+    // enabled, because refine() reads the original RHS for its residuals.
     void solve(const double* rhs, double* sol, cudaStream_t stream = 0) override {
         if (!cudss_initialized_) {
             throw std::runtime_error("cuDSS not initialized");
@@ -2374,6 +2380,8 @@ struct KKTData : public KKTSolver {
             throw std::runtime_error("cuDSS solve failed with status: " + std::to_string(status));
         }
 
+        if (cudss_ir_steps_ > 0) refine(rhs, sol, stream);
+
 #ifdef MOREAU_DEBUG
         // Compute linear system residual: ||KKT*sol - rhs||_inf for each batch
         // This is the single most important diagnostic for cuDSS accuracy
@@ -2381,6 +2389,41 @@ struct KKTData : public KKTSolver {
             computeAndPrintSolveResidual(rhs, sol, stream);
         }
 #endif
+    }
+
+    // Iterative refinement against the unregularized K, per batch element and
+    // without host syncs: cudss_ir_steps_ times, solve K dx = e for the
+    // residual e = rhs - K x and set x += dx, starting from x = sol, and return
+    // in sol the x with the smallest ||e||_inf. cuDSS's own refinement
+    // (CUDSS_CONFIG_IR_N_STEPS) returns the last x, and where the regularized
+    // factorization is a poor approximation of K the steps raise the residual,
+    // by orders of magnitude. The CPU backend likewise never keeps a step that
+    // raises it (DirectLDLKKTSolver::iterative_refinement).
+    void refine(const double* rhs, double* sol, cudaStream_t stream) {
+        const int64_t N = n + m + p;
+        double* norm_best = refine_norms_.get();
+        double* norm_x = norm_best + batchSize;
+
+        kkt_residual(KKT.rowOffsets(), KKT.colIndices(), KKT.values(), N, KKT.nnz(), batchSize,
+                     rhs, sol, refine_e_.get(), norm_best, stream);
+        cudaMemcpyAsync(refine_x_.get(), sol, sizeof(double) * N * batchSize,
+                        cudaMemcpyDeviceToDevice, stream);
+
+        cudssMatrixSetValues(rhs_matrix_, refine_e_.get());
+        cudssMatrixSetValues(sol_matrix_, refine_dx_.get());
+        for (int step = 0; step < cudss_ir_steps_; ++step) {
+            cudssStatus_t status = cudssExecute(
+                cudss_handle_, CUDSS_PHASE_SOLVE, cudss_config_, cudss_data_,
+                kkt_matrix_, sol_matrix_, rhs_matrix_);
+            if (status != CUDSS_STATUS_SUCCESS) {
+                throw std::runtime_error("cuDSS refinement solve failed with status: " + std::to_string(status));
+            }
+            refine_step(refine_x_.get(), refine_dx_.get(), N * batchSize, stream);
+            kkt_residual(KKT.rowOffsets(), KKT.colIndices(), KKT.values(), N, KKT.nnz(), batchSize,
+                         rhs, refine_x_.get(), refine_e_.get(), norm_x, stream);
+            refine_accept(sol, refine_x_.get(), norm_best, norm_x, refine_accept_.get(),
+                          N, batchSize, stream);
+        }
     }
 
 #ifdef MOREAU_DEBUG
@@ -2588,11 +2631,18 @@ private:
             throw std::runtime_error("cudssConfigSet PIVOT_TYPE failed with status: " + std::to_string(status));
         }
 
-        // Iterative refinement for improved KKT solve accuracy
-        ir_n_steps_ = cudss_ir_steps_;
-        status = cudssConfigSet(cudss_config_, CUDSS_CONFIG_IR_N_STEPS, &ir_n_steps_, sizeof(ir_n_steps_));
+        // Iterative refinement is done by refine(), not by cuDSS
+        int no_ir_steps = 0;
+        status = cudssConfigSet(cudss_config_, CUDSS_CONFIG_IR_N_STEPS, &no_ir_steps, sizeof(no_ir_steps));
         if (status != CUDSS_STATUS_SUCCESS) {
             throw std::runtime_error("cudssConfigSet IR_N_STEPS failed with status: " + std::to_string(status));
+        }
+        if (cudss_ir_steps_ > 0) {
+            refine_e_ = make_device_unique<double>(N * batchSize);
+            refine_x_ = make_device_unique<double>(N * batchSize);
+            refine_dx_ = make_device_unique<double>(N * batchSize);
+            refine_norms_ = make_device_unique<double>(2 * batchSize);
+            refine_accept_ = make_device_unique<int8_t>(batchSize);
         }
 
         // Dynamic regularization: any pivot smaller than `dynamic_reg_eps_`
@@ -2868,10 +2918,8 @@ inline bool KKTData::regularize_and_refactor(
 #endif
 
     // Restore diagonal after factorization. cuDSS has captured the regularized
-    // values into its internal L/D factors. Note: with IR_N_STEPS > 0, cuDSS
-    // references the original matrix for residual computation during solve,
-    // so IR refines against the un-regularized system (using regularized factors
-    // as a preconditioner).
+    // values into its internal L/D factors; refine() computes its residuals with
+    // the un-regularized system (using the regularized factors as a preconditioner).
     if (static_regularization_enable) {
         restore_diagonal(
             KKT.values(), work_diag_.get(), diag_full_.get(),

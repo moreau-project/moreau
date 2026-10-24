@@ -11,6 +11,7 @@
 #include "moreau/cones/cones.hpp"
 #include "moreau/profiling/profiler.hpp"
 #include "moreau/cuda/cusolver_utils.hpp"
+#include "moreau/cuda/status_utils.hpp"
 #include <cuda_runtime.h>
 #include <cusolverDn.h>
 #include <cublas_v2.h>
@@ -526,31 +527,6 @@ __global__ void psd_margins_kernel(
         atomicMin((unsigned long long*)d_min_margin,
                   __double_as_longlong(local_min));
         atomicAdd(d_pos_margin, local_pos);
-    }
-}
-
-/**
- * @brief Apply PSD scaled unit shift: z[triangular_index(k)] += alpha
- */
-__global__ void psd_scaled_unit_shift_kernel(
-    double* __restrict__ z,
-    double alpha,
-    int64_t psd_offset,
-    const int64_t* __restrict__ d_dims,
-    const int64_t* __restrict__ d_sz_offsets,
-    int64_t numPsdCones,
-    int64_t m_total
-) {
-    int64_t batch = blockIdx.x;
-    int64_t cone = blockIdx.y;
-    if (cone >= numPsdCones) return;
-
-    int64_t n = d_dims[cone];
-    int64_t sz_off = d_sz_offsets[cone];
-    int64_t base = batch * m_total + psd_offset + sz_off;
-
-    for (int64_t k = threadIdx.x; k < n; k += blockDim.x) {
-        z[base + triangular_index(k)] += alpha;
     }
 }
 
@@ -2274,23 +2250,6 @@ void check_finite_kernel(const double* data, int64_t n, int64_t batch_stride,
     MOREAU_KERNEL_LAUNCH(check_finite_kernel_impl, blk, 256, 0, stream, data, n, batch_stride, d_flags);
 }
 
-void psd_scaled_unit_shift(
-    double* z,
-    double alpha,
-    int64_t psd_offset,
-    int64_t m_total,
-    const Cones& cones,
-    cudaStream_t stream
-) {
-    if (cones.numPsdCones == 0) return;
-    dim3 grid(cones.batchSize, cones.numPsdCones);
-    MOREAU_KERNEL_LAUNCH(psd_scaled_unit_shift_kernel, grid, 256, 0, stream,
-        z, alpha, psd_offset,
-        cones.d_psd_dims, cones.d_psd_sz_offsets,
-        cones.numPsdCones, m_total
-    );
-}
-
 // ============================================================================
 // PSD smoothing for warm start
 // ============================================================================
@@ -2378,6 +2337,35 @@ __global__ void min_eigval_to_alpha_kernel(
  *
  * No host-device transfers in this implementation.
  */
+void psd_eigenvalues(
+    Cones& cones,
+    const double* z,
+    int64_t psd_offset,
+    int64_t m_total,
+    cudaStream_t stream
+) {
+    CUSOLVER_THROW(cusolverDnSetStream(cones.cusolverH_, stream));
+    dim3 grid(cones.batchSize, cones.numPsdCones);
+    MOREAU_KERNEL_LAUNCH(svec_to_mat_kernel, grid, 256, 0, stream,
+        cones.psd_work_mat1.data(), nullptr, z, psd_offset, m_total,
+        cones.d_psd_dims, cones.d_psd_svec_offsets, cones.d_psd_sz_offsets,
+        cones.d_psd_matsq_offsets, cones.numPsdCones, true);
+
+    int64_t matsq_off = 0, mat_off = 0;
+    for (int64_t cone = 0; cone < cones.numPsdCones; cone++) {
+        int64_t n = cones.psdConeDims[cone];
+        for (int64_t b = 0; b < cones.batchSize; b++) {
+            CUSOLVER_THROW(dsyevd_zeroed_workspace(cones.cusolverH_,
+                CUSOLVER_EIG_MODE_NOVECTOR, CUBLAS_FILL_MODE_LOWER, n,
+                cones.psd_work_mat1.data() + b * cones.totalPsdMatSqDim + matsq_off, n,
+                cones.psd_work_mat3.data() + b * cones.totalPsdMatSqDim + mat_off,
+                cones.d_psd_syevd_work_, cones.psd_syevd_work_size_, cones.d_psd_info_));
+        }
+        matsq_off += n * n;
+        mat_off += n;
+    }
+}
+
 void psd_step_length(
     Cones& cones,
     const double* dz,

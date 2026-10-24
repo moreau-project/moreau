@@ -161,12 +161,42 @@ TEST_F(PsdForwardTest, ShiftOfZeroIgnoresStaleEigWorkspace) {
 
     BatchedVector& z = solver.variables.z;
     z.setToConstant(0.0);
-    c.psd_shift_to_interior(z, static_cast<double>(c.degree()));
+    c.fused_margins_and_shift(z, /*is_primal_cone=*/false, static_cast<double>(c.degree()));
 
     std::vector<double> z_h(m);
     ASSERT_EQ(cudaMemcpy(z_h.data(), z.data(), sizeof(double) * m, cudaMemcpyDeviceToHost),
               cudaSuccess);
     EXPECT_EQ(z_h, (std::vector<double>{1.0, 0.0, 1.0}));
+}
+
+// The default start shifts every cone by one amount from the margins of all
+// cones, as the CPU does: z = (1, diag(-5, 1)) has margins 1 (nonneg) and -5,
+// 1 (PSD eigenvalues), so with degree 3 the target margin is
+// max(1, 0.1 * (1 + 1) / 3) = 1 and every cone moves by 5 + 1 = 6.
+TEST_F(PsdForwardTest, StartShiftUsesMarginsOfAllCones) {
+    int64_t n = 2, m = 4;
+    std::vector<int64_t> P_ro = {0, 0, 0}, P_ci = {};
+    std::vector<int64_t> A_ro = {0, 1, 2, 2, 2}, A_ci = {0, 1};
+
+    Cones cones{};
+    cones.numNonnegCones = 1;
+    cones.psdConeDims = {2};
+    Settings settings;
+    settings.verbose = false;
+    CompiledSolver solver(n, m, 1, P_ro.data(), P_ci.data(), 0,
+                          A_ro.data(), A_ci.data(), 2, cones, settings);
+
+    Cones& c = solver.data.cones;
+    BatchedVector& z = solver.variables.z;
+    std::vector<double> z0 = {1.0, -5.0, 0.0, 1.0};
+    ASSERT_EQ(cudaMemcpy(z.data(), z0.data(), sizeof(double) * m, cudaMemcpyHostToDevice),
+              cudaSuccess);
+    c.fused_margins_and_shift(z, /*is_primal_cone=*/false, static_cast<double>(c.degree()));
+
+    std::vector<double> z_h(m);
+    ASSERT_EQ(cudaMemcpy(z_h.data(), z.data(), sizeof(double) * m, cudaMemcpyDeviceToHost),
+              cudaSuccess);
+    EXPECT_EQ(z_h, (std::vector<double>{7.0, 1.0, 0.0, 7.0}));
 }
 
 // PSD(2): min x0 + x1

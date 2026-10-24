@@ -25,6 +25,10 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- CUDA chordal solves could stall when iterative refinement increased the KKT
+  residual and the default start shifted PSD cones independently of other
+  cones. Keep the refinement iterate with the smallest residual and use a
+  common interior shift across cones for each problem (#110).
 - CPU chordal decomposition filled `A`'s values in the wrong order, so it could
   solve a different problem and report `Solved` (#79).
 - CUDA PSD solves could return NaN after shifting an all-zero PSD block, from a
