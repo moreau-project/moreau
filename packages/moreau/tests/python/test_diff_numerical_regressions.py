@@ -194,8 +194,8 @@ def test_ipm_nearly_active_qp_rhs_derivative(equilibrate):
     """IPM backward must not shrink a well-defined, large QP sensitivity.
 
     This is the final constrained stage in CVXPYgen's power-system PGD
-    regression (cvxpy/cvxpylayers#248). With q>0 and positive dual slack,
-    qplus=0, s=S, and g=L-S-q/h. Hence dg/dq = -1/h = -20.
+    regression (cvxpy/cvxpylayers#248). With q > 0 and positive dual slack,
+    qplus = 0, s = S, and g = L - S - q/h. Hence dg/dq = -1/h = -20.
     """
     h = 0.05
     L = 0.6530733729460362
@@ -204,40 +204,49 @@ def test_ipm_nearly_active_qp_rhs_derivative(equilibrate):
     qstate = 0.01751148141201503
     c = 0.9431851652578136
 
-    P = sparse.csr_array(np.diag([0., 0., 2., 2.]))
-    A = sparse.csr_array(np.array([
-        [1., 1., 1., 0.],
-        [0., 0., h, 1.],
-        [-1., 0., 0., 0.],
-        [0., -1., 0., 0.],
-        [0., 1., 0., 0.],
-        [0., 0., -1., 0.],
-        [0., 0., 1., 0.],
-        [0., 0., 0., -1.],
-        [0., 0., 0., 1.],
-    ]))
-    q = np.array([c, 0., 0., -1.6*Q])
+    P = sparse.csr_array(np.diag([0.0, 0.0, 2.0, 2.0]))
+    A = sparse.csr_array(
+        np.array(
+            [
+                [1.0, 1.0, 1.0, 0.0],
+                [0.0, 0.0, h, 1.0],
+                [-1.0, 0.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, -1.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, -1.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+    )
+    q = np.array([c, 0.0, 0.0, -1.6 * Q])
     cones = moreau.Cones(num_zero_cones=2, num_nonneg_cones=7)
     settings = moreau.Settings(
-        device="cpu", solver="ipm", enable_grad=True,
+        device="cpu",
+        solver="ipm",
+        enable_grad=True,
         ipm_settings=moreau.IPMSettings(
-            equilibrate_enable=equilibrate, diff_method="exact",
-            tol_gap_abs=1e-10, tol_gap_rel=1e-10, tol_feas=1e-10,
+            equilibrate_enable=equilibrate,
+            diff_method="exact",
+            tol_gap_abs=1e-10,
+            tol_gap_rel=1e-10,
+            tol_feas=1e-10,
         ),
     )
-    def solve(q_state, gradients=False):
-        b = np.array([L, q_state, 0., 0., S, Q/(10*h),
-                      Q/(10*h), 0., Q])
+
+    def solve(q_state):
+        b = np.array([L, q_state, 0.0, 0.0, S, Q / (10 * h), Q / (10 * h), 0.0, Q])
         solver = moreau.Solver(P, q, A, b, cones, settings)
         result = solver.solve()
         assert solver.info.status == moreau.SolverStatus.Solved
         return solver, result
 
-    solver, result = solve(qstate, gradients=True)
-    np.testing.assert_allclose(result.x[0], L-S-qstate/h, atol=1e-7, rtol=0)
-    actual = solver.backward(np.array([1., 0., 0., 0.]))["db"].ravel()[1]
+    solver, result = solve(qstate)
+    np.testing.assert_allclose(result.x[0], L - S - qstate / h, atol=1e-7, rtol=0)
+    actual = solver.backward(np.array([1.0, 0.0, 0.0, 0.0]))["db"].ravel()[1]
     assert np.isfinite(actual)
-    np.testing.assert_allclose(actual, -1/h, atol=1e-3, rtol=0)
+    np.testing.assert_allclose(actual, -1 / h, atol=1e-3, rtol=0)
     eps = 1e-5
-    fd = (solve(qstate+eps)[1].x[0]-solve(qstate-eps)[1].x[0])/(2*eps)
-    np.testing.assert_allclose(fd, -1/h, atol=1e-4, rtol=0)
+    fd = (solve(qstate + eps)[1].x[0] - solve(qstate - eps)[1].x[0]) / (2 * eps)
+    np.testing.assert_allclose(fd, -1 / h, atol=1e-4, rtol=0)
