@@ -25,6 +25,8 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- CUDA backward passes could return zero or stale gradients when cached solves
+  or newly allocated workspaces crossed CUDA streams (#112).
 - CUDA chordal solves could stall when iterative refinement increased the KKT
   residual and the default start shifted PSD cones independently of other
   cones. Keep the refinement iterate with the smallest residual and use a
