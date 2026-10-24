@@ -729,3 +729,41 @@ class TestChordalUnequalValuesInColumn:
             g = solver.backward(np.array([[0.0, 1.0]]))
             grads[chordal] = np.asarray(g["dA_values"]).ravel()
         np.testing.assert_allclose(grads[True], grads[False], atol=1e-4)
+
+
+class TestChordalSingularDual:
+    """PSD completion of the dual when a clique's separator block is singular.
+
+    X is 4×4 with unit diagonal and X[2,3] = 0; x holds the other five
+    off-diagonal entries, and the objective is their sum. The cliques are
+    {0,1,2} and {0,1,3}. The optimum is -2, and the optimal dual is
+    Z = ½·11ᵀ, whose separator block Z[{0,1},{0,1}] is singular. Completion
+    must still fill Z[2,3] = ½.
+    """
+
+    EDGES = [(0, 1), (0, 2), (1, 2), (0, 3), (1, 3)]
+    ROW = {(i, j): r for r, (i, j) in enumerate((i, j) for j in range(4) for i in range(j + 1))}
+
+    def _problem(self):
+        rows = [self.ROW[e] for e in self.EDGES]
+        A = sparse.csr_array(([-np.sqrt(2)] * 5, (rows, range(5))), shape=(10, 5))
+        b = np.array([1.0 if i == j else 0.0 for (i, j) in self.ROW])
+        return A, b, np.ones(5), moreau.Cones(psd_dims=[4])
+
+    def _solve(self, device, chordal):
+        A, b, q, cones = self._problem()
+        settings = moreau.Settings(
+            device=device,
+            verbose=False,
+            ipm_settings=moreau.IPMSettings(chordal_decomposition_enable=chordal),
+        )
+        solver = moreau.Solver(sparse.csr_array((5, 5)), q, A, b, cones, settings=settings)
+        sol = solver.solve()
+        return q @ np.asarray(sol.x), np.asarray(sol.z)
+
+    def test_solver_chordal_on_completes_dual(self, device):
+        obj, z = self._solve(device, True)
+        assert abs(obj + 2.0) < 1e-6
+        assert abs(z[self.ROW[(2, 3)]] - np.sqrt(2) / 2) < 1e-6
+        _, z_off = self._solve(device, False)
+        np.testing.assert_allclose(z, z_off, atol=1e-6)
