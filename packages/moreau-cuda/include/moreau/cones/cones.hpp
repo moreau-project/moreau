@@ -2980,15 +2980,11 @@ struct Cones {
     void scaled_unit_shift_batched(BatchedVector& z, const BatchedVector& alpha, bool is_primal_cone, cudaStream_t stream = 0);
 
     /**
-     * @brief Fused: compute margins + alpha + apply shift in one kernel
+     * @brief Shift z into the interior of all cones by one alpha computed from
+     * the margins of all cones (CPU _shift_to_cone_interior), in one kernel
+     * after the PSD blocks' eigenvalues
      */
     void fused_margins_and_shift(BatchedVector& z, bool is_primal_cone, double total_degree, cudaStream_t stream = 0);
-
-    /**
-     * @brief Shift PSD cones into interior using eigendecomp-based margins
-     * Matches CPU _shift_to_cone_interior for PSD cones.
-     */
-    void psd_shift_to_interior(BatchedVector& z, double total_degree, cudaStream_t stream = 0);
 
     /**
      * @brief Get total number of constraints

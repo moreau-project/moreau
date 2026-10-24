@@ -9,6 +9,7 @@ This guide covers the core concepts and features of Moreau.
 
 basic-usage
 psd-cones
+chordal-decomposition
 batching
 direct-cones
 warm-starting

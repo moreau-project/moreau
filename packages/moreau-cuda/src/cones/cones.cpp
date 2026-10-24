@@ -8,7 +8,6 @@
 #include "moreau/cones/cone_kernels.cuh"
 #include "moreau/cones/psd_kernels.cuh"
 #include "moreau/cuda/utils.hpp"
-#include "moreau/cuda/cusolver_utils.hpp"
 #include "moreau/cuda/status_utils.hpp"
 #include <iostream>
 #include <limits>
@@ -289,6 +288,7 @@ void Cones::scaled_unit_shift_batched(BatchedVector& z, const BatchedVector& alp
 
 void Cones::fused_margins_and_shift(BatchedVector& z, bool is_primal_cone, double total_degree, cudaStream_t stream) {
     int64_t m_total = totalConstraints();
+    if (numPsdCones > 0) psd_eigenvalues(*this, z.data(), psdOffset(), m_total, stream);
 
     fused_margins_and_shift_kernel(
         z.data(),
@@ -306,89 +306,14 @@ void Cones::fused_margins_and_shift(BatchedVector& z, bool is_primal_cone, doubl
         d_soc_offsets,
         totalSocDim,
         totalPsdSvecDim,
-        d_soc_sz_offsets
+        d_soc_sz_offsets,
+        numPsdCones,
+        d_psd_dims,
+        d_psd_sz_offsets,
+        d_psd_mat_offsets,
+        psd_work_mat3.data(),
+        totalPsdMatSqDim
     );
-}
-
-void Cones::psd_shift_to_interior(BatchedVector& z, double total_degree, cudaStream_t stream) {
-    if (numPsdCones == 0) return;
-
-    int64_t m_total = totalConstraints();
-    int64_t psd_offset = psdOffset();
-    cudaStreamSynchronize(stream);
-
-    // Reconstruct host-side sz_offsets
-    std::vector<int64_t> orig_off(psdConeDimsOriginal.size() + 1, 0);
-    for (size_t i = 0; i < psdConeDimsOriginal.size(); i++)
-        orig_off[i+1] = orig_off[i] + psdConeDimsOriginal[i]*(psdConeDimsOriginal[i]+1)/2;
-    std::vector<int64_t> sz_off(numPsdCones);
-    for (int64_t i = 0; i < numPsdCones; i++)
-        sz_off[i] = orig_off[psdSortPerm[i]];
-
-    // Compute PSD min_margin and pos_margin via eigendecomp
-    double min_margin = 1e30, pos_margin = 0.0;
-
-    for (int64_t b = 0; b < batchSize; b++) {
-        int64_t matsq_off = 0;
-        for (int64_t c = 0; c < numPsdCones; c++) {
-            int64_t n = psdConeDims[c];
-            int64_t n2 = n * n;
-            int64_t svec_dim = n*(n+1)/2;
-
-            // Read svec, convert to dense matrix
-            std::vector<double> svec_h(svec_dim);
-            CUDA_THROW(cudaMemcpy(svec_h.data(),
-                      z.data() + b * m_total + psd_offset + sz_off[c],
-                      sizeof(double) * svec_dim, cudaMemcpyDeviceToHost));
-
-            std::vector<double> mat(n2, 0.0);
-            int64_t idx = 0;
-            for (int64_t col = 0; col < n; col++) {
-                for (int64_t row = 0; row <= col; row++) {
-                    double v = svec_h[idx++];
-                    if (row == col) {
-                        mat[col*n+row] = v;
-                    } else {
-                        double u = v * 0.7071067811865476;
-                        mat[col*n+row] = u;
-                        mat[row*n+col] = u;
-                    }
-                }
-            }
-
-            // Eigendecompose using this cone's workspace
-            double* d_mat = psd_work_mat1.data() + b * totalPsdMatSqDim + matsq_off;
-            double* d_eig = psd_work_mat3.data() + b * totalPsdMatSqDim + matsq_off;
-            CUDA_THROW(cudaMemcpy(d_mat, mat.data(), sizeof(double) * n2, cudaMemcpyHostToDevice));
-            CUDA_THROW(cudaMemset(d_psd_info_, 0, sizeof(int)));
-            CUSOLVER_THROW(cusolverDnSetStream(cusolverH_, stream));
-            CUSOLVER_THROW(dsyevd_zeroed_workspace(cusolverH_,
-                                   CUSOLVER_EIG_MODE_NOVECTOR, CUBLAS_FILL_MODE_LOWER,
-                                   n, d_mat, n, d_eig,
-                                   d_psd_syevd_work_, psd_syevd_work_size_,
-                                   d_psd_info_));
-            CUDA_THROW(cudaDeviceSynchronize());
-
-            std::vector<double> eigs(n);
-            CUDA_THROW(cudaMemcpy(eigs.data(), d_eig, sizeof(double) * n, cudaMemcpyDeviceToHost));
-
-            for (int64_t i = 0; i < n; i++) {
-                if (eigs[i] < min_margin) min_margin = eigs[i];
-                if (eigs[i] > 0) pos_margin += eigs[i];
-            }
-            matsq_off += n2;
-        }
-    }
-
-    // CPU _shift_to_cone_interior algorithm
-    double target = std::max(1.0, pos_margin * 0.1 / total_degree);
-
-    if (min_margin <= 0.0) {
-        psd_scaled_unit_shift(z.data(), -min_margin, psd_offset, m_total, *this, stream);
-        psd_scaled_unit_shift(z.data(), target, psd_offset, m_total, *this, stream);
-    } else if (min_margin < target) {
-        psd_scaled_unit_shift(z.data(), target - min_margin, psd_offset, m_total, *this, stream);
-    }
 }
 
 } // namespace moreau

@@ -275,6 +275,10 @@ void scaled_unit_shift_batched_kernel(
  * @param m_total Total constraints
  * @param batchSize Number of problems
  * @param stream CUDA stream
+ * @param psd_eigenvalues Eigenvalues of each PSD block of z, cone c of batch b at
+ *        [b * psd_eigenvalues_stride + d_psd_mat_offsets[c]]. Every cone, PSD
+ *        included, is shifted by the same alpha from the margins of all cones,
+ *        as in the CPU's _shift_to_cone_interior.
  */
 void fused_margins_and_shift_kernel(
     double* z,
@@ -292,7 +296,13 @@ void fused_margins_and_shift_kernel(
     const int64_t* d_soc_offsets = nullptr,
     int64_t totalSocDim = 0,
     int64_t totalPsdSvecDim = 0,
-    const int64_t* d_soc_sz_offsets = nullptr
+    const int64_t* d_soc_sz_offsets = nullptr,
+    int64_t numPsdCones = 0,
+    const int64_t* d_psd_dims = nullptr,
+    const int64_t* d_psd_sz_offsets = nullptr,
+    const int64_t* d_psd_mat_offsets = nullptr,
+    const double* psd_eigenvalues = nullptr,
+    int64_t psd_eigenvalues_stride = 0
 );
 
 /**

@@ -185,23 +185,26 @@ def test_all_cones_directional_derivatives(device, output, cases):
         "q": rng.normal(size=problem.q.shape),
         "b": rng.normal(size=problem.b.shape),
     }
-    # At smaller steps the boundary solve error can dominate the difference.
-    # A 1e-2 step retains agreement with the analytic pullback on CPU and CUDA.
-    eps = 1e-2
+    # Boundary-solve error is amplified by 1/eps. Use a fourth-order central
+    # difference so a larger step reduces that noise without introducing the
+    # O(eps**2) truncation error of a two-point difference.
+    eps = 2e-2
     for name, direction in directions.items():
         value = getattr(problem, name)
         losses = []
-        for sign in (-1, 1):
+        for step in (-2, -1, 1, 2):
             perturbation = sparse.csr_matrix(direction) if name in ("P", "A") else direction
-            setattr(problem, name, value + sign * eps * perturbation)
-            perturbed = problem.solver(device, ipm_options=ipm).solve()
+            setattr(problem, name, value + step * eps * perturbation)
+            perturbed_solver = problem.solver(device, ipm_options=ipm)
+            perturbed = perturbed_solver.solve()
+            assert perturbed_solver.info.status.name in ("Solved", "AlmostSolved")
             losses.append(upstream @ getattr(perturbed, output))
         setattr(problem, name, value)
         key = "d" + name + ("_values" if name in ("P", "A") else "")
         analytic = grad[key] @ direction.ravel() if name in ("P", "A") else grad[key] @ direction
         np.testing.assert_allclose(
             analytic,
-            (losses[1] - losses[0]) / (2 * eps),
+            (losses[0] - 8 * losses[1] + 8 * losses[2] - losses[3]) / (12 * eps),
             atol=2e-3,
             rtol=3e-3,
             err_msg=f"{output} wrt {name}",
