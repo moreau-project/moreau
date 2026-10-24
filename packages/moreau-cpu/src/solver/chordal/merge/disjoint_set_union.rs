@@ -41,13 +41,12 @@ impl DisjointSetUnion {
         self.root(x) == self.root(y)
     }
 
-    fn root(&mut self, x: usize) -> usize {
-        let mut parent = x;
-        while parent != self.parents[x] {
-            self.parents[x] = self.parents[self.parents[x]]; //path compression
-            parent = self.parents[x];
+    fn root(&mut self, mut x: usize) -> usize {
+        while self.parents[x] != x {
+            self.parents[x] = self.parents[self.parents[x]]; //path halving
+            x = self.parents[x];
         }
-        parent
+        x
     }
 }
 
@@ -115,4 +114,18 @@ fn test_root() {
     assert_eq!(dsu.root(2), common);
     assert_eq!(dsu.root(3), common);
     assert_eq!(dsu.root(4), 4);
+}
+
+#[test]
+fn test_in_same_set_three_levels_deep() {
+    // union by rank builds the chain 0 -> 1 -> 3 -> 7
+    let mut dsu = DisjointSetUnion::new(8);
+    dsu.union(0, 1);
+    dsu.union(2, 3);
+    dsu.union(1, 3);
+    dsu.union(4, 5);
+    dsu.union(6, 7);
+    dsu.union(5, 7);
+    dsu.union(3, 7);
+    assert!(dsu.in_same_set(0, 4));
 }
