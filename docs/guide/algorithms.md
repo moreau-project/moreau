@@ -374,6 +374,8 @@ inherits Clarabel's [1] conditioning stack:
   in weak directions without factoring an indefinite, potentially singular
   unregularized system. Correction retains the best residual and stops updating
   each problem on convergence or non-improvement, with at most seven corrections.
+  CUDA Woodbury differentiation likewise measures its refinement residual against
+  the unregularized normal equations, retaining its regularized preconditioner.
 - **Smoothed.** Replaces the projection Jacobian with its central-path
   (proximal, parameter $\mu$) smoothing for a continuous derivative. See the
   [smoothed differentiation](smoothed-differentiation.md) guide.
