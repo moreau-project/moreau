@@ -162,7 +162,7 @@ struct IPMSettings {
     // Only relevant for non-symmetric matrices with ALG_1/ALG_2 reordering.
     int64_t maxLuNnz = -1;
 
-    // cuDSS iterative refinement steps (only applies when kktSolverType is CuDSS)
+    // Iterative refinement steps per cuDSS KKT solve (see KKTData::refine)
     int cudssIrSteps = 2;
 
     // cuDSS pivoting (only applies when kktSolverType is CuDSS)
