@@ -20,7 +20,10 @@ TEST(MultiPsdMre, SmallestCircle02_NoChordalRaw) {
     int batchSize = 1;
     double obj_true = 98.87372912081759;
 
-    // P: 9x9 diagonal with 1e-7 entries (full symmetric = same as upper+lower for diagonal)
+    // SmallestCircle02 is an SDP with P = 0. Adding a quadratic term
+    // changes its objective and introduces weakly curved directions that can
+    // stall at AlmostSolved. Keep the diagonal pattern, but solve the actual
+    // benchmark whose optimum is obj_true. Zero-P equilibration is supported.
     std::vector<int64_t> P_ro = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     std::vector<int64_t> P_ci = {0, 1, 2, 3, 4, 5, 6, 7, 8};
     int64_t nnzP = 9;
@@ -88,7 +91,7 @@ TEST(MultiPsdMre, SmallestCircle02_NoChordalRaw) {
                           cones, settings);
 
     // P and q values
-    std::vector<double> P_values(9, 1e-7);
+    std::vector<double> P_values(9, 0.0);
     std::vector<double> q = {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     std::vector<double> b = {
         0.0, 0.0, 0.0, 0.0, 0.0,
@@ -137,8 +140,8 @@ TEST(MultiPsdMre, SmallestCircle02_NoChordalRaw) {
     printf("Error: %.2e\n", std::abs(obj - obj_true));
 
     // Check status
-    EXPECT_EQ(status, 1) << "Expected Solved status";
-    EXPECT_NEAR(obj, obj_true, 1.0) << "Objective should be close to expected";
+    EXPECT_EQ(status, static_cast<int32_t>(SolverStatus::Solved)) << "Expected Solved status";
+    EXPECT_NEAR(obj, obj_true, 1e-6) << "Objective should be close to expected";
 
     cudaFree(d_P);
     cudaFree(d_A);

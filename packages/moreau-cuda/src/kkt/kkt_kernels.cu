@@ -6781,4 +6781,112 @@ void refresh_xcone_genpow_expansion(
         totalXGenPowerDim, totalXGenPowerAlphas, totalXGenPowerDim2);
 }
 
+// ============================================================================
+// Iterative refinement of a KKT solve (see KKTData::refine)
+// ============================================================================
+
+// e -= K*x for the symmetric K given by the upper triangle of a CSR matrix,
+// one thread per row and batch element. Entries below the diagonal are
+// skipped, as cuDSS skips them in the CUDSS_MVIEW_UPPER factorization.
+__global__ void kkt_subtract_product_kernel(
+    const int64_t* __restrict__ row_offsets,
+    const int64_t* __restrict__ col_indices,
+    const double* __restrict__ values,
+    int64_t N,
+    int64_t nnz,
+    const double* __restrict__ x,
+    double* __restrict__ e
+) {
+    int64_t i = blockIdx.x * static_cast<int64_t>(blockDim.x) + threadIdx.x;
+    if (i >= N) return;
+    const double* v = values + blockIdx.y * nnz;
+    const double* xb = x + blockIdx.y * N;
+    double* eb = e + blockIdx.y * N;
+    double row_sum = 0.0;
+    for (int64_t k = row_offsets[i]; k < row_offsets[i + 1]; ++k) {
+        int64_t j = col_indices[k];
+        if (j < i) continue;
+        row_sum += v[k] * xb[j];
+        if (j != i) atomicAdd(&eb[j], -v[k] * xb[i]);
+    }
+    atomicAdd(&eb[i], -row_sum);
+}
+
+// norm[b] = max(norm[b], ||e_b||_inf), counting a non-finite entry as inf.
+__global__ void refine_inf_norm_kernel(const double* __restrict__ e, int64_t N, double* __restrict__ norm) {
+    int64_t i = blockIdx.x * static_cast<int64_t>(blockDim.x) + threadIdx.x;
+    double a = (i < N) ? fabs(e[blockIdx.y * N + i]) : 0.0;
+    if (!isfinite(a)) a = INFINITY;
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        a = fmax(a, __shfl_down_sync(0xffffffff, a, offset));
+    }
+    if ((threadIdx.x & 31) == 0) atomicMax_double(&norm[blockIdx.y], a);
+}
+
+void kkt_residual(
+    const int64_t* row_offsets,
+    const int64_t* col_indices,
+    const double* values,
+    int64_t N,
+    int64_t nnz,
+    int64_t batchSize,
+    const double* b,
+    const double* x,
+    double* e,
+    double* norm,
+    cudaStream_t stream
+) {
+    cudaMemcpyAsync(e, b, sizeof(double) * N * batchSize, cudaMemcpyDeviceToDevice, stream);
+    dim3 grid((N + 255) / 256, batchSize);
+    MOREAU_KERNEL_LAUNCH(kkt_subtract_product_kernel, grid, 256, 0, stream,
+        row_offsets, col_indices, values, N, nnz, x, e);
+    cudaMemsetAsync(norm, 0, sizeof(double) * batchSize, stream);
+    MOREAU_KERNEL_LAUNCH(refine_inf_norm_kernel, grid, 256, 0, stream, e, N, norm);
+}
+
+// x += dx
+__global__ void refine_step_kernel(double* __restrict__ x, const double* __restrict__ dx, int64_t size) {
+    int64_t i = blockIdx.x * static_cast<int64_t>(blockDim.x) + threadIdx.x;
+    if (i < size) x[i] += dx[i];
+}
+
+void refine_step(double* x, const double* dx, int64_t size, cudaStream_t stream) {
+    MOREAU_KERNEL_LAUNCH(refine_step_kernel, (size + 255) / 256, 256, 0, stream, x, dx, size);
+}
+
+__global__ void refine_decide_kernel(
+    double* __restrict__ norm_best,
+    const double* __restrict__ norm_candidate,
+    int8_t* __restrict__ accept,
+    int64_t batchSize
+) {
+    int64_t b = blockIdx.x * static_cast<int64_t>(blockDim.x) + threadIdx.x;
+    if (b >= batchSize) return;
+    accept[b] = norm_candidate[b] < norm_best[b];
+    if (accept[b]) norm_best[b] = norm_candidate[b];
+}
+
+__global__ void refine_accept_kernel(
+    double* __restrict__ x,
+    const double* __restrict__ candidate,
+    const int8_t* __restrict__ accept,
+    int64_t N
+) {
+    int64_t i = blockIdx.x * static_cast<int64_t>(blockDim.x) + threadIdx.x;
+    if (i < N && accept[blockIdx.y]) x[blockIdx.y * N + i] = candidate[blockIdx.y * N + i];
+}
+
+void refine_accept(
+    double* x, const double* candidate,
+    double* norm_best, const double* norm_candidate,
+    int8_t* accept,
+    int64_t N, int64_t batchSize,
+    cudaStream_t stream
+) {
+    MOREAU_KERNEL_LAUNCH(refine_decide_kernel, (batchSize + 255) / 256, 256, 0, stream,
+        norm_best, norm_candidate, accept, batchSize);
+    dim3 grid((N + 255) / 256, batchSize);
+    MOREAU_KERNEL_LAUNCH(refine_accept_kernel, grid, 256, 0, stream, x, candidate, accept, N);
+}
+
 } // namespace moreau
