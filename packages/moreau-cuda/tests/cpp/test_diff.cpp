@@ -17,6 +17,7 @@
 #include <random>
 
 #include "moreau/diff/diff.hpp"
+#include "moreau/diff/diff_kkt.hpp"
 #include "moreau/diff/diff_kernels.cuh"
 #include "moreau/solver/solver.hpp"
 #include "moreau/cones/cones.hpp"
@@ -6284,6 +6285,52 @@ TEST(WoodburyDiffTest, WoodburyNonPowerOfTwoMatchesCuDSS) {
         EXPECT_NEAR(dq_wb[j], dq_cudss[j], 1e-6)
             << "Non-power-of-2 Woodbury vs CuDSS dq[" << j << "]: wb=" << dq_wb[j]
             << " cudss=" << dq_cudss[j];
+    }
+}
+
+TEST(HSDERefinementTest, WeakDirectionsForwardAndAdjoint) {
+    // An exact diagonal J gives an independent solution for both orientations.
+    // Different RHS scales exercise per-batch stopping, including a zero RHS.
+    const int64_t ro[] = {0, 1}, ci[] = {0}, aro[] = {0};
+    Cones cones;
+    DiffKKT kkt(1, 0, 3, ro, ci, 1, aro, nullptr, 0, cones, KKTSolverType::CuDSS);
+    std::vector<int64_t> rows(kkt.augdim + 1), cols(kkt.KKT.nnz());
+    cudaMemcpy(rows.data(), kkt.KKT.rowOffsets(), rows.size() * sizeof(int64_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(cols.data(), kkt.KKT.colIndices(), cols.size() * sizeof(int64_t), cudaMemcpyDeviceToHost);
+    std::vector<double> values(3 * kkt.KKT.nnz(), 0.0);
+    for (int batch = 0; batch < 3; ++batch) {
+        for (int64_t r = 0; r < kkt.augdim; ++r) {
+            for (int64_t k = rows[r]; k < rows[r + 1]; ++k) {
+                if (cols[k] == r) values[batch * kkt.KKT.nnz() + k] = r < kkt.jdim ? 1.0 : -1e-8;
+                if (cols[k] == kkt.jdim + r) values[batch * kkt.KKT.nnz() + k] = r == 0 ? 1e-2 : 1.0;
+            }
+        }
+    }
+    cudaMemcpy(kkt.KKT.values(), values.data(), values.size() * sizeof(double), cudaMemcpyHostToDevice);
+    kkt.factor();
+    BatchedVector rhs(2, 3), sol(2, 3);
+    copy_to_batched(rhs, {1e-2, 1.0, 0.0, 0.0, -2e-2, 3.0});
+    for (bool adjoint : {false, true}) {
+        SCOPED_TRACE(adjoint ? "adjoint" : "forward");
+        if (adjoint) kkt.solveAdjoint(rhs.data(), sol.data());
+        else kkt.solveForward(rhs.data(), sol.data());
+        auto actual = copy_from_batched(sol);
+        const std::vector<double> expected = {1., 1., 0., 0., -2., 3.};
+        for (size_t i = 0; i < expected.size(); ++i) EXPECT_NEAR(actual[i], expected[i], 1e-7);
+    }
+}
+
+TEST(ExpConeDerivativeTest, OutsidePolarMatchesProjectionKKT) {
+    // v=(3,4,-2)=p+3*normal at p=(0,1,1), normal=(1,1,-1).
+    // H here is D Pi_K*(-v) = I - D Pi_K(v).
+    BatchedVector u(3, 1), H(9, 1);
+    copy_to_batched(u, {-3., -4., 2.});
+    compute_exp_derivative(H.data(), u.data(), 0, 1, 1, 3, 0);
+    auto actual = copy_from_batched(H);
+    const double primal[] = {2., -1., 1., -1., 5., 4., 1., 4., 5.};
+    for (int i = 0; i < 9; ++i) {
+        const double identity = i % 4 == 0 ? 1.0 : 0.0;
+        EXPECT_NEAR(actual[i], identity - primal[i] / 9.0, 1e-7);
     }
 }
 
