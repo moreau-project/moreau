@@ -1417,7 +1417,13 @@ __global__ void fused_margins_and_shift_impl(
     const int64_t* __restrict__ d_soc_offsets,
     int64_t totalSocDim,
     int64_t totalPsdSvecDim,
-    const int64_t* __restrict__ d_soc_sz_offsets)
+    const int64_t* __restrict__ d_soc_sz_offsets,
+    int64_t numPsdCones,
+    const int64_t* __restrict__ d_psd_dims,
+    const int64_t* __restrict__ d_psd_sz_offsets,
+    const int64_t* __restrict__ d_psd_mat_offsets,
+    const double* __restrict__ psd_eigenvalues,
+    int64_t psd_eigenvalues_stride)
 {
     int64_t batch = blockIdx.x;
     if (batch >= batchSize) return;
@@ -1458,6 +1464,15 @@ __global__ void fused_margins_and_shift_impl(
     }
     offset += totalSocDim;
     offset += totalPsdSvecDim;
+
+    // PSD cones: the eigenvalues of mat(z), precomputed per cone
+    const double* eig = psd_eigenvalues + batch * psd_eigenvalues_stride;
+    for (int64_t c = 0; c < numPsdCones; c++) {
+        for (int64_t i = d_psd_mat_offsets[c] + threadIdx.x; i < d_psd_mat_offsets[c + 1]; i += blockDim.x) {
+            local_min = fmin(local_min, eig[i]);
+            local_pos += fmax(eig[i], 0.0);
+        }
+    }
 
     int64_t exp_start = offset;
     for (int64_t i = threadIdx.x; i < numExpCones; i += blockDim.x) {
@@ -1529,6 +1544,13 @@ __global__ void fused_margins_and_shift_impl(
         z[offset + d_soc_sz_offsets[i]] += alpha_batch;
     }
     offset += totalSocDim;
+
+    // PSD cones: add alpha to the diagonal
+    for (int64_t c = 0; c < numPsdCones; c++) {
+        for (int64_t k = threadIdx.x; k < d_psd_dims[c]; k += blockDim.x) {
+            z[offset + d_psd_sz_offsets[c] + k * (k + 3) / 2] += alpha_batch;
+        }
+    }
     offset += totalPsdSvecDim;
 
     for (int64_t i = threadIdx.x; i < numExpCones; i += blockDim.x) {
@@ -1559,7 +1581,13 @@ void fused_margins_and_shift_kernel(
     const int64_t* d_soc_offsets,
     int64_t totalSocDim,
     int64_t totalPsdSvecDim,
-    const int64_t* d_soc_sz_offsets)
+    const int64_t* d_soc_sz_offsets,
+    int64_t numPsdCones,
+    const int64_t* d_psd_dims,
+    const int64_t* d_psd_sz_offsets,
+    const int64_t* d_psd_mat_offsets,
+    const double* psd_eigenvalues,
+    int64_t psd_eigenvalues_stride)
 {
     if (m_total == 0 || batchSize == 0) return;
 
@@ -1570,7 +1598,9 @@ void fused_margins_and_shift_kernel(
         z, is_primal_cone, degree,
         numZeroCones, numNonnegCones, numSocCones, numExpCones, numPowerCones,
         m_total, batchSize,
-        d_soc_dims, d_soc_offsets, totalSocDim, totalPsdSvecDim, d_soc_sz_offsets);
+        d_soc_dims, d_soc_offsets, totalSocDim, totalPsdSvecDim, d_soc_sz_offsets,
+        numPsdCones, d_psd_dims, d_psd_sz_offsets, d_psd_mat_offsets,
+        psd_eigenvalues, psd_eigenvalues_stride);
 }
 
 } // namespace moreau

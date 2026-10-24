@@ -25,6 +25,10 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- CUDA chordal solves could stall when iterative refinement increased the KKT
+  residual and the default start shifted PSD cones independently of other
+  cones. Keep the refinement iterate with the smallest residual and use a
+  common interior shift across cones for each problem (#110).
 - CPU chordal decomposition filled `A`'s values in the wrong order, so it could
   solve a different problem and report `Solved` (#79).
 - CUDA PSD solves could return NaN after shifting an all-zero PSD block, from a
@@ -34,3 +38,6 @@ All notable changes to Moreau are documented here. The format follows
   warm starts; it now defaults to zeros (#92).
 - The docs gave the wrong slack row order for PSD mixed with exponential or
   power cones (#55), and several examples were wrong or didn't run (#73).
+- CUDA equilibration of problems with `P = 0` (LPs, SOCPs, SDPs) started each
+  Ruiz iteration from stale column norms, so it scaled `A` differently from the
+  CPU (#107).

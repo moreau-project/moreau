@@ -8,7 +8,7 @@ Verifies that the CPU solver correctly caches:
 
 import numpy as np
 import pytest
-import time
+from unittest.mock import Mock
 
 import moreau
 
@@ -377,55 +377,24 @@ class TestBatchCaching:
         assert b_batch.grad.shape == (batch_size, m)
 
 
-class TestCachingPerformance:
-    """Test that caching provides expected performance benefits."""
+class TestCompiledSolverCaching:
+    """Check reuse directly; sub-millisecond timings depend on host scheduling."""
 
-    def test_second_solve_faster_than_first(self, device):
-        """Multiple solves should have consistent performance."""
-        from scipy import sparse
+    def test_repeated_solves_reuse_setup(self, device, monkeypatch):
+        n, m, P_ro, P_ci, P_val, A_ro, A_ci, A_val, q, b, cones = create_qp_problem()
+        settings = moreau.Settings(device=device, solver="ipm", verbose=False, batch_size=1)
+        solver = moreau.CompiledSolver(n, m, P_ro, P_ci, A_ro, A_ci, cones, settings)
+        backend = Mock(wraps=solver._impl)
+        monkeypatch.setattr(solver, "_impl", backend)
+        solver.setup(P_val, A_val)
 
-        # Use a larger problem to see timing differences
-        n, m = 50, 25
+        # Change both q and b, then return to the original problem. For
+        # P=2I and A=-I, x=max(-q/2, -b) is available in closed form.
+        for qi, bi in ((q, b), (2 * q, b), (q, b - 2), (q, b)):
+            result = solver.solve(qi[None, :], bi[None, :])
+            assert solver.info.status[0] == moreau.SolverStatus.Solved
+            np.testing.assert_allclose(result.x[0], np.maximum(-qi / 2, -bi), atol=1e-6)
+            assert solver._impl is backend
+            backend.setup.assert_called_once()
 
-        P_row_offsets = np.arange(n + 1, dtype=np.int64)
-        P_col_indices = np.arange(n, dtype=np.int64)
-        P_values = np.ones(n, dtype=np.float64) * 2.0
-
-        A_row_offsets = np.arange(m + 1, dtype=np.int64)
-        A_col_indices = np.zeros(m, dtype=np.int64)
-        A_values = np.ones(m, dtype=np.float64)
-
-        q = np.ones(n, dtype=np.float64)
-        b = np.ones(m, dtype=np.float64)
-
-        cones = moreau.Cones(num_zero_cones=m)
-
-        # Convert to sparse matrices
-        P = sparse.csr_array((P_values, P_col_indices, P_row_offsets), shape=(n, n))
-        A = sparse.csr_array((A_values, A_col_indices, A_row_offsets), shape=(m, n))
-
-        # Create bounds (unbounded)
-
-        settings = moreau.Settings(device=device, verbose=False)
-
-        # Warmup
-        solver = moreau.Solver(P, q, A, b, cones, settings)
-        solver.solve()
-
-        # Time first solve
-        solver1 = moreau.Solver(P, q, A, b, cones, settings)
-        start = time.perf_counter()
-        solver1.solve()
-        first_time = time.perf_counter() - start
-
-        # Time second solve (different q)
-        solver2 = moreau.Solver(P, q * 2, A, b, cones, settings)
-        start = time.perf_counter()
-        solver2.solve()
-        second_time = time.perf_counter() - start
-
-        # Second solve should be comparable (at least not much slower)
-        # Note: small problems might not show huge differences due to overhead
-        assert (
-            second_time <= first_time * 2
-        ), f"Second solve ({second_time:.4f}s) much slower than first ({first_time:.4f}s)"
+        assert backend.solve.call_count == 4
