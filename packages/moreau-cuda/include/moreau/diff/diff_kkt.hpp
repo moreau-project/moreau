@@ -315,6 +315,13 @@ struct DiffKKT {
     cudssMatrix_t sol_matrix_ = nullptr;
     bool cudss_initialized_ = false;
 
+    // cuDSS binds internal state to the analysis stream. Own that stream so
+    // cached factors can outlive any caller stream; events order each phase
+    // with the caller's matrix/RHS producers and solution consumers.
+    cudaStream_t cudss_stream_ = nullptr;
+    cudaEvent_t cudss_input_ready_ = nullptr;
+    cudaEvent_t cudss_output_ready_ = nullptr;
+
     // Work vectors (cuDSS path)
     BatchedVector work_rhs_;   // [augdim]
     BatchedVector work_sol_;   // [augdim]
@@ -462,6 +469,8 @@ struct DiffKKT {
     const int64_t* getXSocSparseDims() const noexcept { return d_xcone_soc_sparse_dims_.get(); }
 
 private:
+    void begin_cudss_execution(cudaStream_t stream);
+    void end_cudss_execution(cudaStream_t stream);
     void initialize_cudss(cudaStream_t stream);
     void cleanup_cudss();
 
