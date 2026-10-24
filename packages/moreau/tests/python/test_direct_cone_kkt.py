@@ -259,7 +259,8 @@ def test_all_cones_batched_setup_and_warm_reuse(device):
 
 
 @pytest.mark.torch
-def test_all_cones_delayed_chained_backward(device):
+@pytest.mark.parametrize("theta_value", [0.0, 0.25])
+def test_all_cones_delayed_chained_backward(device, theta_value):
     import torch
     from moreau.torch import Solver
 
@@ -285,33 +286,75 @@ def test_all_cones_delayed_chained_backward(device):
     def tensor(value):
         return torch.tensor(value, dtype=torch.float64, device=device)
 
-    P, A, q, b = [tensor(v) for v in (problem.P.data, problem.A.data, problem.q, problem.b)]
+    P, A = [tensor(v) for v in (problem.P.data, problem.A.data)]
+    reference = {
+        name: tensor(getattr(problem.optimum, name)) for name in ("x", "s", "z", "z_x")
+    }
+    indices = torch.tensor(
+        np.concatenate([c.indices for c in problem.cones.dir_cones]), device=device
+    )
     rng = np.random.default_rng(7)
     H = rng.normal(scale=0.01, size=problem.P.shape)
     dP = tensor((H + H.T).ravel())
-    dA, dq, db = [tensor(rng.normal(scale=0.02, size=v.shape)) for v in (A, q, b)]
+    dA = tensor(rng.normal(scale=0.02, size=A.shape))
     weights = {
         name: tensor(rng.normal(size=getattr(problem.optimum, name).shape))
         for name in ("x", "s", "z", "z_x")
     }
 
+    first_rates = {"x": 0.05, "s": -0.04, "z": 0.03, "z_x": 0.02}
+    second_rates = {"x": -0.03, "s": 0.06, "z": -0.02, "z_x": 0.04}
+    second_scales = {"x": 1.1, "s": 0.8, "z": 1.2, "z_x": 0.9}
+
+    def planted_solve(theta, p_scale, a_scale, scales, rates, coupling=None):
+        # Positive scaling preserves cone membership and complementarity.
+        # Choose q and b from the KKT equations so the solution is known at
+        # every parameter value, including the cone boundaries.
+        expected = {name: (scales[name] + theta * rates[name]) * v for name, v in reference.items()}
+        Pt, At = p_scale * P + theta * dP, a_scale * A + theta * dA
+        P_dense, A_dense = Pt.reshape(problem.P.shape), At.reshape(problem.A.shape)
+        qt = (-P_dense @ expected["x"] - A_dense.T @ expected["z"]).index_add(
+            0, indices, expected["z_x"]
+        )
+        bt = A_dense @ expected["x"] + expected["s"]
+        if coupling is not None:
+            qt = qt + coupling
+        sol = solver.solve(Pt, At, qt, bt)
+        assert solver.info.status.name in ("Solved", "AlmostSolved")
+        for name, value in expected.items():
+            torch.testing.assert_close(getattr(sol, name), value, atol=3e-4, rtol=3e-4)
+        return sol, expected
+
     def loss(theta):
-        first = solver.solve(P + theta * dP, A + theta * dA, q + theta * dq, b + theta * db)
+        first, first_expected = planted_solve(
+            theta, 1.0, 1.0, dict.fromkeys(reference, 1.0), first_rates
+        )
         # Change P, A, q, b before backpropagating through either solution.
-        second = solver.solve(
-            1.2 * P + theta * dP,
-            0.9 * A + theta * dA,
-            q + theta * dq + 0.02 * first.x,
-            b + theta * db,
+        # The coupling vanishes on the known path but retains the autograd
+        # dependency of the second solve on the first solve's x.
+        second, _ = planted_solve(
+            theta, 1.2, 0.9, second_scales, second_rates,
+            coupling=first.x - first_expected["x"],
         )
         return sum(
             weights[name] @ (getattr(first, name) + 0.3 * getattr(second, name)) for name in weights
         )
 
-    theta = tensor(0.0).requires_grad_()
-    # Perturbations have scale 0.01-0.02; this step resolves forward-solve noise
-    # near active cone boundaries while keeping each data change small.
-    assert torch.autograd.gradcheck(loss, (theta,), eps=1e-2, atol=3e-3, rtol=3e-3, nondet_tol=1e-6)
+    theta = tensor(theta_value).requires_grad_()
+    # The loss along the known KKT path is affine in theta. Its exact
+    # derivative avoids amplifying cold-solve stopping error by a finite-
+    # difference step, while exercising the implicit gradients of P, A, q, b.
+    expected_grad = sum(
+        weights[name] @ ((first_rates[name] + 0.3 * second_rates[name]) * reference[name])
+        for name in weights
+    )
+    value = loss(theta)
+    (gradient,) = torch.autograd.grad(value, theta, retain_graph=True)
+    torch.testing.assert_close(gradient, expected_grad, atol=3e-3, rtol=3e-3)
+    (repeated,) = torch.autograd.grad(value, theta, retain_graph=True)
+    torch.testing.assert_close(repeated, gradient, atol=1e-6, rtol=0)
+    (zero,) = torch.autograd.grad(value, theta, grad_outputs=torch.zeros_like(value))
+    torch.testing.assert_close(zero, torch.zeros_like(theta), atol=0, rtol=0)
 
 
 @pytest.mark.parametrize("cone_kind", ["soc", "gen_power"])
