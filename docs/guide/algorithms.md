@@ -353,9 +353,14 @@ inherits Clarabel's [1] conditioning stack:
 - **Iterative refinement.** Both regularizations perturb the system, so the
   result is refined against the *unregularized* $K$: form the residual
   $e = b - K\xi$, solve $K\,\delta = e$ with the factorization already in hand,
-  accept $\xi + \delta$, and repeat (up to 10 times) while the residual keeps
-  dropping by at least $5\times$. This buys back the accuracy the regularization
-  traded for stability.
+  and step to $\xi + \delta$. The CPU accepts a step only if it lowers
+  $\lVert e\rVert_\infty$ and repeats (up to 10 times) while the residual
+  keeps dropping by at least $5\times$. CUDA takes `cudss_ir_steps` steps
+  (default 2), since stopping early would need a host sync, and keeps the
+  iterate with the smallest residual. This buys back the accuracy the
+  regularization traded for stability; where the regularized factorization is
+  a poor approximation of $K$, the steps can raise the residual instead, and
+  neither backend keeps such a step.
 
 ## Differentiation (backward pass)
 

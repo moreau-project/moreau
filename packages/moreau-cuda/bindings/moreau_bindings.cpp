@@ -2029,7 +2029,8 @@ NB_MODULE(_moreau_cuda, m) {
             "cuDSS max LU fill-in limit. -1 = cuDSS default (100*nnz). "
             "Set lower to prevent OOM for dense SDP problems.")
         .def_rw("cudss_ir_steps", &IPMSettings::cudssIrSteps,
-            "cuDSS iterative refinement steps (default: 2)")
+            "Iterative refinement steps of each cuDSS KKT solve; the iterate with "
+            "the smallest KKT residual is kept (default: 2)")
         .def_rw("cudss_pivot_enable", &IPMSettings::cudssPivotEnable,
             "Enable cuDSS pivoting for numerically challenging problems (default: false)")
         .def_rw("chordal_decomposition_enable",
