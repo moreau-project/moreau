@@ -17,7 +17,7 @@ import jax
 import jax.numpy as jnp
 from jax import custom_vjp
 
-from moreau._types import Cones, Settings
+from moreau._types import Cones, Settings, _check_backward_statuses
 from ._types import JaxSolution, JaxSolveInfo
 
 
@@ -347,11 +347,16 @@ def _backward_cpu_callback(
     z: np.ndarray,
     s: np.ndarray,
     z_x: np.ndarray,
+    status: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Callback function for backward pass.
 
+    Raises if a problem whose solve returned no solution (per `status`)
+    has a nonzero upstream gradient.
+
     Returns 4 arrays: dP, dA, dq, db
     """
+    _check_backward_statuses(status, dx, dz, ds, dz_x)
     solver_wrapper = _SOLVER_REGISTRY[solver_id]
 
     # Convert to float64
@@ -556,7 +561,7 @@ def _solve_cpu_fwd(
     )
 
     # Save everything needed for backward (including z_x for direct dz_x).
-    residuals = (P_data, A_data, q, b, x, z, s, z_x)
+    residuals = (P_data, A_data, q, b, x, z, s, z_x, status)
     return (
         x,
         z,
@@ -573,7 +578,7 @@ def _solve_cpu_fwd(
 
 def _solve_cpu_bwd(solver_id: int, residuals, g):
     """Backward pass via implicit differentiation."""
-    P_data, A_data, q, b, x, z, s, z_x = residuals
+    P_data, A_data, q, b, x, z, s, z_x, status = residuals
     # g contains gradients for all 10 outputs.
     # x, z, s, z_x carry meaningful gradients into the implicit-diff KKT.
     (
@@ -621,6 +626,7 @@ def _solve_cpu_bwd(solver_id: int, residuals, g):
         z,
         s,
         z_x,
+        status,
         vmap_method="broadcast_all",
     )
 
