@@ -150,6 +150,11 @@ bs = np.tile([1.0, 0.7, 0.7], (1024, 1))
 result = solver.solve(qs, bs)              # result.x has shape (1024, 2)
 ```
 
+On CPU, live compiled solvers with the same thread count share a worker pool.
+The pool is released when its last solver is destroyed. See the
+[batching guide](docs/guide/batching.md#cpu-workers-and-multiprocessing) for
+multiprocessing guidance.
+
 ## Performance
 
 Benchmarks on real optimization problems (February 2026).
@@ -191,6 +196,7 @@ Full guides and API reference: **[moreau.so](https://moreau.so)**.
 - [Basic usage](docs/guide/basic-usage.md) · [Batching](docs/guide/batching.md) · [Solver settings](docs/guide/solver-settings.md)
 - [PyTorch](docs/guide/pytorch-integration.md) · [JAX](docs/guide/jax-integration.md) · [CVXPY](docs/guide/cvxpy-integration.md) · [cvxpylayers](docs/guide/cvxpylayers-integration.md)
 - [Direct conic constraints](docs/guide/direct-cones.md) · [PSD cones](docs/guide/psd-cones.md) · [Warm starting](docs/guide/warm-starting.md)
+- [Chordal decomposition](docs/guide/chordal-decomposition.md): illustrated explanation, examples, limitations, and CPU/CUDA differences
 - [Device selection](docs/guide/device-selection.md) · [Julia](docs/guide/julia-integration.md) / [JuMP](docs/guide/jump-integration.md)
 
 ## Citation

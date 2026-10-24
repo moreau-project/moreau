@@ -4,14 +4,14 @@ For each cone kind, solve the same problem on 'cpu' and 'cuda' (with the
 **same** algorithm forced via ``solver='ipm'``) and assert that:
   - solver status agrees (both Solved or AlmostSolved)
   - primal solution x* agrees to within rtol=1e-4 / atol=1e-4
-  - iteration count agrees exactly — both backends run the same IPM, so any
-    drift indicates the CPU and CUDA code paths have diverged
-    (η-correction tuning, KKT scatter, NT scaling, residual computation, …).
 
-The ``solver='ipm'`` forcing is load-bearing: the default ``solver='auto'``
-routes small QPs on CPU to the active-set solver, producing very different
-iteration counts than CUDA's IPM. With IPM forced on both sides, the two
-backends should agree iter-for-iter on well-conditioned problems.
+CPU and CUDA use different KKT solvers and refinement stopping policies, so
+matching iteration counts is not a correctness requirement. The dense GenPower
+secant identities are tested directly by DenseScalingSatisfiesBothSecants in
+moreau-cuda/tests/cpp/test_direct_cone_genpow.cpp.
+
+The ``solver='ipm'`` forcing ensures both sides exercise the interior-point
+implementation rather than selecting a different algorithm on CPU.
 
 All tests skip cleanly when CUDA is not available.
 """
@@ -45,20 +45,20 @@ def skip_no_cuda():
         pytest.skip("CUDA backend not available")
 
 
-def solve_on(device: str, P, q, A, b, cones, ipm_settings=None) -> tuple[np.ndarray, str, int]:
-    """Solve a problem on the given device. Returns (x, status_name, iters)."""
+def solve_on(device: str, P, q, A, b, cones, ipm_settings=None) -> tuple[np.ndarray, str]:
+    """Solve a problem on the given device. Returns (x, status_name)."""
     settings_kwargs = dict(COMMON_SETTINGS)
     if ipm_settings is not None:
         settings_kwargs = dict(settings_kwargs, ipm_settings=ipm_settings)
     settings = moreau.Settings(device=device, **settings_kwargs)
     solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
     sol = solver.solve()
-    return sol.x, solver.info.status.name, int(solver.info.iterations)
+    return sol.x, solver.info.status.name
 
 
 def assert_parity(label, cpu, gpu, rtol=PARITY_RTOL, atol=PARITY_ATOL):
-    x_cpu, st_cpu, it_cpu = cpu
-    x_gpu, st_gpu, it_gpu = gpu
+    x_cpu, st_cpu = cpu
+    x_gpu, st_gpu = gpu
     assert st_cpu in ("Solved", "AlmostSolved"), f"{label} CPU status: {st_cpu}"
     assert st_gpu in ("Solved", "AlmostSolved"), f"{label} CUDA status: {st_gpu}"
     np.testing.assert_allclose(
@@ -67,12 +67,6 @@ def assert_parity(label, cpu, gpu, rtol=PARITY_RTOL, atol=PARITY_ATOL):
         rtol=rtol,
         atol=atol,
         err_msg=f"{label} x* parity failed: cpu={x_cpu}, cuda={x_gpu}",
-    )
-    assert it_cpu == it_gpu, (
-        f"{label} iter-count parity failed: cpu={it_cpu}, cuda={it_gpu}. "
-        f"Both backends run the same IPM, so any drift indicates the CPU "
-        f"and CUDA code paths have diverged (η correction, NT scaling, "
-        f"KKT scatter, residual computation, …)."
     )
 
 
@@ -167,10 +161,7 @@ def test_genpow_direct_x_cpu_cuda_parity():
 
 
 def test_genpow_direct_x_stacked_parity():
-    """GenPower direct-x: two stacked cones — exercises both K-cap pass-1/pass-2
-    paths AND the dim-≤-4 dense Hs path, which carries the Mosek-Tunçel secant
-    rank-2 terms enforcing `Hs·x = z_x`. Without those terms CUDA's dense Hs
-    drifts (~7 iters: cpu=23 vs cuda=16) from the CPU iterate count."""
+    """Two stacked cones exercise the K-cap passes and dense Hs path."""
     n = 6
     P = sparse.eye(n, format="csr") * 0.01
     q = np.array([-0.5, -0.5, 5.0, -0.3, -0.3, 4.0])
@@ -189,13 +180,7 @@ def test_genpow_direct_x_stacked_parity():
 
 
 def test_genpow_direct_x_dim3_dense_path_parity():
-    """GenPower direct-x at dim=3 (CUDA dense path, dim ≤ 4): the IPM
-    iter count must match CPU iter-for-iter. Locks in the secant-fix
-    commits (43068f11 + 146e0833) — pre-fix this case drifted by 5 iters
-    (cpu=20 vs cuda=15) because CUDA's dense `update_xcones_genpow_scaling`
-    branch built Hs as μ·(D + p·pᵀ − q·qᵀ − r·rᵀ) only, dropping CPU's
-    `pd_scaling_nd_dense` secant rank-2 updates (z_x·z_xᵀ/⟨z_x,x⟩ +
-    δz_x·δz_xᵀ/⟨δz_x,δx⟩) and the P_⊥ projection cleanup."""
+    """Boundary-active solution parity through the dense (dim <= 4) Hs path."""
     n = 3
     P = sparse.eye(n, format="csr") * 0.01
     q = np.array([-0.5, -0.5, 5.0])

@@ -379,6 +379,45 @@ TEST_F(EquilibrationDataTest, VarLenSocRectificationUsesConeDimensions) {
     cudaFree(matrixARowOf);
 }
 
+// With P = 0 the column norms of [P; A] are those of A. For A = [0.25], the
+// CPU's Ruiz equilibration scales by d = e = 1/sqrt(0.25) = 2 in its first
+// iteration, which makes the scaled A = 1, and leaves it there.
+TEST_F(EquilibrationDataTest, ZeroPUsesColumnNormsOfA) {
+    const int64_t n = 1, m = 1, batchSize = 1;
+
+    Cones cones;
+    cones.numNonnegCones = 1;
+    cones.initialize(batchSize);
+
+    CSR P(n, n, 0, batchSize);
+    CSR A(m, n, 1, batchSize);
+    std::vector<int64_t> P_row_offsets = {0, 0};
+    std::vector<int64_t> A_row_offsets = {0, 1}, A_col_indices = {0};
+    std::vector<double> A_values = {0.25};
+    P.indicesCpuToGpu(P_row_offsets.data(), nullptr, stream);
+    A.indicesCpuToGpu(A_row_offsets.data(), A_col_indices.data(), stream);
+    A.valuesCpuToGpu(A_values.data(), stream);
+
+    BatchedVector q(n, batchSize), b(m, batchSize);
+    q.setToConstant(1.0, stream);
+    b.setToConstant(1.0, stream);
+
+    std::vector<int64_t> h_matrixARowOf = moreau::computeRowOfFromCSR(A_row_offsets.data(), m, 1);
+    int64_t* matrixARowOf = moreau::allocateAndCopyRowOfToGPU(h_matrixARowOf, stream);
+
+    EquilibrationData equil(n, m, batchSize);
+    equilibration(equil, P, nullptr, A, matrixARowOf, q, b, EquilibrationSettings{}, cones, stream);
+    cudaStreamSynchronize(stream);
+
+    double d = 0.0, e = 0.0;
+    equil.gpuToCpu(&d, nullptr, &e, nullptr, nullptr, nullptr, nullptr, stream);
+    cudaStreamSynchronize(stream);
+    EXPECT_DOUBLE_EQ(d, 2.0);
+    EXPECT_DOUBLE_EQ(e, 2.0);
+
+    cudaFree(matrixARowOf);
+}
+
 TEST_F(EquilibrationDataTest, SmallProblem) {
     EquilibrationData equil(1, 1, 1);
     equil.reset(stream);

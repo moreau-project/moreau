@@ -219,17 +219,15 @@ void compute_psd_margins(
 );
 
 /**
- * @brief Apply scaled unit shift for PSD cones
- *
- * Shifts z by alpha * I (identity in svec form):
- * z[triangular_index(k)] += alpha for k = 0..n-1
+ * @brief Eigenvalues of mat(z) for every PSD cone and batch element, written to
+ * cones.psd_work_mat3 at [b * totalPsdMatSqDim + d_psd_mat_offsets[cone]].
+ * Uses cones.psd_work_mat1 as scratch.
  */
-void psd_scaled_unit_shift(
-    double* z,
-    double alpha,
+void psd_eigenvalues(
+    Cones& cones,
+    const double* z,
     int64_t psd_offset,
     int64_t m_total,
-    const Cones& cones,
     cudaStream_t stream = 0
 );
 

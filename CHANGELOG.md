@@ -25,6 +25,10 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- CUDA chordal solves could stall when iterative refinement increased the KKT
+  residual and the default start shifted PSD cones independently of other
+  cones. Keep the refinement iterate with the smallest residual and use a
+  common interior shift across cones for each problem (#110).
 - CPU chordal decomposition filled `A`'s values in the wrong order, so it could
   solve a different problem and report `Solved` (#79).
 - CUDA PSD solves could return NaN after shifting an all-zero PSD block, from a
@@ -37,3 +41,6 @@ All notable changes to Moreau are documented here. The format follows
 - CUDA ordered PSD sparsity graphs with its own minimum-degree search instead of
   the CPU's AMD, so the two backends could split the same sparse PSD cone into
   different cliques. CUDA now uses SuiteSparse AMD, vendored (#108).
+- CUDA equilibration of problems with `P = 0` (LPs, SOCPs, SDPs) started each
+  Ruiz iteration from stale column norms, so it scaled `A` differently from the
+  CPU (#107).
