@@ -647,15 +647,6 @@ void CompiledSolver::default_start(
         //      their own shift formulas (margins() differ).
         init_xcone_start_point(stream);
 
-        // PSD cones: apply eigendecomp-based margin+shift matching CPU.
-        // Applied for both LP (P=0) and QP problems — without this shift,
-        // LP+PSD problems have near-zero initial residuals and the solver
-        // falsely reports convergence at iteration 0.
-        if (data.cones.numPsdCones > 0) {
-            data.cones.psd_shift_to_interior(variables.s, total_degree, stream);
-            data.cones.psd_shift_to_interior(variables.z, total_degree, stream);
-        }
-
     } else {
         // Asymmetric cones: unit_initialization on z, s; x[J]/z_x for direct-x.
         data.cones.unit_initialization(variables.s, variables.z, stream);
