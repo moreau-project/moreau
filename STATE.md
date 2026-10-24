@@ -98,6 +98,10 @@ src/
 
 Headers in `include/moreau/**` mirror the `src/` tree. Tests in
 `tests/cpp/` (gtest binaries built with the main CMake config).
+`third_party/suitesparse_amd/` vendors SuiteSparse AMD (unmodified sources
+plus a small `SuiteSparse_config.h` stand-in): the chordal decomposition
+orders each PSD cone's sparsity graph with it, as the CPU does through the
+Rust `amd` crate, so both backends find the same cliques.
 
 ### Direct conic constraints and slack cones
 

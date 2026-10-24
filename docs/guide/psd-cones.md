@@ -130,8 +130,9 @@ settings = moreau.Settings(
 ```
 
 Both backends honor `'clique_graph'` (the default), `'parent_child'`, and
-`'none'` after the merge-setting fixes in PR #84. The initial graph orderings
-still differ, so matching merge choices need not produce identical cliques.
+`'none'` after the merge-setting fixes in PR #84. Both backends now use
+SuiteSparse AMD for the initial graph ordering (#108), so matching aggregate
+patterns and merge choices produce the same cliques.
 
 For compiled batches, declare structural zeros of `b` with a valid
 `b_sparsity_pattern` at entry points that accept it. Without that information,

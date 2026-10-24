@@ -235,22 +235,20 @@ illustration, not a prediction of the ordering chosen by either backend.
 
 The backend ordering makes this example more instructive. With
 $D_1=D_2=I_8$, one variable for each entry of $B$ in row-major order, and an
-explicit diagonal `b` pattern, a local check of the #84 implementations gave:
+explicit diagonal `b` pattern, both backends produce the following structures
+with the shared AMD ordering introduced in #108:
 
 | Backend and merge choice | PSD matrix orders | Scalar PSD rows | Added overlap variables | Cubic cone-work proxy |
 |---|---|---:|---:|---:|
 | Original, decomposition off | 16 | 136 | 0 | 4,096 |
-| CPU, `'none'` | 15 and 9 | 165 | 36 | 4,104 |
-| CPU, `'clique_graph'` | 16 | 136 | 0 | 4,096 |
-| CUDA, `'none'` | eight of order 9 | 360 | 252 | 5,832 |
-| CUDA, `'clique_graph'` | 12 and 12 | 156 | 36 | 3,456 |
+| Both backends, `'none'` | 15 and 9 | 165 | 36 | 4,104 |
+| Both backends, `'clique_graph'` | 16 | 136 | 0 | 4,096 |
 | Either backend, `'parent_child'` | 16 | 136 | 0 | 4,096 |
 
-These are structural counts, not timing measurements. The CPU default
-recombines to the original cone, buying no decomposition; CUDA's default
-retains a modest cone-work reduction but adds rows and variables. The
-ordering and merge sequence determine the trade-off, even with the same
-aggregate pattern and named strategy.
+These are structural counts, not timing measurements. Both backends' default
+strategy recombines to the original cone, buying no decomposition. With no
+merging, the smaller blocks add rows and variables without reducing the cubic
+cone-work proxy. The ordering and merge sequence determine this trade-off.
 
 This is a finite, structured counterexample to treating “smaller blocks” as
 an automatic improvement. It has roughly half its matrix entries zero; it is
@@ -391,22 +389,23 @@ PSD completion; its entries outside the aggregate pattern need not be zero.
 ## CPU and CUDA: common mathematics, different paths
 
 Both backends use a compact clique reformulation on their chordal-enabled
-paths. They can nevertheless choose different reformulations and incur
-different overhead.
+paths. Matching aggregate patterns and merge settings now produce the same
+cliques, while the implementation paths still incur different overhead.
 
 | Stage | CPU | CUDA |
 |---|---|---|
-| Graph analysis | Rust host code; AMD ordering through the Rust `amd` crate. | C++ host code; a minimum-degree ordering in `symbolic_ldl.hpp`, with different tie handling and no AMD dense-row/postordering machinery. |
+| Graph analysis | Rust host code; AMD ordering through the Rust `amd` crate. | C++ host code; vendored SuiteSparse AMD with default controls, matching the Rust `amd` ordering. |
 | Clique merging | Honors `'clique_graph'`, `'parent_child'`, and `'none'` through the Python settings binding after #84. | Honors the same strategies after #84, using C++ ports with matched merge semantics. |
 | Conversion | Rust builds the compact augmented problem and its value maps. | The C++ Python binding analyzes the structure and constructs augmented CSR data before creating the GPU solver. |
 | Numerical iterations | CPU cone operations and KKT solves. | CUDA cone operations and GPU KKT solves; splitting cones does not move the graph analysis to the GPU. |
 | Recovery | Maps the primal/slack results back and can complete the dual. | Binding-side host code maps results back and can complete the dual; this adds work around the GPU solve. |
 
-The merge strategies agreeing does not make the initial cliques agree: the
-ordering runs first. Compare final objective values and feasibility in the
-original problem, not identical clique counts, iterations, or bitwise
-solutions. Finite-precision behavior and the size of the KKT system can
-change with the reformulation.
+The initial ordering and merge strategies agree for the same aggregate graph.
+Entry points can still supply different structural information, especially
+for `b`. Compare final objective values and feasibility in the original
+problem; matching cliques does not imply identical iteration counts or
+bitwise solutions. Finite-precision behavior and the size of the KKT system
+can change with the reformulation.
 
 ### Framework and differentiation details
 
@@ -427,9 +426,8 @@ The entry point matters as well as the selected device:
   tracks the convention. Restrict comparisons to the parameters that are
   actually allowed to vary.
 - Dual completion is a separate numerical step after the solve. The CUDA
-  handling of scaling and singular separators is the subject of
-  [PR #81](https://github.com/moreau-project/moreau/pull/81); #84 does not resolve
-  that limitation. A completion failure is different from the interior-point
+  handling of scaling and singular separators was corrected in
+  [PR #81](https://github.com/moreau-project/moreau/pull/81). A completion failure is different from the interior-point
   method failing to converge.
 
 Small cones can be particularly cheap on the CPU, while GPU efficiency also
