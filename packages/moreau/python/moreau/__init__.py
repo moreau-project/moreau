@@ -49,7 +49,7 @@ Example (CompiledSolver - multiple problems):
     print(solution.x.shape, solver.info.status[0])
 """
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 # Import CPU backend types
 import numpy as np
@@ -254,14 +254,10 @@ class Solver:
         _warn_cvxpy_soc_if_needed(cones)
 
         n = len(q)
-        nnz_P = P.nnz if sparse.issparse(P) else np.count_nonzero(P)
         nnz_A = A.nnz if sparse.issparse(A) else np.count_nonzero(A)
         settings, device = _resolve_settings_and_device(
             settings,
             n=n,
-            m=len(b),
-            cones=cones,
-            nnz_P=nnz_P,
             nnz_A=nnz_A,
             batch_size=1,
         )
@@ -704,9 +700,6 @@ class CompiledSolver:
         settings, device = _resolve_settings_and_device(
             settings,
             n=n,
-            m=m,
-            cones=cones,
-            nnz_P=len(P_col_indices),
             nnz_A=len(A_col_indices),
             batch_size=peek_batch_size,
         )
@@ -731,11 +724,13 @@ class CompiledSolver:
         # Auto-tune (benchmarking) fires when device='auto' OR method='auto'.
         # When method='auto' and device is explicit, we resolve the method
         # heuristically for initial construction, but keep _original_method='auto'
-        # so auto-tune benchmarks methods on first solve.
+        # so auto-tune benchmarks methods on first solve. On CPU, 'auto' is left
+        # to the Rust core (single-threaded faer), exactly as Solver does, so
+        # both classes factor the KKT system the same way.
         self._original_device = settings.device
         ipm = settings.ipm_settings
         self._original_method = ipm.direct_solve_method if ipm else "auto"
-        if self._original_method == "auto" and settings.device != "auto":
+        if self._original_method == "auto" and settings.device != "auto" and device != "cpu":
             from moreau._backend import _rank_method
 
             ranked = _rank_method(device, n, m, self._nnz_A, self._batch_size)

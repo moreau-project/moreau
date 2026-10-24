@@ -11,7 +11,6 @@ from itertools import product
 import pathlib
 import re
 import sys
-import tarfile
 import tokenize
 import zipfile
 
@@ -28,16 +27,6 @@ RELEASE_WHEEL_TAGS = {
     ("moreau_cuda13", "cp312", "abi3", "manylinux_2_28_x86_64"),
     ("moreau_cuda13", "cp312", "abi3", "manylinux_2_28_aarch64"),
 }
-C_LIBRARY_ARCHIVES = {
-    "moreau-cpu-linux-x86_64.tar.gz": "libmoreau_cpu.so",
-    "moreau-cpu-linux-aarch64.tar.gz": "libmoreau_cpu.so",
-    "moreau-cpu-macos-arm64.tar.gz": "libmoreau_cpu.dylib",
-    "moreau-cuda12-linux-x86_64.tar.gz": "libmoreau_cuda.so",
-    "moreau-cuda12-linux-aarch64.tar.gz": "libmoreau_cuda.so",
-    "moreau-cuda13-linux-x86_64.tar.gz": "libmoreau_cuda.so",
-    "moreau-cuda13-linux-aarch64.tar.gz": "libmoreau_cuda.so",
-}
-
 PATH_MARKERS = (b"/workspace/", b"/Users/runner/work/", b"/home/runner/work/")
 
 
@@ -158,24 +147,6 @@ def release_version(wheels: list[pathlib.Path], *, require_complete: bool = Fals
     return versions.pop()
 
 
-def validate_c_libraries(directory: pathlib.Path) -> None:
-    """Require every supported C archive and its public header and licenses."""
-    archives = {path.name: path for path in directory.glob("*.tar.gz")}
-    if archives.keys() != C_LIBRARY_ARCHIVES.keys():
-        raise ValueError(f"Incomplete C library matrix: {sorted(archives)}")
-    for filename, library in C_LIBRARY_ARCHIVES.items():
-        with tarfile.open(archives[filename]) as archive:
-            names = {member.name.removeprefix("./"): member for member in archive.getmembers()}
-            required = {"include/moreau.h", "LICENSE", "NOTICE", f"lib/{library}"}
-            missing = required - names.keys()
-            if missing:
-                raise ValueError(f"{filename}: missing {sorted(missing)}")
-            for name in required:
-                member = names[name]
-                if not (member.isfile() or (name.startswith("lib/") and member.issym())):
-                    raise ValueError(f"{filename}: {name} is not a file or library symlink")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -186,7 +157,6 @@ def main() -> int:
     )
     parser.add_argument("--version-output", type=pathlib.Path)
     parser.add_argument("--require-complete", action="store_true")
-    parser.add_argument("--c-library-dir", type=pathlib.Path)
     args = parser.parse_args()
 
     wheels = wheel_paths(*args.wheel_dirs)
@@ -196,8 +166,6 @@ def main() -> int:
 
     try:
         version = release_version(wheels, require_complete=args.require_complete)
-        if args.c_library_dir:
-            validate_c_libraries(args.c_library_dir)
     except ValueError as error:
         print(f"ERROR: {error}")
         return 1

@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-Keep Moreau's Python, Rust, native, and documentation versions in sync."""
+Keep Moreau's Python, Rust, Julia, native, and documentation versions in sync."""
 
 from __future__ import annotations
 
@@ -58,6 +58,26 @@ def bump_version(root: pathlib.Path, version: str, *, pin_dependencies: bool = F
         r'^version = "[^"]+"',
         f'version = "{cargo_version}"',
         count=1,
+    )
+    for path in [
+        "packages/moreau-julia/Moreau.jl/Project.toml",
+        "packages/moreau-julia/MoreauTests.jl/Project.toml",
+    ]:
+        replace(path, r'^version = "[^"]+"', f'version = "{cargo_version}"', count=1)
+    # JLL rebuild suffixes do not change the native release. Julia compatibility
+    # bounds constrain the release core; the loader also checks prerelease IDs.
+    for path in [
+        "packages/moreau-julia/Moreau.jl/Project.toml",
+        "packages/moreau-julia/Moreau.jl/test/cuda/Project.toml",
+    ]:
+        replace(path, r'^(Moreau_(?:CPU|CUDA)_jll) = "=[^"]+"', rf'\g<1> = "={base}"')
+    for backend in ("CPU", "CUDA"):
+        path = f"packaging/yggdrasil/M/Moreau/Moreau_{backend}/build_tarballs.jl"
+        replace(path, r'^version = v"[^"]+"', f'version = v"{cargo_version}"')
+    replace(
+        "packaging/yggdrasil/M/Moreau/Moreau_CUDA/build_tarballs.jl",
+        r"-DMOREAU_VERSION=[^\s]+",
+        f"-DMOREAU_VERSION={version}",
     )
     for path in [
         "packages/moreau/python/moreau/__init__.py",
@@ -109,7 +129,7 @@ def bump_version(root: pathlib.Path, version: str, *, pin_dependencies: bool = F
         rf"\g<1>{operator}{python_version}",
     )
     # Compute every edit before writing so invalid input or missing fields cannot
-    # leave a partially bumped checkout. Julia has its own package version.
+    # leave a partially bumped checkout.
     for file, content in updates.items():
         file.write_text(content)
 

@@ -162,7 +162,7 @@ struct IPMSettings {
     // Only relevant for non-symmetric matrices with ALG_1/ALG_2 reordering.
     int64_t maxLuNnz = -1;
 
-    // cuDSS iterative refinement steps (only applies when kktSolverType is CuDSS)
+    // Iterative refinement steps per cuDSS KKT solve (see KKTData::refine)
     int cudssIrSteps = 2;
 
     // cuDSS pivoting (only applies when kktSolverType is CuDSS)
@@ -170,11 +170,14 @@ struct IPMSettings {
     // true  = pivoting on (for numerically challenging problems)
     bool cudssPivotEnable = false;
 
+    bool chordalDecompositionEnable = true;
+
     // Chordal decomposition merge strategy for sparse PSD cones.
     // Must match the CPU default to keep CPU/CUDA on the same reformulation
     // for the same problem. Accepted values:
     //   "clique_graph"  — Garstka et al. 2019 (default; also CPU default)
-    //   "parent_child"  — fill_in-thresholded parent-child merging
+    //   "parent_child"  — merge a child into its parent when the fill is at
+    //                     most 8 or both supernodes have at most 8 vertices
     //   "none"          — no merging beyond the symbolic supernode tree
     std::string chordalDecompositionMergeMethod = "clique_graph";
 };

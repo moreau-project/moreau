@@ -22,6 +22,10 @@ target_include_directories(moreau_active_set PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+if(MSVC)
+    target_compile_options(moreau_active_set PRIVATE /EHsc)
+endif()
+
 find_package(Threads REQUIRED)
 target_link_libraries(moreau_active_set PUBLIC Threads::Threads)
 
@@ -37,16 +41,10 @@ install(TARGETS moreau_active_set
 option(MOREAU_BUILD_TESTS "Build tests" ON)
 
 if(MOREAU_BUILD_TESTS)
-    find_package(GTest QUIET)
-    if(GTest_FOUND)
-        enable_testing()
+    find_package(GTest REQUIRED)
+    enable_testing()
 
-        add_executable(test_active_set tests/test_active_set.cpp)
-        target_link_libraries(test_active_set PRIVATE moreau_active_set GTest::gtest GTest::gtest_main)
-        add_test(NAME test_active_set COMMAND test_active_set)
-
-        message(STATUS "Tests enabled")
-    else()
-        message(STATUS "GTest not found - tests will not be built")
-    endif()
+    add_executable(test_active_set tests/test_active_set.cpp)
+    target_link_libraries(test_active_set PRIVATE moreau_active_set GTest::gtest GTest::gtest_main)
+    add_test(NAME test_active_set COMMAND test_active_set)
 endif()

@@ -9,7 +9,7 @@ using CUDA
 Extract device pointer from a CuArray — no copy needed, data is already on GPU.
 """
 function Moreau._to_device(v::CuVector{Float64})
-    return Ptr{Float64}(pointer(v))
+    return Ptr{Float64}(UInt(pointer(v)))
 end
 
 """
@@ -27,11 +27,11 @@ function Moreau._from_device_like(device_ptr::Ptr{Float64}, len::Int, ::CuVector
 end
 
 """
-    Moreau._maybe_free(::CuVector) -> Nothing
+    Moreau._maybe_free_ptr(::Ptr{Float64}, ::CuVector{Float64}) -> Nothing
 
 No-op: CUDA.jl manages CuArray memory.
 """
-function Moreau._maybe_free(::CuVector)
+function Moreau._maybe_free_ptr(::Ptr{Float64}, ::CuVector{Float64})
     return nothing
 end
 

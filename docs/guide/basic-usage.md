@@ -201,14 +201,20 @@ where $\text{mat}(s)$ reconstructs the symmetric matrix from svec form (column-m
 
 ### Constraint Ordering
 
-Constraints in A and b must be ordered to match the cone specification:
-1. Zero cone rows first
+The rows of `A` and `b` must be stacked by cone type in this order, which is
+the same on CPU and CUDA and similar to the convention used by SCS:
+
+1. Zero cone rows
 2. Nonnegative cone rows
-3. Second-order cone rows (one block per cone, size = cone dimension)
-4. Exponential cone rows (3 per cone)
-5. Power cone rows (3 per cone)
-6. Generalized power cone rows (one block per cone, size = `len(alphas) + dim2`)
-7. PSD cone rows ($d(d+1)/2$ per cone)
+3. Second-order cone rows (one block per cone, in `so_cone_dims` order)
+4. PSD cone rows ($d(d+1)/2$ per cone, in `psd_dims` order)
+5. Exponential cone rows (3 per cone)
+6. Power cone rows (3 per cone, in `power_alphas` order)
+7. Generalized power cone rows (one block per cone, size `len(alphas) + dim2`)
+
+Rows in the wrong order are not detected: they are silently interpreted as a
+different cone, which typically produces a false `PrimalInfeasible` or a wrong
+solution. Direct cones (`dir_cones`) constrain `x` directly and use no rows.
 
 ---
 
@@ -264,8 +270,15 @@ solution = solver.solve()
 
 # Compute gradients of a scalar loss w.r.t. problem data
 # dl_dx, dl_dz, dl_ds are the gradients of your loss w.r.t. x, z, s
-dl_dP, dl_dq, dl_dA, dl_db = solver.backward(dl_dx, dl_dz, dl_ds)
+grads = solver.backward(dl_dx, dl_dz, dl_ds)
+dl_dP = grads["dP_values"]  # w.r.t. P's CSR values
+dl_dq = grads["dq"]
+dl_dA = grads["dA_values"]  # w.r.t. A's CSR values
+dl_db = grads["db"]
 ```
+
+`backward()` returns a dict keyed by name; index it by key rather than
+unpacking it, since the key order differs between solvers.
 
 For PyTorch and JAX, gradient computation is handled automatically by the
 framework's autograd system — see the [PyTorch](../api/torch) and

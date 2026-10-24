@@ -30,6 +30,8 @@ import warnings
 import torch
 from typing import Tuple, Optional, Sequence
 
+from moreau._validation import _validate_P_sparsity_pattern_symmetric
+
 # Use centralized backend for device availability
 from moreau._backend import (
     torch_available,
@@ -80,6 +82,7 @@ def _validate_tensor_dtype(t: torch.Tensor, name: str) -> None:
 # `_solve_backward_op` is re-exported so it remains patchable via
 # `moreau.torch._solve_backward_op` (tests rely on this).
 from ._autograd import _register_impl, _SolveFunction, _solve_backward_op
+from ._compiled import _register_solver, _compiled_solve
 
 
 class Solver:
@@ -129,6 +132,9 @@ class Solver:
         >>> print(solver.info.status, solver.info.obj_val)
     """
 
+    # Native solver lifecycle operations run eagerly; callers can still compile
+    # the tensor operations on either side, with autograd preserved.
+    @torch.compiler.disable
     def __init__(
         self,
         n: int,
@@ -141,6 +147,20 @@ class Solver:
         settings: Optional[Settings] = None,
         b_sparsity_pattern: Optional[Sequence[bool]] = None,
     ):
+        # Validate the fixed structure once, before choosing a solver backend.
+        _validate_P_sparsity_pattern_symmetric(
+            n,
+            (
+                P_row_offsets.detach().cpu()
+                if isinstance(P_row_offsets, torch.Tensor)
+                else P_row_offsets
+            ),
+            (
+                P_col_indices.detach().cpu()
+                if isinstance(P_col_indices, torch.Tensor)
+                else P_col_indices
+            ),
+        )
         # Check for old CVXPY with SOC cones
         from moreau import _warn_cvxpy_soc_if_needed, _require_dir_cones_compatible
 
@@ -161,8 +181,7 @@ class Solver:
         batch_size = settings.batch_size
         enable_grad = settings.enable_grad
 
-        # Resolve 'auto' to best device with torch support FIRST,
-        # so active-set auto-select can see the actual target device
+        # Resolve 'auto' to the best device with torch support.
         if device == "auto":
             device = "cpu"
             for dev in [default_device()]:
@@ -170,11 +189,10 @@ class Solver:
                     device = dev
                     break
 
-        # Now resolve solver='auto' with the actual device known
+        # Resolve solver='auto' (active-set forces device='cpu')
         from moreau import _resolve_solver_type
 
-        nnz_P = len(P_col_indices)
-        settings, device = _resolve_solver_type(settings, n, m, cones, device, nnz_P=nnz_P)
+        settings, device = _resolve_solver_type(settings, device)
 
         # Validate device availability before doing any tensor .to(device) calls,
         # which would otherwise raise inscrutable PyTorch internals errors (e.g.
@@ -275,7 +293,11 @@ class Solver:
         # Register _impl in the backward op's registry so the vmap rule
         # can look it up from a tensor handle.
         self._impl_handle = _register_impl(self._impl)
+        self._compile_handle = _register_solver(self)
+        self._compile_active_set = getattr(self._impl, "_use_active_set", False)
+        self._direct_dual_size = sum(len(c.indices) for c in cones.dir_cones)
 
+    @torch.compiler.disable
     def setup(
         self,
         P_values: torch.Tensor,
@@ -478,6 +500,14 @@ class Solver:
             >>> loss = solution.x.sum()
             >>> loss.backward()
         """
+        if torch.compiler.is_compiling() and self._device in ("cpu", "cuda"):
+            return _compiled_solve(self, P_values, A_values, q, b, warm_start)
+        return self._solve_eager(P_values, A_values, q, b, warm_start=warm_start)
+
+    @torch.compiler.disable
+    def _solve_eager(self, P_values, A_values, q, b, *, warm_start=None):
+        if isinstance(warm_start, (TorchSolution, TorchBatchedSolution)):
+            warm_start = warm_start.to_warm_start()
         self.setup(P_values, A_values)
 
         # Auto-tune on first solve when device or method is 'auto'

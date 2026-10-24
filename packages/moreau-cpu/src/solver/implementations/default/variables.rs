@@ -581,15 +581,16 @@ where
         self.z.hadamard(e).scale(scaleinv * cinv);
         self.s.hadamard(einv).scale(scaleinv);
 
-        // Direct-x dual z_x pairs with x[J], so it scales with D (not E) —
-        // `d[J]` at the cone's index set. A dedicated scatter pass is
-        // required since `z_x` is a flat stacked Vec while `d` is length-n.
+        // x_user = D x_eq and P_eq = c D P D, so stationarity gives
+        // z_x_user = D[J]^{-1} z_x_eq / c. Gather the inverse primal
+        // scaling in direct-cone order before undoing the embedding scale.
         if !self.z_x.is_empty() {
             let mut off = 0usize;
             for xcone in &data.dir_cones {
                 let indices = xcone.indices();
                 for (k, &idx) in indices.iter().enumerate() {
-                    self.z_x[off + k] = self.z_x[off + k] * d[idx] * scaleinv * cinv;
+                    self.z_x[off + k] =
+                        self.z_x[off + k] * data.equilibration.dinv[idx] * scaleinv * cinv;
                 }
                 off += indices.len();
             }

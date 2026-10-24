@@ -160,7 +160,7 @@ def cones_to_cpu(cones) -> List:
         cpu_cones.append(_cpu_solver.NonnegativeConeT(cones.num_nonneg_cones))
     for dim in cones.so_cone_dims:
         cpu_cones.append(_cpu_solver.SecondOrderConeT(dim))
-    # PSD cones must come before exp/power to match CVXPY/Clarabel cone ordering
+    # Documented slack row order (docs/guide/basic-usage.md): PSD before exp/power
     for dim in getattr(cones, "psd_dims", []):
         cpu_cones.append(_cpu_solver.PSDTriangleConeT(dim))
     for _ in range(cones.num_exp_cones):
@@ -211,18 +211,25 @@ def settings_to_cpu(settings) -> "_cpu_solver.DefaultSettings":
             "chordal_decomposition_enable",
             "chordal_decomposition_merge_method",
         ]:
-            # Only copy if both source has the attribute AND dest can accept it
-            if hasattr(ipm_src, attr) and hasattr(ipm_dst, attr):
-                value = getattr(ipm_src, attr)
-                try:
-                    setattr(ipm_dst, attr, value)
-                except (AttributeError, TypeError) as e:
-                    # Log warning instead of silently ignoring
-                    warnings.warn(
-                        f"Failed to set IPM setting '{attr}' = {value!r}: {e}",
-                        RuntimeWarning,
-                        stacklevel=3,
-                    )
+            if not hasattr(ipm_src, attr):
+                continue
+            # A setting the CPU binding doesn't expose would otherwise be
+            # dropped without a trace, and the solver would use its default
+            if not hasattr(ipm_dst, attr):
+                raise AttributeError(
+                    f"CPU IPMSettings has no attribute '{attr}'; "
+                    "the setting can't be passed to the CPU solver"
+                )
+            value = getattr(ipm_src, attr)
+            try:
+                setattr(ipm_dst, attr, value)
+            except (AttributeError, TypeError) as e:
+                # Log warning instead of silently ignoring
+                warnings.warn(
+                    f"Failed to set IPM setting '{attr}' = {value!r}: {e}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
         cpu_settings.ipm = ipm_dst
 
     return cpu_settings
@@ -232,6 +239,26 @@ def settings_to_cpu(settings) -> "_cpu_solver.DefaultSettings":
 # These are internal implementation details
 _SolverInternal = _cpu_solver.DefaultSolver
 _CompiledSolverInternal = _cpu_solver.CompiledSolver
+
+
+# Active-set stores P and A densely. Warn when one dense copy of [P; A] alone
+# exceeds this, since measured peak use is roughly 2x that for a solve and more
+# with gradients or per-problem matrices.
+_ACTIVE_SET_DENSE_WARN_BYTES = 1 << 30
+
+
+def _warn_if_active_set_dense_is_large(n: int, m: int) -> None:
+    dense_bytes = 8 * (n * n + m * n)
+    if dense_bytes <= _ACTIVE_SET_DENSE_WARN_BYTES:
+        return
+    warnings.warn(
+        f"The active-set solver stores P and A as dense matrices. For n={n}, m={m} "
+        f"that needs at least {dense_bytes / 2**30:.1f} GiB, and typically about twice "
+        "that during a solve (more with enable_grad or per-problem matrices). "
+        "Use solver='ipm' for large sparse problems.",
+        UserWarning,
+        stacklevel=3,
+    )
 
 
 class ActiveSetSolver:
@@ -269,6 +296,7 @@ class ActiveSetSolver:
         self._nnz_A = len(A_col_indices)
         self._enable_grad = enable_grad
         self._batch_size = batch_size or 1
+        _warn_if_active_set_dense_is_large(n, m)
 
         # Active-set CPU solver only supports zero + nonneg slack cones.
         # Direct cones (cones.dir_cones) and exotic slack cones (SOC, exp,
@@ -838,6 +866,7 @@ class Solver:
         warm_x: Optional[list] = None,
         warm_z: Optional[list] = None,
         warm_s: Optional[list] = None,
+        warm_z_x: Optional[list] = None,
     ) -> Dict[str, Any]:
         """Solve batched problems.
 
@@ -884,12 +913,15 @@ class Solver:
         warm_x_flat = None
         warm_z_flat = None
         warm_s_flat = None
+        warm_z_x_flat = None
         if warm_x is not None:
             warm_x_flat = np.ascontiguousarray(warm_x, dtype=np.float64).ravel()
         if warm_z is not None:
             warm_z_flat = np.ascontiguousarray(warm_z, dtype=np.float64).ravel()
         if warm_s is not None:
             warm_s_flat = np.ascontiguousarray(warm_s, dtype=np.float64).ravel()
+        if warm_z_x is not None:
+            warm_z_x_flat = np.ascontiguousarray(warm_z_x, dtype=np.float64).ravel()
 
         result = self._compiled_solver.solve_flat(
             q_flat,
@@ -898,6 +930,7 @@ class Solver:
             warm_x_flat=warm_x_flat,
             warm_z_flat=warm_z_flat,
             warm_s_flat=warm_s_flat,
+            warm_z_x_flat=warm_z_x_flat,
         )
 
         # Reshape flat arrays to (batch, dim)
@@ -928,6 +961,7 @@ class Solver:
         warm_x: Optional[list] = None,
         warm_z: Optional[list] = None,
         warm_s: Optional[list] = None,
+        warm_z_x: Optional[list] = None,
     ) -> Dict[str, Any]:
         """Solve conic optimization problem(s).
 
@@ -943,6 +977,7 @@ class Solver:
             warm_x: Optional warm start primal variables (list of lists)
             warm_z: Optional warm start dual variables (list of lists)
             warm_s: Optional warm start slack variables (list of lists)
+            warm_z_x: Optional warm start direct-cone dual variables (list of lists)
 
         Returns:
             Dict with keys: x, z, s, status, obj_val, iterations, solve_time
@@ -994,7 +1029,14 @@ class Solver:
 
         # Batched solve (handles both shared and per-problem P/A)
         result = self._solve_batch(
-            P_values, A_values, q, b, warm_x=warm_x, warm_z=warm_z, warm_s=warm_s
+            P_values,
+            A_values,
+            q,
+            b,
+            warm_x=warm_x,
+            warm_z=warm_z,
+            warm_s=warm_s,
+            warm_z_x=warm_z_x,
         )
 
         # If we reshuffled from single to batch, squeeze back

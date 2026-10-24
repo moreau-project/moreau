@@ -133,3 +133,27 @@ fn test_cached_grad_state_psd_direct_x() {
     let non_cached = run_direct_x(&P, &q, n, make, false);
     assert_results_close(&cached, &non_cached, 1e-9);
 }
+
+#[test]
+fn test_cached_grad_state_genpow_dense_and_sparse() {
+    // Straddle the numerical derivative's dense/rank-3 cutoff. In particular,
+    // a small active cone used to allocate a different symbolic pattern.
+    for n in [5, 64, 65] {
+        let P = CscMatrix::<f64>::new(n, n, (0..=n).collect(), (0..n).collect(), vec![1.; n]);
+        let mut q = vec![0.; n];
+        q[0] = -0.5;
+        q[1] = -0.5;
+        q[2] = 2.;
+        let make = || {
+            vec![SupportedXConeT::GenPowerXConeT(
+                (0..n).collect(),
+                vec![0.4, 0.6],
+                n - 2,
+            )]
+        };
+        let cached = run_direct_x(&P, &q, n, make, true);
+        let uncached = run_direct_x(&P, &q, n, make, false);
+        assert_results_close(&cached, &uncached, 1e-8);
+        assert!(cached.dq.iter().any(|v| v.abs() > 1e-2));
+    }
+}

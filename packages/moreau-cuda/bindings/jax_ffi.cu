@@ -587,14 +587,14 @@ ffi::Error MoreauSolveFwdImpl(
 
     // Emit z_x in the user/original frame. The internal `variables.z_x`
     // is in the equilibrated τ-scaled frame; `unscale_z_x` applies the
-    // inverse Ruiz scaling and τ_raw division.
+    // inverse Ruiz scaling and tau/kappa normalization for solutions/certificates.
     if (xb.total_xn > 0) {
         moreau::unscale_z_x(
             z_x_out->typed_data(),
-            cached->solver->variables.z_x.data(),
+            cached->solver->solution.z_x_raw.data(),
             cached->solver->data.equilibration.dinv.data(),
             cached->solver->data.equilibration.c.data(),
-            cached->solver->solution.τ_raw.data(),
+            cached->solver->solution.normalization_scale.data(),
             cached->solver->data.cones.d_xcone_indices,
             n, xb.total_xn, batch_size, stream);
     }
@@ -1033,10 +1033,10 @@ ffi::Error MoreauSolveFwdWarmImpl(
     if (xb.total_xn > 0) {
         moreau::unscale_z_x(
             z_x_out->typed_data(),
-            cached->solver->variables.z_x.data(),
+            cached->solver->solution.z_x_raw.data(),
             cached->solver->data.equilibration.dinv.data(),
             cached->solver->data.equilibration.c.data(),
-            cached->solver->solution.τ_raw.data(),
+            cached->solver->solution.normalization_scale.data(),
             cached->solver->data.cones.d_xcone_indices,
             n, xb.total_xn, batch_size, stream);
     }

@@ -8,7 +8,9 @@ using ChainRulesCore
 # ============================================================================
 
 function _extract_tangent(Δ, field::Symbol, fallback_size)
-    t = getproperty(Δ, field)
+    Δ = unthunk(Δ)
+    Δ isa AbstractZero && return zeros(Float64, fallback_size)
+    t = unthunk(getproperty(Δ, field))
     if t isa AbstractArray
         return t
     else

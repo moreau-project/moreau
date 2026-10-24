@@ -728,8 +728,8 @@ where
         let _ = m;
 
         // Direct-x dual `z_x_eq` in the solver's equilibrated frame:
-        // unscale runs `z_x_orig = z_x_eq * d[J] / c`, so the inverse is
-        // `z_x_eq[k] = z_x_orig[k] * c / d[J[k]]`.
+        // unscale runs `z_x_orig = z_x_eq / (d[J] * c)`, so the inverse is
+        // `z_x_eq[k] = z_x_orig[k] * c * d[J[k]]`.
         let xcone_indices: Vec<Vec<usize>> = self
             .data
             .dir_cones
@@ -741,7 +741,7 @@ where
             let mut zx_off = 0usize;
             for ix in &xcone_indices {
                 for &idx in ix {
-                    out.push(self.variables.z_x[zx_off] * c / d[idx]);
+                    out.push(self.variables.z_x[zx_off] * c * d[idx]);
                     zx_off += 1;
                 }
             }
@@ -751,7 +751,7 @@ where
         };
 
         // Convert the user-frame dz_x into equilibrated frame:
-        //   z_x_orig = z_x_eq * d[J] / c  ⇒  dz_x_eq = dz_x_orig * d[J] / c.
+        //   z_x_orig = z_x_eq / (d[J] * c) ⇒ dz_x_eq = dz_x_orig / (d[J] * c).
         // Empty input means "no upstream gradient on z_x" — same as before
         // task-5 plumbing. xn-zero in this case.
         let xn_total: usize = xcone_indices.iter().map(|ix| ix.len()).sum();
@@ -765,7 +765,7 @@ where
             let mut k = 0usize;
             for ix in &xcone_indices {
                 for &idx in ix {
-                    out.push(dz_x[k] * d[idx] / c);
+                    out.push(dz_x[k] / (d[idx] * c));
                     k += 1;
                 }
             }

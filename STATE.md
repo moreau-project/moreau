@@ -25,7 +25,12 @@ python/moreau/
 │                      # Solution, BatchedSolution, WarmStart, BatchedWarmStart
 ├── _validation.py     # Input shape/dtype/sparsity validation
 ├── testing.py         # Public test helpers
-├── torch/             # torch.Solver — PyTorch autograd integration
+├── torch/             # torch.Solver — PyTorch autograd + torch.compile
+│   ├── __init__.py    # Solver API, eager/compiled dispatch
+│   ├── _autograd.py   # Eager autograd and shared backward custom op
+│   ├── _compiled.py   # Forward custom op, fake kernel, autograd registration
+│   ├── _cpu_impl.py   # CPU backend adapter
+│   └── _types.py      # Torch solution and warm-start containers
 └── jax/               # jax.Solver — jit/vmap/grad-friendly (recently split out)
 
 tests/python/          # Unified API integration tests
@@ -35,6 +40,10 @@ tests/python/bench/    # Decision-gate benchmarks (checked in)
 The public direct cone API uses `DirectConeSpec` entries in `Cones.dir_cones`.
 Both native solver bindings accept the `dir_cones` argument. See
 [`docs/guide/direct-cones.md`](docs/guide/direct-cones.md) for usage.
+
+PyTorch CPU and CUDA solves and backward passes use custom ops under
+`torch.compile`, including with `fullgraph=True`. See the
+[PyTorch guide](docs/guide/pytorch-integration.md#torchcompile).
 
 ## packages/moreau-cpu (Rust solver)
 
@@ -68,6 +77,14 @@ Browser WASM (`wasm32-unknown-unknown`, no default features) uses QDLDL and
 sequential batch execution through `utils/batch.rs`. Native batches use Rayon.
 `tests/browser.rs` runs portable solve and derivative checks natively and in
 Firefox through `.github/workflows/ci-wasm.yml`. See `docs/guide/webassembly.md`.
+
+`default/compiled_solver.rs` uses `utils/batch.rs` to share Rayon pools among
+live native compiled solvers with the same thread count. The process-wide
+cache holds weak references;
+solvers own the workers and release them when the last owner is dropped.
+Its unit test checks sharing, and `tests/python/test_thread_pool_lifecycle.py`
+checks constructing a fresh child solver after releasing parent solvers and
+forking, with a timeout to catch hangs.
 
 ## packages/moreau-cuda (C++/CUDA solver)
 
@@ -124,6 +141,14 @@ Julia MOI wrapper. Links against `moreau-c`. Released under Apache 2.0.
 
 Critical Rule 6 in CLAUDE.md: prefer C++/Rust tests for fast inner-loop
 verification; use Python tests for API/integration validation.
+
+## Documentation
+
+`docs/` contains the Sphinx user guides and API reference. The illustrated
+[chordal decomposition guide](docs/guide/chordal-decomposition.md) covers
+sparse PSD conversion, counterexamples, and CPU/CUDA execution paths.
+Its checked-in SVG figures live in `docs/_static/figures/` and are generated
+by `docs/_scripts/chordal_figures.py` (NumPy and Matplotlib).
 
 ## Build commands
 

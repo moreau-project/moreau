@@ -18,11 +18,12 @@ Covers:
 - Woodbury KKT solver with nonneg direct-x agreeing with cuDSS.
 """
 
+import moreau
 import numpy as np
 import pytest
 from scipy import sparse
 
-import moreau
+from .cone_test_utils import assert_member, complementary_pair
 
 
 @pytest.mark.parametrize(
@@ -43,8 +44,8 @@ def test_cuda_torch_asymmetric_direct_x_kinds(kind, extra_kwargs, q_vals):
     """
     pytest.importorskip("torch")
     import torch
-    from moreau.torch import Solver
     from moreau._backend import device_available
+    from moreau.torch import Solver
 
     if not device_available("cuda"):
         pytest.skip("CUDA backend not available")
@@ -83,6 +84,49 @@ def test_cuda_torch_asymmetric_direct_x_kinds(kind, extra_kwargs, q_vals):
     assert sol.x.shape == (n,)
     x = sol.x.detach().cpu().numpy()
     assert np.all(np.isfinite(x)), f"{kind} produced non-finite x: {x}"
+
+
+@pytest.mark.parametrize("equilibrate", [False, True])
+def test_nonneg_dual_scaling_and_external_warm_start(device, equilibrate):
+    # x* = (0, 1, 0), equality dual = 4, direct duals = (3, 6).
+    # Gather direct coordinates out of order, with a free coordinate between them.
+    P = sparse.diags([4.0, 2.0, 0.25], format="csr")
+    q = np.array([2.0, -6.0, 3.0])
+    A = sparse.csr_matrix([[1.0, 1.0, 0.0]])
+    b = np.array([1.0])
+    cones = moreau.Cones(
+        num_zero_cones=1,
+        dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[2, 0])],
+    )
+    settings = moreau.Settings(
+        device=device,
+        solver="ipm",
+        verbose=False,
+        ipm_settings=moreau.IPMSettings(
+            presolve_enable=False,
+            equilibrate_enable=equilibrate,
+        ),
+    )
+    solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
+    sol = solver.solve()
+    assert solver.info.status.name == "Solved"
+    np.testing.assert_allclose(sol.z_x, (P @ sol.x + q + A.T @ sol.z)[[2, 0]], atol=1e-6)
+    np.testing.assert_allclose(sol.z_x, [3.0, 6.0], atol=1e-6)
+
+    # An independent optimum exposes incorrect input scaling even when output
+    # and input scaling bugs would cancel in a solution.to_warm_start() roundtrip.
+    settings.max_iter = 1
+    warm_solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
+    warm_solver.solve(
+        warm_start=moreau.WarmStart(
+            x=np.array([0.0, 1.0, 0.0]),
+            z=np.array([4.0]),
+            s=np.array([0.0]),
+            z_x=np.array([3.0, 6.0]),
+        )
+    )
+    assert warm_solver.info.status.name == "Solved"
+    assert warm_solver.info.iterations == 0
 
 
 def test_direct_x_warm_start_reduces_iters(device):
@@ -391,6 +435,80 @@ def test_psd_slack_plus_direct_x_chordal_disabled():
     assert abs(sol.x[3] - 1.0) < 1e-6
 
 
+@pytest.mark.parametrize("interface", ["numpy", "torch"])
+def test_sparse_psd_direct_dual_chordal_backward(device, interface):
+    # Two disjoint 2x2 blocks inside a slack PSD(4), plus an active direct bound.
+    P = sparse.diags([1.0, 3.0, 2.0, 5.0, 2.0, 0.4, 4.0], format="csr")
+    q = np.array([0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 2.0])
+    rows = [0, 1, 2, 5, 8, 9]
+    A = sparse.csr_matrix((-np.ones(6), (rows, np.arange(6))), shape=(10, 7))
+    b = np.zeros(10)
+    cones = moreau.Cones(
+        psd_dims=[4], dir_cones=[moreau.DirectConeSpec(kind="nonneg", indices=[6])]
+    )
+    results = []
+    for chordal in (False, True):
+        settings = moreau.Settings(
+            device=device,
+            solver="ipm",
+            enable_grad=True,
+            verbose=False,
+            ipm_settings=moreau.IPMSettings(
+                chordal_decomposition_enable=chordal,
+                chordal_decomposition_merge_method="none",
+                tol_feas=1e-10,
+                tol_gap_abs=1e-10,
+                tol_gap_rel=1e-10,
+            ),
+        )
+        if interface == "numpy":
+            solver = moreau.Solver(P, q, A, b, cones, settings)
+            sol = solver.solve()
+            grad = solver.backward(np.zeros(7), dz_x=np.ones(1))["dq"]
+            x, s, z, zx = sol.x, sol.s, sol.z, sol.z_x
+        else:
+            torch = pytest.importorskip("torch")
+            from moreau.torch import Solver
+
+            solver = Solver(
+                n=7,
+                m=10,
+                P_row_offsets=torch.tensor(P.indptr),
+                P_col_indices=torch.tensor(P.indices),
+                A_row_offsets=torch.tensor(A.indptr),
+                A_col_indices=torch.tensor(A.indices),
+                cones=cones,
+                settings=settings,
+                b_sparsity_pattern=[False] * 10,
+            )
+
+            def tensor(a, torch=torch):
+                return torch.tensor(a, dtype=torch.float64, device=device)
+
+            qt = tensor(q).requires_grad_()
+            sol = solver.solve(tensor(P.data), tensor(A.data), qt, tensor(b))
+            sol.z_x.sum().backward()
+            grad = qt.grad.cpu().numpy()
+            x, s, z, zx = [
+                getattr(sol, name).detach().cpu().numpy() for name in ("x", "s", "z", "z_x")
+            ]
+        if device == "cuda":
+            assert (solver._impl._impl.m_solver != 10) == chordal
+        np.testing.assert_allclose(zx, [2.0], atol=1e-6)
+        stationarity = P @ x + q + A.T @ z
+        stationarity[6] -= zx[0]
+        np.testing.assert_allclose(stationarity, 0, atol=1e-6)
+        np.testing.assert_allclose(A @ x + s, b, atol=1e-6)
+        psd, _, _ = complementary_pair("psd4")
+        assert_member(psd, s)
+        assert_member(psd, z, dual=True)
+        assert abs(s @ z) < 1e-6
+        np.testing.assert_allclose(grad, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0], atol=1e-5)
+        results.append((x, s, z, zx))
+    for off, on in zip(*results):
+        np.testing.assert_allclose(off, on, atol=1e-5)
+
+
 # ---------- CUDA torch zero-copy + warm-start + Woodbury ----------
 
 
@@ -532,7 +650,8 @@ def test_woodbury_with_nonneg_direct_x_matches_cudss():
         b,
         cones,
         moreau.Settings(
-            device="cuda", ipm_settings=moreau.IPMSettings(direct_solve_method="woodbury")
+            device="cuda",
+            ipm_settings=moreau.IPMSettings(direct_solve_method="woodbury"),
         ),
     )
     sol_wb = s_wb.solve()

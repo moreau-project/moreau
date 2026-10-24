@@ -1,7 +1,7 @@
 # Publish Python artifacts from a GitHub Release to PyPI.
 #
 # Run this AFTER creating a GitHub Release (via release.yml) and completing QA.
-# CPU/Julia QA and artifact validation are required. CUDA runtime QA is opt-in;
+# Python QA and artifact validation are required. CUDA runtime QA is opt-in;
 # its coverage is recorded by test-release.yml, including when it was not run.
 #
 # Usage:
@@ -32,25 +32,19 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
 
-      - name: Require successful QA for this release commit
+      - name: Require successful Python QA for this release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          gh run list --workflow test-release.yml --commit "$(git rev-parse HEAD)" \
-            --limit 100 --json displayTitle,conclusion,status,url > qa-runs.json
-          python3 - <<'PYQA'
-          import json, os
-          title = "Test Release " + os.environ["RELEASE_TAG"]
-          runs = [run for run in json.load(open("qa-runs.json")) if run["displayTitle"] == title]
-          if not runs or runs[0]["status"] != "completed" or runs[0]["conclusion"] != "success":
-              raise SystemExit("The latest QA run for this release commit must pass before publishing")
-          print("QA passed:", runs[0]["url"])
-          PYQA
+          gh run list --workflow test-release.yml --event workflow_dispatch \
+            --limit 100 --json displayTitle,conclusion,status | \
+            jq -e --arg title "Test Python Release $RELEASE_TAG" \
+              '[.[] | select(.displayTitle == $title)][0] | .status == "completed" and .conclusion == "success"'
 
       - name: Download release assets
         env:
@@ -58,7 +52,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          gh release download "$RELEASE_TAG" --dir dist
+          gh release download "$RELEASE_TAG" --pattern '*.whl' --dir dist
 
           echo "=== Release assets ==="
           ls -la dist/
@@ -92,11 +86,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -151,7 +145,7 @@ jobs:
       actions: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

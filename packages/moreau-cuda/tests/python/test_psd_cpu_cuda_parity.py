@@ -14,6 +14,7 @@ obj_val agree.
 
 import numpy as np
 import pytest
+from moreau import SolverStatus
 
 # CPU backend: lower-level CompiledSolver (the unified `moreau` Cones class
 # does not yet expose `psd_dims` — that lands in #134, after which this test
@@ -45,19 +46,29 @@ def _diag_csr(n):
     return (np.arange(n + 1, dtype=np.int64), np.arange(n, dtype=np.int64), np.ones(n))
 
 
-def _solve_cpu(n, m, P_ro, P_ci, A_ro, A_ci, P_vals, A_vals, q, b, psd_dims):
+def _solve_cpu(
+    n, m, P_ro, P_ci, A_ro, A_ci, P_vals, A_vals, q, b, psd_dims, merge_method="clique_graph"
+):
     cones = [moreau_cpu.PSDTriangleConeT(d) for d in psd_dims]
     settings = moreau_cpu.DefaultSettings()
     settings.verbose = False
+    ipm = settings.ipm  # PyO3 returns a copy
+    ipm.chordal_decomposition_merge_method = merge_method
+    settings.ipm = ipm
     solver = moreau_cpu.CompiledSolver(n, m, P_ro, P_ci, A_ro, A_ci, cones, settings, 1, False)
     solver.setup([P_vals], [A_vals])
     solutions = solver.solve([q], [b])
     return solutions[0]
 
 
-def _solve_cuda(n, m, P_ro, P_ci, A_ro, A_ci, P_vals, A_vals, q, b, psd_dims):
+def _solve_cuda(
+    n, m, P_ro, P_ci, A_ro, A_ci, P_vals, A_vals, q, b, psd_dims, merge_method="clique_graph"
+):
     cones = _CudaCones()
     cones.psd_cone_dims = list(psd_dims)
+    settings = moreau_cuda._CudaSettings()
+    settings.verbose = False
+    settings.ipm.chordal_decomposition_merge_method = merge_method
     solver = moreau_cuda.CompiledSolver(
         n=n,
         m=m,
@@ -67,22 +78,24 @@ def _solve_cuda(n, m, P_ro, P_ci, A_ro, A_ci, P_vals, A_vals, q, b, psd_dims):
         A_col_indices=A_ci,
         cones=cones,
         batch_size=1,
+        settings=settings,
     )
     solver.setup(P_vals.reshape(1, -1), A_vals.reshape(1, -1))
     return solver.solve(q.reshape(1, -1), b.reshape(1, -1))
 
 
 def _assert_parity(label, sol_cpu, sol_cuda):
-    """sol_cpu is a moreau_cpu DefaultSolution; sol_cuda is whatever
-    moreau_cuda.CompiledSolver.solve returns. Both expose .x and
-    .status; CUDA result may be batched-shaped."""
+    """sol_cpu is a moreau_cpu DefaultSolution; sol_cuda is the dict of
+    batched arrays that moreau_cuda.CompiledSolver.solve returns."""
     cpu_status_name = (
         sol_cpu.status.name if hasattr(sol_cpu.status, "name") else str(sol_cpu.status)
     )
-    assert "Solved" in cpu_status_name, f"{label}: CPU did not solve ({cpu_status_name})"
+    assert cpu_status_name == "Solved", f"{label}: CPU did not solve ({cpu_status_name})"
+    cuda_status = SolverStatus(int(np.asarray(sol_cuda["status"]).ravel()[0]))
+    assert cuda_status == SolverStatus.Solved, f"{label}: CUDA did not solve ({cuda_status})"
 
     x_cpu = np.asarray(sol_cpu.x).ravel()
-    x_cuda = np.asarray(sol_cuda.x).ravel()
+    x_cuda = np.asarray(sol_cuda["x"]).ravel()
     assert (
         x_cpu.shape == x_cuda.shape
     ), f"{label}: x shape {x_cpu.shape} (cpu) vs {x_cuda.shape} (cuda)"
@@ -94,12 +107,11 @@ def _assert_parity(label, sol_cpu, sol_cuda):
         f"  cuda x[:5] = {x_cuda[:5]}"
     )
 
-    if hasattr(sol_cpu, "obj_val") and hasattr(sol_cuda, "obj_val"):
-        obj_cpu = float(np.asarray(sol_cpu.obj_val).ravel()[0])
-        obj_cuda = float(np.asarray(sol_cuda.obj_val).ravel()[0])
-        assert abs(obj_cpu - obj_cuda) < TOL_OBJ, (
-            f"{label}: |obj_cpu - obj_cuda| = " f"{abs(obj_cpu - obj_cuda):.2e} (tol {TOL_OBJ:.0e})"
-        )
+    obj_cpu = float(sol_cpu.obj_val)
+    obj_cuda = float(np.asarray(sol_cuda["obj_val"]).ravel()[0])
+    assert abs(obj_cpu - obj_cuda) < TOL_OBJ, (
+        f"{label}: |obj_cpu - obj_cuda| = " f"{abs(obj_cpu - obj_cuda):.2e} (tol {TOL_OBJ:.0e})"
+    )
 
 
 # ─── Tests ──────────────────────────────────────────────────────────────────
@@ -204,26 +216,15 @@ def test_parity_block_diag_psd6_chordal():
     _assert_parity("block_diag_psd6_chordal", sol_cpu, sol_cuda)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "#176: CUDA chordal merge currently hardcodes fill_in==0 parent-child "
-        "(chordal_info.cpp), while CPU defaults to clique_graph (Garstka et "
-        "al. 2019). The IPMSettings.chordal_decomposition_merge_method "
-        "field is plumbed through to _CudaSettings but is NOT honored by "
-        "CUDA — wiring requires an adapter between moreau::SuperNodeTree "
-        "and moreau::chordal::SuperNodeTree (parallel implementations with "
-        "incompatible VertexSet types). This test documents the divergence; "
-        "remove the xfail when the adapter lands."
-    ),
-    strict=False,
-)
-def test_parity_banded_psd8_chordal_merge_strategy():
+@pytest.mark.parametrize("merge_method", ["clique_graph", "parent_child", "none"])
+def test_parity_banded_psd8_chordal_merge_strategy(merge_method):
     """Banded PSD(8) (tridiagonal sparsity) — non-trivial chordal merge case.
 
-    Regression for #176. For a banded pattern, CPU's clique_graph strategy
-    and CUDA's hardcoded fill_in==0 parent-child produce different clique
-    sets, so the two backends converge to different (Solved-status) iterates
-    of fundamentally different reformulations.
+    For #83 (formerly #176): each merge method must give the same solution
+    on both backends. The optimum doesn't depend on the merge, so this
+    checks the reformulation under each method, not which cliques it uses;
+    MergeMethodTest in test_psd_chordal.cpp and test_chordal_merge_method.py
+    check those.
 
     The existing block-diagonal parity test cannot catch this because every
     sensible merge collapses to the same outcome on perfectly separated
@@ -272,6 +273,7 @@ def test_parity_banded_psd8_chordal_merge_strategy():
             idx += 1
     q = -0.5 * b
 
-    sol_cpu = _solve_cpu(n, m, P_ro, P_ci, A_ro, A_ci, P_vals, A_vals, q, b, [mat_dim])
-    sol_cuda = _solve_cuda(n, m, P_ro, P_ci, A_ro, A_ci, P_vals, A_vals, q, b, [mat_dim])
-    _assert_parity("banded_psd8_chordal", sol_cpu, sol_cuda)
+    args = (n, m, P_ro, P_ci, A_ro, A_ci, P_vals, A_vals, q, b, [mat_dim], merge_method)
+    sol_cpu = _solve_cpu(*args)
+    sol_cuda = _solve_cuda(*args)
+    _assert_parity(f"banded_psd8_chordal_{merge_method}", sol_cpu, sol_cuda)

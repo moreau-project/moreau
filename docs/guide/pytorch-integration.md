@@ -72,6 +72,25 @@ loss.backward()
 
 ---
 
+## torch.compile
+
+Compile the surrounding model or loss. CPU and CUDA solves support
+`fullgraph=True` and backpropagation; Moreau's native solver runs unchanged.
+
+```python
+# Using the solver and tensors from Quick Start:
+weights = torch.eye(q.numel(), dtype=q.dtype, device=q.device, requires_grad=True)
+
+@torch.compile(fullgraph=True)
+def loss(weights, q):
+    x = solver.solve(P_values, A_values, weights @ q, b).x
+    return x.square().mean()
+
+loss(weights, q).backward()
+```
+
+---
+
 ## Implicit Differentiation
 
 Unlike some other libraries that differentiate through solver iterations (unrolling), Moreau uses **implicit differentiation**. This technique computes gradients based on the optimality (KKT) conditions of the problem.

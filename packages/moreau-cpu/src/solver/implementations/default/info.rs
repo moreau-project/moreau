@@ -241,12 +241,12 @@ where
 
         // Direct-x dual `z_x` contributes to the primal-infeasibility
         // certificate `‖A^T z − Σ_J E_J^T z_x‖ → 0` and pairs with `x[J]`
-        // (so it unscales by `d[J]`, not `e`). Folding `‖z_x‖_{d|J} · cinv`
+        // (so it unscales by `dinv[J]`). Folding `‖z_x‖_{dinv|J} · cinv`
         // into the relative-residual denominator keeps the certificate test
         // comparable across slack-only vs. direct-x problems — without it,
         // a certificate with small `‖z‖` but large `‖z_x‖` can inflate the
         // relative residual past `tol_infeas_rel · |b^T z|` and miss firing.
-        let norm_zx_d_cinv = if data.dir_cones.is_empty() {
+        let norm_zx_dinv_cinv = if data.dir_cones.is_empty() {
             T::zero()
         } else {
             let mut sumsq = T::zero();
@@ -254,7 +254,7 @@ where
             for xcone in &data.dir_cones {
                 let indices = xcone.indices();
                 for (k, &idx) in indices.iter().enumerate() {
-                    let val = variables.z_x[off + k] * d[idx];
+                    let val = variables.z_x[off + k] * dinv[idx];
                     sumsq += val * val;
                 }
                 off += indices.len();
@@ -263,8 +263,8 @@ where
         };
 
         // primal and dual infeasibility residuals.
-        self.res_primal_inf =
-            (residuals.rx_inf.norm_scaled(dinv) * cinv) / T::max(T::one(), normz + norm_zx_d_cinv);
+        self.res_primal_inf = (residuals.rx_inf.norm_scaled(dinv) * cinv)
+            / T::max(T::one(), normz + norm_zx_dinv_cinv);
         self.res_dual_inf = T::max(
             residuals.Px.norm_scaled(dinv) / T::max(T::one(), normx),
             residuals.rz_inf.norm_scaled(einv) / T::max(T::one(), normx + norms),

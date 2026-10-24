@@ -8,9 +8,14 @@
  * - Block-diagonal PSD cones ARE decomposed into smaller cliques
  * - Augmentation structure is correct (dimensions, nnz)
  * - Reverse mapping correctly reconstructs original-dimension solution
+ * - Each clique merge method gives the CPU backend's cliques
  */
 
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <memory>
+#include <stdexcept>
+#include <string>
 #include <vector>
 #include <cmath>
 #include <numeric>
@@ -67,7 +72,8 @@ TEST_F(ChordalTest, DensePsdNoDecomposition) {
     auto info = ChordalInfo::analyze(
         A_colptr.data(), A_rowind.data(), n, m,
         psd_dims.data(), 1,
-        0, 0, 0, 0, 0  // no other cones
+        0, 0, 0, 0, 0,  // no other cones
+        "clique_graph"
     );
 
     EXPECT_FALSE(info.is_decomposed()) << "Dense PSD should not be decomposed";
@@ -104,6 +110,7 @@ TEST_F(ChordalTest, BlockDiagonalDecomposition) {
         A_colptr.data(), A_rowind.data(), n, m,
         psd_dims.data(), 1,
         0, 0, 0, 0, 0,
+        "clique_graph",
         b_mask.get()
     );
 
@@ -146,6 +153,7 @@ TEST_F(ChordalTest, MixedConeOrderKeepsPsdBeforeExpAndPower) {
         A_colptr.data(), A_rowind.data(), n, m,
         psd_dims.data(), 1,
         1, 1, 3, 1, 1,
+        "clique_graph",
         b_mask.get()
     );
     ASSERT_TRUE(info.is_decomposed());
@@ -177,6 +185,86 @@ TEST_F(ChordalTest, MixedConeOrderKeepsPsdBeforeExpAndPower) {
     }
 }
 
+// ============================================================================
+// complete_z on a 4x4 PSD cone with pattern K4 minus the edge (2,3): cliques
+// {0,1,2} and {0,1,3}, separator {0,1}, and one structural entry, (2,3).
+// ============================================================================
+
+class CompleteZTest : public ::testing::Test {
+protected:
+    static constexpr int64_t kDim = 4;
+    static constexpr int64_t kSvec = 10;  // svec rows: (0,0) (0,1) (1,1) (0,2) (1,2) (2,2) (0,3) (1,3) (2,3) (3,3)
+    static constexpr int64_t kFill = 8;   // svec row of (2,3)
+
+    static ChordalInfo analyze_k4_minus_edge() {
+        // One variable on each specified off-diagonal entry; b on the diagonal.
+        std::vector<int64_t> A_colptr = {0, 1, 2, 3, 4, 5};
+        std::vector<int64_t> A_rowind = {1, 3, 4, 6, 7};
+        std::vector<int64_t> psd_dims = {kDim};
+        std::unique_ptr<bool[]> b_mask(new bool[kSvec]);
+        for (int64_t i = 0; i < kSvec; ++i) b_mask[i] = (i == 0 || i == 2 || i == 5 || i == 9);
+        return ChordalInfo::analyze(A_colptr.data(), A_rowind.data(), 5, kSvec,
+                                    psd_dims.data(), 1, 0, 0, 0, 0, 0, "clique_graph",
+                                    b_mask.get());
+    }
+
+    // svec of a symmetric row-major matrix, off-diagonal entries scaled by sqrt(2)
+    static std::vector<double> svec(const std::vector<double>& M) {
+        std::vector<double> v;
+        for (int64_t col = 0; col < kDim; ++col) {
+            for (int64_t row = 0; row <= col; ++row) {
+                v.push_back(row == col ? M[row * kDim + col] : M[row * kDim + col] * std::sqrt(2.0));
+            }
+        }
+        return v;
+    }
+};
+
+// M is its own max-determinant completion: M[{0,1},{0,1}] = I and
+// M[2,3] = M[2,{0,1}] * M[{0,1},3] = 0.5 * 0.3 + 0.2 * (-0.4) = 0.07.
+// Completing M without M[2,3] must give M back, svec scaling included.
+TEST_F(CompleteZTest, RestoresMaxDeterminantCompletion) {
+    auto info = analyze_k4_minus_edge();
+    ASSERT_TRUE(info.is_decomposed());
+
+    std::vector<double> M = {1.0, 0.0, 0.5, 0.3,
+                             0.0, 1.0, 0.2, -0.4,
+                             0.5, 0.2, 1.0, 0.07,
+                             0.3, -0.4, 0.07, 1.0};
+    std::vector<double> expected = svec(M);
+    std::vector<double> z = expected;
+    z[kFill] = 0.0;
+    info.complete_z(z.data(), 0);
+    for (int64_t i = 0; i < kSvec; ++i) EXPECT_NEAR(z[i], expected[i], 1e-14) << "svec row " << i;
+}
+
+// Z = 1 1^T has a singular separator block [[1, 1], [1, 1]], whose second
+// Cholesky pivot is exactly 0, so this takes the pseudoinverse path. The only
+// PSD completion has Z[2,3] = 1.
+TEST_F(CompleteZTest, SingularSeparatorBlock) {
+    auto info = analyze_k4_minus_edge();
+    ASSERT_TRUE(info.is_decomposed());
+
+    std::vector<double> expected = svec(std::vector<double>(kDim * kDim, 1.0));
+    std::vector<double> z = expected;
+    z[kFill] = 0.0;
+    info.complete_z(z.data(), 0);
+    for (int64_t i = 0; i < kSvec; ++i) EXPECT_NEAR(z[i], expected[i], 1e-14) << "svec row " << i;
+}
+
+// A separator block with eigenvalues 3 and -1 has no PSD completion.
+TEST_F(CompleteZTest, IndefiniteSeparatorBlockThrows) {
+    auto info = analyze_k4_minus_edge();
+    ASSERT_TRUE(info.is_decomposed());
+
+    std::vector<double> M = {1.0, 2.0, 0.5, 0.3,
+                             2.0, 1.0, 0.2, -0.4,
+                             0.5, 0.2, 1.0, 0.0,
+                             0.3, -0.4, 0.0, 1.0};
+    std::vector<double> z = svec(M);
+    EXPECT_THROW(info.complete_z(z.data(), 0), std::runtime_error);
+}
+
 // Non-PSD cones should pass through unchanged
 TEST_F(ChordalTest, NonPsdConesUnchanged) {
     // 2 nonneg + PSD(3) = m = 2 + 6 = 8
@@ -190,7 +278,8 @@ TEST_F(ChordalTest, NonPsdConesUnchanged) {
     auto info = ChordalInfo::analyze(
         A_colptr.data(), A_rowind.data(), n, m,
         psd_dims.data(), 1,
-        0, 2, 0, 0, 0  // 2 nonneg cones
+        0, 2, 0, 0, 0,  // 2 nonneg cones
+        "clique_graph"
     );
 
     // Dense PSD with all rows active → no decomposition
@@ -258,4 +347,92 @@ TEST_F(SuperNodeTreeTest, ConstructFromLDL) {
 
     EXPECT_GT(tree.n_cliques, 0);
     std::cout << "Chain graph: n_cliques=" << tree.n_cliques << std::endl;
+}
+
+// ============================================================================
+// Clique merging
+// ============================================================================
+
+// Strictly lower CSC pattern of the Cholesky factor of an n×n banded matrix
+// with the given bandwidth, in natural order (no fill).
+void banded_L(int64_t n, int64_t bandwidth,
+              std::vector<int64_t>& colptr, std::vector<int64_t>& rowind) {
+    colptr.assign(1, 0);
+    rowind.clear();
+    for (int64_t j = 0; j < n; ++j) {
+        for (int64_t i = j + 1; i <= std::min(j + bandwidth, n - 1); ++i) rowind.push_back(i);
+        colptr.push_back(rowind.size());
+    }
+}
+
+// The cliques (supernode plus separator) of a merged tree, each sorted, in
+// lexicographic order.
+std::vector<std::vector<int64_t>> cliques_of(const SuperNodeTree& tree) {
+    std::vector<std::vector<int64_t>> out;
+    for (int64_t i = 0; i < tree.n_cliques; ++i) {
+        int64_t c = tree.get_post_order(i);
+        std::vector<int64_t> clique(tree.snode[c].begin(), tree.snode[c].end());
+        clique.insert(clique.end(), tree.separators[c].begin(), tree.separators[c].end());
+        std::sort(clique.begin(), clique.end());
+        out.push_back(clique);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+// Analyze a PSD(dim) cone whose only nonzeros are the diagonal and first
+// superdiagonal, as in #83's example.
+ChordalInfo analyze_tridiagonal_psd(int64_t dim, const std::string& merge_method) {
+    // svec is the column-major upper triangle: (i, j), i <= j, is j(j+1)/2 + i
+    std::vector<int64_t> rows;
+    for (int64_t j = 0; j < dim; ++j) {
+        if (j > 0) rows.push_back(j * (j + 1) / 2 + j - 1);
+        rows.push_back(j * (j + 1) / 2 + j);
+    }
+    int64_t n = rows.size(), m = dim * (dim + 1) / 2;
+    std::vector<int64_t> A_colptr(n + 1);
+    std::iota(A_colptr.begin(), A_colptr.end(), 0);
+    std::unique_ptr<bool[]> b_mask(new bool[m]());
+    std::vector<int64_t> psd_dims = {dim};
+    return ChordalInfo::analyze(A_colptr.data(), rows.data(), n, m, psd_dims.data(), 1,
+                                0, 0, 0, 0, 0, merge_method, b_mask.get());
+}
+
+class MergeMethodTest : public ::testing::Test {};
+
+// #83: on a tridiagonal PSD(8) the CPU gives 7 cones of size 2 with
+// clique_graph and none, and merges everything with parent_child.
+TEST_F(MergeMethodTest, TridiagonalPsd8) {
+    for (const std::string method : {"clique_graph", "none"}) {
+        auto info = analyze_tridiagonal_psd(8, method);
+        ASSERT_TRUE(info.is_decomposed()) << method;
+        EXPECT_EQ(info.decomposed_psd_dims, std::vector<int64_t>(7, 2)) << method;
+    }
+    auto info = analyze_tridiagonal_psd(8, "parent_child");
+    EXPECT_FALSE(info.is_decomposed());
+}
+
+TEST_F(MergeMethodTest, UnknownMethodThrows) {
+    EXPECT_THROW(analyze_tridiagonal_psd(8, "parent-child"), std::invalid_argument);
+}
+
+// Bandwidth 4 on 7 vertices gives the cliques {0..4}, {1..5}, {2..6} in a
+// path. Both clique-graph edges weigh 34, and the CPU (Rust's max_by_key
+// takes the last maximum) merges the last two.
+TEST_F(MergeMethodTest, CliqueGraphTieBreak) {
+    std::vector<int64_t> colptr, rowind;
+    banded_L(7, 4, colptr, rowind);
+    using Cliques = std::vector<std::vector<int64_t>>;
+
+    SuperNodeTree none(colptr.data(), rowind.data(), 7);
+    merge_cliques(none, "none");
+    EXPECT_EQ(cliques_of(none), (Cliques{{0, 1, 2, 3, 4}, {1, 2, 3, 4, 5}, {2, 3, 4, 5, 6}}));
+
+    SuperNodeTree clique_graph(colptr.data(), rowind.data(), 7);
+    merge_cliques(clique_graph, "clique_graph");
+    EXPECT_EQ(cliques_of(clique_graph), (Cliques{{0, 1, 2, 3, 4}, {1, 2, 3, 4, 5, 6}}));
+
+    SuperNodeTree parent_child(colptr.data(), rowind.data(), 7);
+    merge_cliques(parent_child, "parent_child");
+    EXPECT_EQ(cliques_of(parent_child), (Cliques{{0, 1, 2, 3, 4, 5, 6}}));
 }

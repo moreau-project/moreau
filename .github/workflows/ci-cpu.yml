@@ -9,7 +9,6 @@ on:
       - '.github/workflows/ci-cpu.yml'
       - 'scripts/**'
   pull_request:
-    branches: [ main ]
     paths:
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
@@ -18,22 +17,35 @@ on:
   workflow_dispatch:
   workflow_call:
 
+concurrency:
+  group: cpu-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  test-active-set:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install native test dependencies
+      run: sudo apt-get update && sudo apt-get install -y cmake libgtest-dev
+    - name: Build native active-set tests
+      run: |
+        cmake -S packages/moreau-cpu/cpp -B build/active-set -DCMAKE_BUILD_TYPE=Release -DMOREAU_BUILD_TESTS=ON
+        cmake --build build/active-set --target test_active_set --parallel 2
+    - name: Run native active-set tests
+      run: ctest --test-dir build/active-set --output-on-failure --no-tests=error
+
   test-linux:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python: ['3.12']
-      fail-fast: false
-
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
-    - name: Set up Python ${{ matrix.python }}
-      uses: actions/setup-python@v5
+    - name: Set up Python
+      uses: actions/setup-python@v7
       with:
-        python-version: ${{ matrix.python }}
+        python-version: '3.12'
         cache: 'pip'
+        cache-dependency-path: '**/pyproject.toml'
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
@@ -45,7 +57,7 @@ jobs:
       run: cargo fmt --check
 
     - name: Cache Rust build
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/registry

@@ -65,6 +65,7 @@ class JaxSolverCuda:
         self._n = n
         self._m = m
         self._cones = cones
+        self._total_xn = sum(len(spec.indices) for spec in cones.dir_cones)
         self._settings = settings if settings is not None else Settings()
         self._b_sparsity_pattern = (
             list(b_sparsity_pattern) if b_sparsity_pattern is not None else None
@@ -210,7 +211,6 @@ class JaxSolverCuda:
                     x_gp_dim1s.append(len(alphas))
                     x_gp_dim2s.append(int(dim2))
                     x_gp_alphas_flat.extend(alphas)
-            self._total_xn = x_idx_off[-1] if x_idx_off else 0
             self._x_kinds_gpu = jax.device_put(jnp.array(x_kinds, dtype=jnp.int64), cuda_device)
             self._x_indices_offsets_gpu = jax.device_put(
                 jnp.array(x_idx_off, dtype=jnp.int64), cuda_device
@@ -372,7 +372,9 @@ class JaxSolverCuda:
         Falls back to pure_callback with solve_warm_start when FFI is not available.
 
         Returns a function:
-            (P_data, A_data, q, b, warm_x, warm_z, warm_s) -> (JaxSolution, JaxSolveInfo)
+            (P_data, A_data, q, b, warm_x, warm_z, warm_s, warm_z_x=None)
+                -> (JaxSolution, JaxSolveInfo)
+        where ``warm_z_x`` is the warm direct-cone dual, zeros when omitted.
         """
         if self._use_ffi:
             if self._ffi_solve_warm_fn is None:

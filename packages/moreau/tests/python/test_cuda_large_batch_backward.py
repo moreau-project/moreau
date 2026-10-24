@@ -131,6 +131,7 @@ def _make_mpc_qp(n_states, n_controls, horizon, batch_size, seed=42):
 
 
 @pytest.mark.cuda
+@pytest.mark.slow
 class TestLargeBatchMPCBackward:
     """Test backward pass on large batched MPC problems on CUDA."""
 

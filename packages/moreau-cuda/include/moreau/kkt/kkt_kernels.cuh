@@ -1556,4 +1556,36 @@ void expand_upper_to_full(
     cudaStream_t stream = 0
 );
 
+// ========== Iterative refinement of a KKT solve (see KKTData::refine) ==========
+
+// e = b - K*x and norm[b] = ||e_b||_inf (inf if e_b is not finite), per batch
+// element, for the symmetric K given by the upper triangle of a CSR matrix
+// with values [batchSize * nnz]; b, x and e are [batchSize * N].
+void kkt_residual(
+    const int64_t* row_offsets,
+    const int64_t* col_indices,
+    const double* values,
+    int64_t N,
+    int64_t nnz,
+    int64_t batchSize,
+    const double* b,
+    const double* x,
+    double* e,
+    double* norm,
+    cudaStream_t stream = 0
+);
+
+// x += dx, over [size] entries.
+void refine_step(double* x, const double* dx, int64_t size, cudaStream_t stream = 0);
+
+// For each batch element: if norm_candidate < norm_best, x = candidate and
+// norm_best = norm_candidate.
+void refine_accept(
+    double* x, const double* candidate,
+    double* norm_best, const double* norm_candidate,
+    int8_t* accept,
+    int64_t N, int64_t batchSize,
+    cudaStream_t stream = 0
+);
+
 } // namespace moreau

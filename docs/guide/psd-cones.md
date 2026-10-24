@@ -25,7 +25,7 @@ m = 6
 P = sparse.eye(n, format='csr')
 A = sparse.eye(m, format='csr')
 q = np.zeros(n)
-b = np.array([1.0, 0.0, 0.0, 1.0, 0.0, 1.0])  # svec of identity matrix
+b = np.array([1.0, 0.0, 1.0, 0.0, 0.0, 1.0])  # svec of identity matrix
 
 cones = moreau.Cones(psd_dims=[3])
 
@@ -96,14 +96,9 @@ cones = moreau.Cones(
 
 ### Constraint Ordering
 
-PSD cone rows come last in the constraint matrix, after all other cones:
-
-1. Zero cone rows
-2. Nonnegative cone rows
-3. Second-order cone rows
-4. Exponential cone rows
-5. Power cone rows
-6. **PSD cone rows** (svec length per cone)
+PSD cone rows come after second-order cone rows and before exponential,
+power, and generalized power cone rows. See
+[Constraint Ordering](basic-usage.md#constraint-ordering) for the full order.
 
 ```python
 # 2 equality + 3 inequality + PSD(3) = 2 + 3 + 6 = 11 constraints
@@ -115,48 +110,35 @@ assert cones.total_constraints() == 11
 
 ## Chordal Decomposition
 
-For PSD cones with **sparse constraint structure**, Moreau automatically
-applies chordal decomposition to split a large PSD cone into smaller ones.
-This can dramatically reduce solve time.
+Chordal decomposition can replace a sparse PSD slack cone with smaller PSD
+cones connected by additional variables. The reformulation is exact. It is
+enabled by default on the chordal-capable paths, but a useful split depends on
+the **aggregate structure of both `A` and `b`**, the clique merge choice, and
+the solver entry point.
 
-Chordal decomposition fires when the constraint matrix $A$ has block-diagonal
-or near-block-diagonal sparsity within the PSD cone rows. The solver detects
-the sparsity pattern and decomposes the cone structure at construction time.
+The dedicated [Chordal Decomposition](chordal-decomposition.md) guide explains
+the graph and matrix mathematics with figures, a runnable example, structured
+non-examples, CPU/CUDA differences, and a procedure for measuring the benefit.
 
-### When It Helps
+```python
+settings = moreau.Settings(
+    ipm_settings=moreau.IPMSettings(
+        chordal_decomposition_enable=True,
+        chordal_decomposition_merge_method="clique_graph",
+    )
+)
+```
 
-Chordal decomposition is most effective when:
-- The PSD matrix has known block-diagonal or banded structure
-- The problem comes from an SOS (sum-of-squares) program with separable variables
-- The underlying graph of the matrix is chordal or nearly chordal
+Both backends honor `'clique_graph'` (the default), `'parent_child'`, and
+`'none'` after the merge-setting fixes in PR #84. The initial graph orderings
+still differ, so matching merge choices need not produce identical cliques.
 
-### Performance
-
-| PSD size | Dense | Chordal (block_dim=2) | Speedup |
-|----------|-------|----------------------|---------|
-| PSD(10) | 5ms | 12ms | 0.4x |
-| PSD(20) | 20ms | 11ms | **1.7x** |
-| PSD(40) | 153ms | 7ms | **20.7x** |
-
-At larger sizes, chordal decomposition provides order-of-magnitude speedups.
-The backward pass benefits even more (46x at PSD(40)) because the decomposed
-KKT system is much smaller.
-
-:::{note}
-Chordal decomposition is fully automatic in both `Solver` and
-`CompiledSolver`. No user configuration is needed — the solver detects
-exploitable sparsity from the constraint matrix structure.
-
-The clique merge strategy is controlled by
-`IPMSettings.chordal_decomposition_merge_method` (default `'clique_graph'`;
-also accepts `'parent_child'` and `'none'`).
-
-CPU honors this setting today. CUDA currently hardcodes a fill_in==0
-parent-child variant regardless of the setting — so a sparse PSD problem
-may decompose differently on CPU than CUDA at present. The setting field
-exists on `_CudaSettings` as forward-compatibility scaffolding while the
-CUDA chordal path is wired through to honor it (tracked in #176).
-:::
+For compiled batches, declare structural zeros of `b` with a valid
+`b_sparsity_pattern` at entry points that accept it. Without that information,
+the conservative pattern can prevent decomposition. Small cliques and modest
+overlap can reduce cone work; fill, extra variables, and recovery overhead can
+erase that saving. Compare end-to-end timing and original-problem residuals
+with decomposition disabled.
 
 ---
 
@@ -235,8 +217,7 @@ solver = Solver(
     A_row_offsets=A_ro, A_col_indices=A_ci,
     cones=moreau.Cones(psd_dims=[3]),
 )
-solver.setup(P_values_tensor, A_values_tensor)
-solution = solver.solve(q_tensor, b_tensor)
+solution = solver.solve(P_values_tensor, A_values_tensor, q_tensor, b_tensor)
 solution.x.sum().backward()  # gradients flow through PSD projection
 ```
 

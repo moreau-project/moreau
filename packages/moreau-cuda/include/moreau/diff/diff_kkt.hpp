@@ -98,9 +98,7 @@ struct DiffKKT {
     device_unique_ptr<int64_t> H_exp_idx_;  // Exp H block indices
     device_unique_ptr<int64_t> H_power_idx_;// Power H block indices
     device_unique_ptr<int64_t> H_psd_idx_;  // PSD H block indices (svec_dim*svec_dim per cone)
-    device_unique_ptr<int64_t> d_psd_Hs_offsets_;   // [numPsdCones+1] prefix sum of upper-tri entries
-    device_unique_ptr<int64_t> d_psd_kkt_offsets_;  // [numPsdCones+1] prefix sum of svec_dim*svec_dim
-    device_unique_ptr<int64_t> d_psd_svec_dims_;    // [numPsdCones] svec dimension per cone
+    device_unique_ptr<int64_t> H_psd_val_idx_; // [totalPsdKktEntries] packed derivative source
     int64_t numPsdCones_ = 0;
     int64_t totalPsdHsEntries_ = 0;        // Total upper-tri entries for all PSD cones
     int64_t totalPsdKktEntries_ = 0;       // Total svec_dim*svec_dim entries for all PSD cones
@@ -112,9 +110,7 @@ struct DiffKKT {
     device_unique_ptr<int64_t> c3_idx_;     // c3 position
 
     // SOC variable-dim info for H block population
-    device_unique_ptr<int64_t> d_soc_dims_;        // [numSocCones] per-cone dim
-    device_unique_ptr<int64_t> d_soc_Hs_offsets_;  // [numSocCones+1] prefix sum of upper-tri entries (dense-only)
-    device_unique_ptr<int64_t> d_soc_kkt_offsets_;  // [numSocCones+1] prefix sum of dim*dim KKT entries (dense-only)
+    device_unique_ptr<int64_t> H_soc_val_idx_; // [totalSocKktEntries] packed derivative source
     int64_t numSocCones_ = 0;
     int64_t totalSocHsEntries_ = 0;       // Dense-only Hs total
     int64_t totalSocKktEntries_ = 0;      // Dense-only dim*dim total
@@ -131,15 +127,13 @@ struct DiffKKT {
     device_unique_ptr<int64_t> H_soc_exp_v2_du_idx_;    // [totalSparseSocDim] v2 exp row -> du col KKT idx
     // Expansion row diagonal entries:
     device_unique_ptr<int64_t> H_soc_exp_diag_idx_;     // [2*numSparseSoc] expansion row diag KKT idx
-    // Sparse SOC offset array for kernel dispatch
-    device_unique_ptr<int64_t> d_soc_sparse_offsets_;   // [numSocCones+1] prefix sum of dim for sparse cones
-    device_unique_ptr<int64_t> d_soc_sparse_indices_;   // [numSocCones] sparse cone idx (-1 if dense)
+    // Sparse SOC entry ownership for kernel dispatch
+    device_unique_ptr<int64_t> d_soc_sparse_owners_; // [totalSparseSocDim] sparse cone index
     int64_t numSparseSoc_ = 0;
     int64_t totalSparseSocDim_ = 0;
     int64_t base_jdim_ = 0;   // n + 2m + 1 (without expansion vars)
 
     // GenPowerCone variable-dim info for H block population (sparse: diagonal + rank-3)
-    device_unique_ptr<int64_t> d_genpow_dims_;          // [numGenPowerCones] total dim per cone
     int64_t numGenPowerCones_ = 0;
 
     // Sparse GenPowerCone expansion (3 expansion columns per cone)
@@ -154,8 +148,8 @@ struct DiffKKT {
     device_unique_ptr<int64_t> H_genpow_exp_v3_du_idx_;    // [totalGenpowDim] v3 exp row -> du col KKT idx
     // Expansion row diagonal entries
     device_unique_ptr<int64_t> H_genpow_exp_diag_idx_;     // [3*numGenPowerCones] expansion row diag KKT idx
-    // Offset arrays for kernel dispatch
-    device_unique_ptr<int64_t> d_genpow_sparse_offsets_;   // [numGenPowerCones+1] prefix sum of dim per cone
+    // Entry ownership for kernel dispatch
+    device_unique_ptr<int64_t> d_genpow_sparse_owners_; // [totalGenpowDim] cone index
     int64_t totalGenpowDim_ = 0;
 
     // Sizes for kernel dispatches
@@ -291,7 +285,7 @@ struct DiffKKT {
     device_unique_ptr<int64_t> H_xcone_genpow_exp_v2_du_idx_;
     device_unique_ptr<int64_t> H_xcone_genpow_exp_v3_du_idx_;
     device_unique_ptr<int64_t> H_xcone_genpow_exp_diag_idx_;
-    device_unique_ptr<int64_t> d_xcone_genpow_dim_offsets_;   // [numXGenPow+1] prefix of dim per cone
+    device_unique_ptr<int64_t> d_xcone_genpow_owners_; // [totalXGenPowDim] cone index
 
     // Direct-x SOC rank-2 sparse expansion KKT slots (mirrors slack
     // `H_soc_*_idx_`). Only direct-x SOC cones with dim > 4 use the
@@ -308,6 +302,7 @@ struct DiffKKT {
     device_unique_ptr<int64_t> H_xcone_soc_exp_v2_du_idx_;    // [totalSparseXSocDim]
     device_unique_ptr<int64_t> H_xcone_soc_exp_diag_idx_;     // [2*numSparseXSoc]
     device_unique_ptr<int64_t> d_xcone_soc_sparse_dim_offsets_; // [numSparseXSoc+1] prefix of dim
+    device_unique_ptr<int64_t> d_xcone_soc_sparse_owners_;     // [totalSparseXSocDim] sparse cone index
     device_unique_ptr<int64_t> d_xcone_soc_sparse_to_xc_;       // [numSparseXSoc] -> position in cones.dir_cones
     device_unique_ptr<int64_t> d_xcone_soc_sparse_dims_;        // [numSparseXSoc] dim per cone
 

@@ -5,6 +5,19 @@
 use std::ffi::CStr;
 use std::ptr;
 
+/// Copy a C++ array, allowing null pointers for empty vectors.
+///
+/// # Safety
+/// For nonzero `len`, `data` must satisfy `slice::from_raw_parts` requirements.
+unsafe fn copy_c_array<T: Copy>(data: *const T, len: usize) -> Vec<T> {
+    if len == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: The caller guarantees a valid array for nonzero lengths.
+        unsafe { std::slice::from_raw_parts(data, len).to_vec() }
+    }
+}
+
 // ============================================================================
 // Raw C FFI declarations
 // ============================================================================
@@ -433,11 +446,11 @@ impl ActiveSetSolver {
         let packed_rinv = n * (n + 1) / 2;
         // SAFETY: C side populated `state` with arrays of these lengths.
         Ok(ActiveSetBackwardState {
-            rinv: unsafe { std::slice::from_raw_parts(state.rinv, packed_rinv).to_vec() },
-            rinv_diag: unsafe { std::slice::from_raw_parts(state.rinv_diag, n).to_vec() },
-            ws: unsafe { std::slice::from_raw_parts(state.ws, m).to_vec() },
-            sense: unsafe { std::slice::from_raw_parts(state.sense, m).to_vec() },
-            lam_star: unsafe { std::slice::from_raw_parts(state.lam_star, m).to_vec() },
+            rinv: unsafe { copy_c_array(state.rinv, packed_rinv) },
+            rinv_diag: unsafe { copy_c_array(state.rinv_diag, n) },
+            ws: unsafe { copy_c_array(state.ws, m) },
+            sense: unsafe { copy_c_array(state.sense, m) },
+            lam_star: unsafe { copy_c_array(state.lam_star, m) },
             n_active: state.n_active,
             use_rinv_diag: state.use_rinv_diag != 0,
         })
@@ -460,9 +473,9 @@ impl ActiveSetSolver {
         let m = self.m as usize;
         // SAFETY: C side populated `sol` with arrays of these lengths.
         Ok(ActiveSetSolution {
-            x: unsafe { std::slice::from_raw_parts(sol.x, n).to_vec() },
-            z: unsafe { std::slice::from_raw_parts(sol.z, m).to_vec() },
-            s: unsafe { std::slice::from_raw_parts(sol.s, m).to_vec() },
+            x: unsafe { copy_c_array(sol.x, n) },
+            z: unsafe { copy_c_array(sol.z, m) },
+            s: unsafe { copy_c_array(sol.s, m) },
             status: sol.status,
             obj_val: sol.obj_val,
             iterations: sol.iterations,
@@ -494,10 +507,10 @@ impl ActiveSetSolver {
         let nnz_a = self.nnz_a as usize;
         // SAFETY: C side populated `grad` with arrays of these lengths.
         Ok(ActiveSetBackward {
-            dp_values: unsafe { std::slice::from_raw_parts(grad.dP_values, nnz_p).to_vec() },
-            da_values: unsafe { std::slice::from_raw_parts(grad.dA_values, nnz_a).to_vec() },
-            dq: unsafe { std::slice::from_raw_parts(grad.dq, n).to_vec() },
-            db: unsafe { std::slice::from_raw_parts(grad.db, m).to_vec() },
+            dp_values: unsafe { copy_c_array(grad.dP_values, nnz_p) },
+            da_values: unsafe { copy_c_array(grad.dA_values, nnz_a) },
+            dq: unsafe { copy_c_array(grad.dq, n) },
+            db: unsafe { copy_c_array(grad.db, m) },
         })
     }
 

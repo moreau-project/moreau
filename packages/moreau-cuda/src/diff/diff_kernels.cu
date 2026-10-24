@@ -2021,7 +2021,7 @@ void build_adjoint_rhs_hsde_with_xcones(
 }
 
 // Convert IPM-internal direct-x dual to user/original frame:
-//   z_x_user[b, k] = z_x_int[b, k] * d[J[k]] / (τ_raw[b] * c_scale[b])
+//   z_x_user[b, k] = z_x_int[b, k] * dinv[J[k]] / (τ_raw[b] * c_scale[b])
 // Mirrors CPU `Variables::unscale` for z_x.
 __global__ void unscale_z_x_kernel(
     double* __restrict__ z_x_user,
@@ -2040,8 +2040,7 @@ __global__ void unscale_z_x_kernel(
     const double inv_tau_c = 1.0 / (tau_raw[batch] * c_scale[batch]);
     for (int64_t k = threadIdx.x; k < total_xn; k += blockDim.x) {
         int64_t idx = xcone_indices[k];
-        double d_j = 1.0 / dinv_b[idx];
-        z_x_user[batch * total_xn + k] = z_x_int[batch * total_xn + k] * d_j * inv_tau_c;
+        z_x_user[batch * total_xn + k] = z_x_int[batch * total_xn + k] * dinv_b[idx] * inv_tau_c;
     }
 }
 
@@ -2067,9 +2066,8 @@ void unscale_z_x(
 }
 
 // Equilibrate user-frame z_x to the equilibrated τ=1 frame:
-//   z_x_eq[b, k] = z_x_user[b, k] * c_scale[b] / d[J[k]]
-// (Inverse of `z_x_user = z_x_eq * d[J] / c`.) Mirrors CPU
-// solver.rs:694 `z_x_eq = self.variables.z_x[k] * c / d[J[k]]`.
+//   z_x_eq[b, k] = z_x_user[b, k] * c_scale[b] * d[J[k]]
+// Inverse of `z_x_user = z_x_eq / (d[J] * c)` from CPU Variables::unscale.
 __global__ void equilibrate_z_x_kernel(
     double* __restrict__ z_x_eq,
     const double* __restrict__ z_x_user,
@@ -2086,8 +2084,7 @@ __global__ void equilibrate_z_x_kernel(
     const double c_b = c_scale[batch];
     for (int64_t k = threadIdx.x; k < xn; k += blockDim.x) {
         int64_t idx = xcone_indices[k];
-        // d[J] = 1 / dinv[J]; z_x_eq = z_x_user * c / d[J] = z_x_user * c * dinv[J].
-        z_x_eq[batch * xn + k] = z_x_user[batch * xn + k] * c_b * dinv_b[idx];
+        z_x_eq[batch * xn + k] = z_x_user[batch * xn + k] * c_b / dinv_b[idx];
     }
 }
 
@@ -2111,9 +2108,8 @@ void equilibrate_z_x(
 }
 
 // Equilibrate user-frame dz_x to the equilibrated frame:
-//   dz_x_eq[b, k] = dz_x_bar[b, k] * d[J[k]] / c_scale[b]
-// Mirrors `dz_x_eq = dz_x_user * d[J] / c` chain rule on
-// `z_x_user = z_x_eq * d[J] / c` from CPU `Variables::unscale`.
+//   dz_x_eq[b, k] = dz_x_bar[b, k] * dinv[J[k]] / c_scale[b]
+// Chain rule on `z_x_user = z_x_eq / (d[J] * c)` from CPU Variables::unscale.
 __global__ void equilibrate_dz_x_kernel(
     double* __restrict__ dz_x_eq,                  // [batchSize * xn]
     const double* __restrict__ dz_x_bar,           // [batchSize * xn]
@@ -2134,8 +2130,7 @@ __global__ void equilibrate_dz_x_kernel(
 
     for (int64_t k = threadIdx.x; k < xn; k += blockDim.x) {
         int64_t idx = xcone_indices[k];
-        double d_j = 1.0 / dinv_b[idx];
-        out_b[k] = in_b[k] * d_j * inv_c;
+        out_b[k] = in_b[k] * dinv_b[idx] * inv_c;
     }
 }
 

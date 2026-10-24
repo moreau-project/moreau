@@ -36,6 +36,8 @@ from typing import Optional, Sequence
 import time
 import warnings
 
+from moreau._validation import _validate_P_sparsity_pattern_symmetric
+
 from moreau._backend import (
     default_device,
     get_device_component,
@@ -122,6 +124,8 @@ class Solver:
         jit: bool = True,
         b_sparsity_pattern: Optional[Sequence[bool]] = None,
     ):
+        # Validate the fixed structure once, before choosing a solver backend.
+        _validate_P_sparsity_pattern_symmetric(n, P_row_offsets, P_col_indices)
         # Check for old CVXPY with SOC cones
         from moreau import _warn_cvxpy_soc_if_needed, _require_dir_cones_compatible
 
@@ -138,16 +142,14 @@ class Solver:
         if settings is None:
             settings = Settings()
 
-        # Resolve device FIRST so active-set auto-select sees actual target
         device = settings.device
         if device == "auto":
             device = default_device()
 
-        # Now resolve solver='auto' with the actual device known
+        # Resolve solver='auto' (active-set forces device='cpu')
         from moreau import _resolve_solver_type
 
-        nnz_P = len(P_col_indices)
-        settings, device = _resolve_solver_type(settings, n, m, cones, device, nnz_P=nnz_P)
+        settings, device = _resolve_solver_type(settings, device)
 
         # Resolve the JAX class for the requested device. If unavailable, fall
         # back to CPU and update `device` so downstream consumers (self._device,

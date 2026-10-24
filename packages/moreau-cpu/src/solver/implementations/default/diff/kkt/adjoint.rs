@@ -144,14 +144,16 @@ pub(super) fn build_placeholder_H_x_blocks<T: FloatT>(
                     }
                 }
                 SupportedXConeT::GenPowerXConeT(_, alphas, dim2) => {
-                    // Direct-x GenPowerCone uses the rank-3 sparse expansion
-                    // (mirrors slack `GenPowerSparse`). The forward (1,1)
-                    // block uses μ·H_primal; the BACKWARD projection
-                    // Jacobian factors as diag + 3 rank-1 outer products.
-                    // Placeholder values are arbitrary — they only fix the
-                    // symbolic sparsity; real values come from
-                    // `derivative_cone_sparse(u_x, GenPowerConeT(...), dual)`.
+                    // Match derivative_cone_sparse for both small dense and
+                    // large rank-3 generalized power blocks.
+                    use crate::solver::core::cones::N_DENSE_GENPOW;
                     let d = alphas.len() + dim2;
+                    if d <= N_DENSE_GENPOW {
+                        return ConeDerivativeBlock::Dense {
+                            dim: d,
+                            data: vec![T::one(); d * d],
+                        };
+                    }
                     ConeDerivativeBlock::GenPowerSparse {
                         dim: d,
                         diag: vec![T::one(); d],

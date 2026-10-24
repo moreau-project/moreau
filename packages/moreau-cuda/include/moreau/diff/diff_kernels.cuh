@@ -306,7 +306,7 @@ void build_adjoint_rhs_hsde_with_xcones(
 
 // Convert the IPM-internal direct-x dual `z_x_int` to user (original)
 // frame, applying both τ-normalization and equilibration scaling:
-//   z_x_user[b, k] = z_x_int[b, k] * d[J[k]] / (τ_raw[b] * c_scale[b]).
+//   z_x_user[b, k] = z_x_int[b, k] * dinv[J[k]] / (τ_raw[b] * c_scale[b]).
 // Mirrors CPU `Variables::unscale` for z_x.
 void unscale_z_x(
     double* z_x_user,
@@ -323,8 +323,8 @@ void unscale_z_x(
 
 // Equilibrate user-frame `z_x_user` (the direct-x cone duals returned by
 // `Solution`) to the equilibrated τ=1 frame stored in `DiffState.z_x`:
-//   z_x_eq[b, k] = z_x_user[b, k] * c_scale[b] / d[J[k]]
-// (Inverse of the unscale `z_x_user = z_x_eq * d[J] / c`.)
+//   z_x_eq[b, k] = z_x_user[b, k] * c_scale[b] * d[J[k]]
+// (Inverse of the unscale `z_x_user = z_x_eq / (d[J] * c)`.)
 void equilibrate_z_x(
     double* z_x_eq,
     const double* z_x_user,
@@ -339,9 +339,8 @@ void equilibrate_z_x(
 
 // Equilibrate user-frame `dz_x_bar` to the equilibrated frame used in
 // IFT-direct backward:
-//   dz_x_eq[b, k] = dz_x_bar[b, k] * d[J[k]] / c_scale[b]
-// where d = 1 / dinv (per-batch equilibration scaling). Mirrors the CPU
-// chain rule on `z_x_orig = z_x_eq * d[J] / c`.
+//   dz_x_eq[b, k] = dz_x_bar[b, k] * dinv[J[k]] / c_scale[b]
+// Mirrors the CPU chain rule on `z_x_orig = z_x_eq / (d[J] * c)`.
 void equilibrate_dz_x(
     double* dz_x_eq,
     const double* dz_x_bar,

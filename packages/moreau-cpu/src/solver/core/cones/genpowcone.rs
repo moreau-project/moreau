@@ -1358,6 +1358,10 @@ where
     }
 
     fn smoothing(&mut self, z: &mut [T], _s: &[T], work: &[T], μ: T) {
+        // Keep the initial barrier evaluation away from rounded cone faces.
+        for (zi, &alpha) in z.iter_mut().zip(self.α.iter()) {
+            *zi += μ * (T::one() + alpha).sqrt();
+        }
         // Newton's method to solve: z + μ*∇f*(z) = work
         // where ∇f*(z) is the dual barrier gradient.
         //
@@ -1529,13 +1533,15 @@ where
                 break;
             }
 
-            // Newton decrement: λ² = res' * delta
+            // Squared Newton step norm for the unscaled objective.
             let mut lambda_sq = T::zero();
             for i in 0..dim {
                 lambda_sq += self.data.smoothing_res[i] * self.data.smoothing_delta[i];
             }
+            // Self-concordant damping uses ||z-work||²/(2μ) + F*(z),
+            // whose squared Newton decrement is res.dot(delta)/μ.
             let lambda = if lambda_sq > T::zero() {
-                T::sqrt(lambda_sq)
+                T::sqrt(lambda_sq / μ)
             } else {
                 T::zero()
             };

@@ -4,10 +4,53 @@
 #include "moreau/equilibration/equilibration.hpp"
 #include "moreau/equilibration/equilibration_kernels.cuh"
 #include "moreau/cones/cones.hpp"
+#include "moreau/diff/diff_kernels.cuh"
 #include <vector>
 #include <cmath>
 
 using namespace moreau;
+
+TEST(DirectConeEquilibrationTest, DualRecoveryWarmStartAndAdjoint) {
+    constexpr int n = 3, xn = 2, batchSize = 2;
+    const std::vector<int64_t> indices = {2, 0};
+    const std::vector<double> h_dinv = {0.5, 2.0, 0.25, 4.0, 0.125, 2.0};
+    const std::vector<double> h_c = {2.0, 5.0}, h_tau = {4.0, 3.0};
+    const std::vector<double> h_raw = {24.0, 32.0, 15.0, 40.0};
+    const std::vector<double> h_bar = {1.0, 2.0, 3.0, 4.0};
+    const std::vector<double> expected_user = {0.75, 2.0, 2.0, 40.0 * 4.0 / 15.0};
+    const std::vector<double> expected_adjoint = {0.125, 0.5, 1.2, 3.2};
+    BatchedVector dinv(n, batchSize), c(1, batchSize), tau(1, batchSize);
+    BatchedVector raw(xn, batchSize), user(xn, batchSize), restored(xn, batchSize);
+    BatchedVector bar(xn, batchSize), adjoint(xn, batchSize);
+    dinv.cpuToGpu(h_dinv.data());
+    c.cpuToGpu(h_c.data());
+    tau.cpuToGpu(h_tau.data());
+    raw.cpuToGpu(h_raw.data());
+    bar.cpuToGpu(h_bar.data());
+    int64_t* d_indices = nullptr;
+    ASSERT_EQ(cudaMalloc(&d_indices, xn * sizeof(int64_t)), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(d_indices, indices.data(), xn * sizeof(int64_t),
+                         cudaMemcpyHostToDevice), cudaSuccess);
+
+    unscale_z_x(user.data(), raw.data(), dinv.data(), c.data(), tau.data(),
+                d_indices, n, xn, batchSize);
+    equilibrate_z_x(restored.data(), user.data(), dinv.data(), c.data(),
+                    d_indices, n, xn, batchSize);
+    equilibrate_dz_x(adjoint.data(), bar.data(), dinv.data(), c.data(),
+                     d_indices, n, xn, batchSize);
+    std::vector<double> h_user(xn * batchSize), h_restored(xn * batchSize);
+    std::vector<double> h_adjoint(xn * batchSize);
+    user.gpuToCpu(h_user.data());
+    restored.gpuToCpu(h_restored.data());
+    adjoint.gpuToCpu(h_adjoint.data());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    cudaFree(d_indices);
+    for (int k = 0; k < xn * batchSize; ++k) {
+        EXPECT_NEAR(h_user[k], expected_user[k], 1e-12);
+        EXPECT_NEAR(h_restored[k], h_raw[k] / h_tau[k / xn], 1e-12);
+        EXPECT_NEAR(h_adjoint[k], expected_adjoint[k], 1e-12);
+    }
+}
 
 class EquilibrationDataTest : public ::testing::Test {
 protected:
@@ -333,6 +376,45 @@ TEST_F(EquilibrationDataTest, VarLenSocRectificationUsesConeDimensions) {
     }
 
     cudaFree(matrixPRowOf);
+    cudaFree(matrixARowOf);
+}
+
+// With P = 0 the column norms of [P; A] are those of A. For A = [0.25], the
+// CPU's Ruiz equilibration scales by d = e = 1/sqrt(0.25) = 2 in its first
+// iteration, which makes the scaled A = 1, and leaves it there.
+TEST_F(EquilibrationDataTest, ZeroPUsesColumnNormsOfA) {
+    const int64_t n = 1, m = 1, batchSize = 1;
+
+    Cones cones;
+    cones.numNonnegCones = 1;
+    cones.initialize(batchSize);
+
+    CSR P(n, n, 0, batchSize);
+    CSR A(m, n, 1, batchSize);
+    std::vector<int64_t> P_row_offsets = {0, 0};
+    std::vector<int64_t> A_row_offsets = {0, 1}, A_col_indices = {0};
+    std::vector<double> A_values = {0.25};
+    P.indicesCpuToGpu(P_row_offsets.data(), nullptr, stream);
+    A.indicesCpuToGpu(A_row_offsets.data(), A_col_indices.data(), stream);
+    A.valuesCpuToGpu(A_values.data(), stream);
+
+    BatchedVector q(n, batchSize), b(m, batchSize);
+    q.setToConstant(1.0, stream);
+    b.setToConstant(1.0, stream);
+
+    std::vector<int64_t> h_matrixARowOf = moreau::computeRowOfFromCSR(A_row_offsets.data(), m, 1);
+    int64_t* matrixARowOf = moreau::allocateAndCopyRowOfToGPU(h_matrixARowOf, stream);
+
+    EquilibrationData equil(n, m, batchSize);
+    equilibration(equil, P, nullptr, A, matrixARowOf, q, b, EquilibrationSettings{}, cones, stream);
+    cudaStreamSynchronize(stream);
+
+    double d = 0.0, e = 0.0;
+    equil.gpuToCpu(&d, nullptr, &e, nullptr, nullptr, nullptr, nullptr, stream);
+    cudaStreamSynchronize(stream);
+    EXPECT_DOUBLE_EQ(d, 2.0);
+    EXPECT_DOUBLE_EQ(e, 2.0);
+
     cudaFree(matrixARowOf);
 }
 
