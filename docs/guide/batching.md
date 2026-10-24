@@ -19,6 +19,21 @@ solutions = solver.solve(qs, bs)  # Solves all 1000 in parallel
 
 ---
 
+## CPU Workers and Multiprocessing
+
+CPU compiled solvers with the same thread count share a Rayon worker pool
+while they are alive. Each solver keeps its own problem data and solution
+cache. Concurrent solves share the workers instead of creating a separate
+set of threads for every solver. Different thread counts use separate pools.
+When the last solver using a pool is destroyed, its workers are released.
+
+For multiprocessing, prefer the `spawn` start method and construct solvers
+inside each worker. If using `fork`, release all parent CPU compiled solvers
+before forking and construct fresh solvers in the child. The pool cache does
+not keep released parent solvers' workers alive. Forking with live solvers or
+using an inherited solver is not supported; other numerical libraries may
+also impose restrictions on `fork`.
+
 ## Three-Step API
 
 `CompiledSolver` uses a three-step pattern:
