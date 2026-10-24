@@ -25,6 +25,10 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- CPU HSDE derivatives could be biased in weakly constrained directions by
+  the regularized differentiation solve. Apply defect correction to the
+  unregularized equations in forward and adjoint differentiation, reusing
+  the factorization in the cached adjoint path.
 - CUDA chordal solves could stall when iterative refinement increased the KKT
   residual and the default start shifted PSD cones independently of other
   cones. Keep the refinement iterate with the smallest residual and use a
