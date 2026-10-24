@@ -1339,7 +1339,7 @@ static void backward_impl(
     }
     if (dz_x_bar != nullptr && xn > 0) {
         // Equilibrate dz_x_bar (user frame) → dz_x_eq, then pass through.
-        dz_x_eq_buf = std::make_unique<BatchedVector>(xn, batchSize);
+        dz_x_eq_buf = std::make_unique<BatchedVector>(xn, batchSize, stream);
         equilibrate_dz_x(
             dz_x_eq_buf->data(), dz_x_bar->data(),
             state.dinv.data(), state.c_scale.data(),

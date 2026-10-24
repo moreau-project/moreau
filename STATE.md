@@ -105,7 +105,8 @@ including when JAX reuses a cached differentiation system on a different stream.
 Backward vectors and CSR storage initialize on the caller's stream, including
 lazy workspace allocation and direct-cone resizes.
 `tests/cpp/test_diff.cpp` covers stream changes for single and batched gradients,
-matrix updates, cold unconstrained solves, and forward/adjoint solves with cached factors.
+matrix updates, direct-cone dual cotangents, cold unconstrained solves, and
+forward/adjoint solves with cached factors.
 
 ### Direct conic constraints and slack cones
 

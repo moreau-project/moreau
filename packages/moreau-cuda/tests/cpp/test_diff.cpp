@@ -5469,6 +5469,56 @@ TEST_P(BackwardStreamTest, CacheOutlivesAnalysisCallerStream) {
     for (double value : dq) EXPECT_NEAR(value, -1.0, 1e-6);
 }
 
+TEST_P(BackwardStreamTest, DirectConeDualCotangentFollowsStream) {
+    const int64_t batch_size = GetParam();
+    const std::vector<int64_t> P_ro = {0, 1, 2, 3};
+    const std::vector<int64_t> P_ci = {0, 1, 2};
+    const std::vector<int64_t> A_ro = {0};
+    std::vector<double> P_host(3 * batch_size), q_host(3 * batch_size);
+    for (int64_t i = 0; i < batch_size; ++i) {
+        P_host[3*i] = 2.0;
+        P_host[3*i+1] = 3.0;
+        P_host[3*i+2] = 4.0;
+        q_host[3*i] = -3.0;
+        q_host[3*i+1] = 2.0;
+        q_host[3*i+2] = -1.0;
+    }
+    BatchedVector P(3, batch_size), q(3, batch_size);
+    P.cpuToGpu(P_host.data());
+    q.cpuToGpu(q_host.data());
+    Cones cones;
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+    Settings settings;
+    settings.verbose = false;
+    settings.enableGrad = true;
+    settings.ipm.diffMethod = DiffMethod::Exact;
+    settings.ipm.kktSolverType = KKTSolverType::CuDSS;
+    CompiledSolver solver(3, 0, batch_size,
+                          P_ro.data(), P_ci.data(), 3,
+                          A_ro.data(), nullptr, 0, cones, settings);
+    solver.solveAll(P.data(), nullptr, q.data(), nullptr);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+    for (int i = 0; i < 6; ++i) {
+        auto stream = streams[i % 2];
+        BatchedVector dx(3, batch_size, stream), dz(0, batch_size, stream);
+        BatchedVector ds(0, batch_size, stream), dz_x(3, batch_size, stream);
+        const double weight = i % 2 ? -2.0 : 3.0;
+        dx.setToConstant(1.0, stream);
+        dz_x.setToConstant(weight, stream);
+        backward_with_dz_x(*solver.diff_state(), dx, dz, ds, &dz_x, solver, stream);
+        std::vector<double> dq(3 * batch_size);
+        ASSERT_EQ(cudaMemcpyAsync(dq.data(), solver.diff_state()->dq.data(),
+                  dq.size() * sizeof(double), cudaMemcpyDeviceToHost, stream), cudaSuccess);
+        ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+        for (int64_t j = 0; j < batch_size; ++j) {
+            EXPECT_NEAR(dq[3*j], -0.5, 1e-6);
+            EXPECT_NEAR(dq[3*j+1], weight, 1e-6);
+            EXPECT_NEAR(dq[3*j+2], -0.25, 1e-6);
+        }
+    }
+}
+
 TEST_P(BackwardStreamTest, FirstUnconstrainedBackwardOnNonblockingStream) {
     const int64_t batch_size = GetParam();
     const std::vector<int64_t> P_ro = {0, 1, 2, 3};
