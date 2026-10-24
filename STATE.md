@@ -73,6 +73,13 @@ composite direct conic constraints. Symmetric and nonsymmetric helpers live in
 
 Tests in `tests/` (top-level integration tests).
 
+`default/compiled_solver.rs` shares Rayon pools among live compiled solvers
+with the same thread count. The process-wide cache holds weak references;
+solvers own the workers and release them when the last owner is dropped.
+Its unit test checks sharing, and `tests/python/test_thread_pool_lifecycle.py`
+checks constructing a fresh child solver after releasing parent solvers and
+forking, with a timeout to catch hangs.
+
 ## packages/moreau-cuda (C++/CUDA solver)
 
 ```
@@ -128,6 +135,14 @@ Julia MOI wrapper. Links against `moreau-c`. Released under Apache 2.0.
 
 Critical Rule 6 in CLAUDE.md: prefer C++/Rust tests for fast inner-loop
 verification; use Python tests for API/integration validation.
+
+## Documentation
+
+`docs/` contains the Sphinx user guides and API reference. The illustrated
+[chordal decomposition guide](docs/guide/chordal-decomposition.md) covers
+sparse PSD conversion, counterexamples, and CPU/CUDA execution paths.
+Its checked-in SVG figures live in `docs/_static/figures/` and are generated
+by `docs/_scripts/chordal_figures.py` (NumPy and Matplotlib).
 
 ## Build commands
 

@@ -21,6 +21,15 @@ def _solve_qp(P, q, A, b, cones, **settings_kw):
     return sol, solver.info
 
 
+def _assert_optimal(x, expected, P, q, rtol=1e-6):
+    """Compare to a known optimum. IPM accuracy is relative to the problem's scale, so
+    coordinates are checked against the optimum's scale and the objective against its value."""
+    expected = np.asarray(expected, dtype=float)
+    np.testing.assert_allclose(x, expected, rtol=rtol, atol=rtol * np.abs(expected).max())
+    obj = lambda v: 0.5 * v @ (P @ v) + q @ v
+    assert abs(obj(x) - obj(expected)) <= rtol * max(1.0, abs(obj(expected)))
+
+
 class TestIllConditionedP:
     """Problems where P has extreme eigenvalue spread."""
 
@@ -33,19 +42,20 @@ class TestIllConditionedP:
         cones = moreau.Cones(num_nonneg_cones=2)
 
         sol, info = _solve_qp(P, q, A, b, cones)
-        # Should still converge (maybe to AlmostSolved)
-        assert info.status in (
-            moreau.SolverStatus.Solved,
-            moreau.SolverStatus.AlmostSolved,
-            moreau.SolverStatus.MaxIterations,
-        )
-        assert not np.any(np.isnan(sol.x))
+        assert info.status == moreau.SolverStatus.Solved
+        # Unconstrained minimizer x = -q / diag(P) = (-1e6, -1e-6) satisfies x <= 0.
+        _assert_optimal(sol.x, [-1e6, -1e-6], P, q)
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Scaling limitation: bounded QP with tiny P reported DualInfeasible (#38)",
+    )
     def test_near_zero_P_diagonal(self):
         """P with very small diagonal — nearly degenerate Hessian.
 
-        With near-zero P and a negative q component, the solver may correctly
-        detect dual infeasibility (unbounded in that direction).
+        P = 1e-10 I is positive definite, so the problem is bounded with the unique
+        optimum x = (-1e10, 10). The IPM currently reports DualInfeasible, which is
+        wrong (Clarabel does the same, #38); strict xfail turns a fix into XPASS.
         """
         eps = 1e-10
         P = sparse.diags([eps, eps], format="csr")
@@ -54,15 +64,9 @@ class TestIllConditionedP:
         b = np.array([10.0, 10.0])
         cones = moreau.Cones(num_nonneg_cones=2)
 
-        sol, info = _solve_qp(P, q, A, b, cones)
-        # Near-zero P with negative q can be detected as dual infeasible
-        assert info.status in (
-            moreau.SolverStatus.Solved,
-            moreau.SolverStatus.AlmostSolved,
-            moreau.SolverStatus.MaxIterations,
-            moreau.SolverStatus.DualInfeasible,
-            moreau.SolverStatus.AlmostDualInfeasible,
-        )
+        sol, info = _solve_qp(P, q, A, b, cones, device="cpu")
+        assert info.status == moreau.SolverStatus.Solved
+        _assert_optimal(sol.x, [-1e10, 10.0], P, q)
 
     def test_large_P_values(self):
         """P with very large entries."""
@@ -90,22 +94,24 @@ class TestIllConditionedP:
         cones = moreau.Cones(num_nonneg_cones=n)
 
         sol, info = _solve_qp(P, q, A, b, cones)
-        assert info.status in (
-            moreau.SolverStatus.Solved,
-            moreau.SolverStatus.AlmostSolved,
-            moreau.SolverStatus.MaxIterations,
-        )
-        assert not np.any(np.isnan(sol.x))
+        assert info.status == moreau.SolverStatus.Solved
+        # Unconstrained minimizer x = -q / diag(P) satisfies x <= 0.
+        _assert_optimal(sol.x, [-1e4, -1.0, -1e-4], P, q)
 
 
 class TestBadlyScaledData:
     """Problems where q, b, or A have extreme magnitudes."""
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Scaling limitation: bounded QP with huge q reported DualInfeasible (#38)",
+    )
     def test_large_q(self):
         """q with very large values.
 
-        Extreme q magnitudes can cause the solver to detect dual infeasibility
-        due to scaling issues. The key check is no crash / no hang.
+        min 1/2||x||^2 + 1e10 (x1 + x2)  s.t.  x <= 0 has the unique optimum
+        x = (-1e10, -1e10). The IPM currently reports DualInfeasible, which is
+        wrong (Clarabel does the same, #38); strict xfail turns a fix into XPASS.
         """
         P = sparse.diags([1.0, 1.0], format="csr")
         A = sparse.csr_matrix([[1.0, 0.0], [0.0, 1.0]])
@@ -113,15 +119,9 @@ class TestBadlyScaledData:
         b = np.array([0.0, 0.0])
         cones = moreau.Cones(num_nonneg_cones=2)
 
-        sol, info = _solve_qp(P, q, A, b, cones)
-        # Solver should terminate (may misclassify due to scaling)
-        assert info.status in (
-            moreau.SolverStatus.Solved,
-            moreau.SolverStatus.AlmostSolved,
-            moreau.SolverStatus.DualInfeasible,
-            moreau.SolverStatus.AlmostDualInfeasible,
-            moreau.SolverStatus.MaxIterations,
-        )
+        sol, info = _solve_qp(P, q, A, b, cones, device="cpu")
+        assert info.status == moreau.SolverStatus.Solved
+        _assert_optimal(sol.x, [-1e10, -1e10], P, q)
 
     def test_tiny_q(self):
         """q with very small values."""
@@ -196,7 +196,6 @@ class TestInfeasibilityEdgeCases:
         assert info.status in (
             moreau.SolverStatus.PrimalInfeasible,
             moreau.SolverStatus.AlmostPrimalInfeasible,
-            moreau.SolverStatus.MaxIterations,
         )
 
     def test_infeasible_nonneg_and_equality(self):
@@ -211,7 +210,6 @@ class TestInfeasibilityEdgeCases:
         assert info.status in (
             moreau.SolverStatus.PrimalInfeasible,
             moreau.SolverStatus.AlmostPrimalInfeasible,
-            moreau.SolverStatus.MaxIterations,
         )
 
     def test_unbounded_no_constraints(self):
@@ -226,7 +224,6 @@ class TestInfeasibilityEdgeCases:
         assert info.status in (
             moreau.SolverStatus.DualInfeasible,
             moreau.SolverStatus.AlmostDualInfeasible,
-            moreau.SolverStatus.MaxIterations,
         )
 
     def test_redundant_constraints_feasible(self):
