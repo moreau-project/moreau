@@ -2,7 +2,8 @@
  * @file diff_woodbury.hpp
  * @brief Woodbury-specialized backward pass via direct Schur complement solve
  *
- * Solves (J'J + eI)w = rhs_bar, then y_out = J*w.
+ * Uses the factor of J'J + eI as a preconditioner for J'J w = rhs_bar,
+ * then returns y_out = J*w. Residuals omit eI to remove regularization bias.
  * Exploits diagonal P + low-rank A structure via block elimination:
  *   1. Eliminate y_s (diagonal D_s = I + H^2 + eI)
  *   2. Solve reduced (n+m+1) system via two-level Woodbury:
