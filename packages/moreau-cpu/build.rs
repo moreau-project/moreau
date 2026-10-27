@@ -1,4 +1,20 @@
 fn main() {
+    if std::env::var("TARGET").as_deref() == Ok("wasm32-unknown-unknown") {
+        for feature in [
+            "ACTIVE_SET",
+            "PYTHON",
+            "SDP",
+            "FAER_SPARSE",
+            "PARDISO_PANUA",
+            "PARDISO_MKL",
+            "C_API",
+        ] {
+            assert!(
+                std::env::var_os(format!("CARGO_FEATURE_{feature}")).is_none(),
+                "browser WebAssembly requires --no-default-features; {feature} is unsupported"
+            );
+        }
+    }
     // Tell cargo to check the sdp_pyblas cfg flag (suppress warnings)
     // Using single-colon for Rust 1.70+ compatibility
     println!("cargo:rustc-check-cfg=cfg(sdp_pyblas)");

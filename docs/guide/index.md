@@ -24,6 +24,7 @@ cvxpylayers-integration
 jump-integration
 julia-integration
 testing-diagnostics
+webassembly
 ```
 
 ## Overview
