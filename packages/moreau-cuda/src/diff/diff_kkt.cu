@@ -16,7 +16,7 @@
 
 namespace moreau {
 
-static constexpr double REG_DIFF = 1e-8;  // Regularization for diff KKT
+static constexpr double REG_DIFF = 1e-10;  // Regularization for diff KKT
 
 // Symbolic maps shared across batches and backward calls. Empty intervals are
 // skipped (e.g. dense SOC cones within the sparse-only offset array).
