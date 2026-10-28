@@ -27,6 +27,14 @@ All notable changes to Moreau are documented here. The format follows
 
 - CUDA backward passes could return zero or stale gradients when cached solves
   or newly allocated workspaces crossed CUDA streams (#112).
+- CPU and CUDA HSDE derivatives could be biased in weakly constrained directions by
+  the regularized differentiation solve. Apply defect correction to the
+  unregularized equations in forward and adjoint differentiation, reusing
+  the factorization in the cached adjoint and CUDA paths. Woodbury backward
+  refinement also targets the unregularized normal equations.
+- Exponential-cone differentiation could incorrectly classify points as polar
+  on both CPU and CUDA because the dual membership test applied the factor
+  `e` twice. Correct the inequality and the resulting projection Jacobians.
 - CUDA chordal solves could stall when iterative refinement increased the KKT
   residual and the default start shifted PSD cones independently of other
   cones. Keep the refinement iterate with the smallest residual and use a

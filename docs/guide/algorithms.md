@@ -368,7 +368,14 @@ inherits Clarabel's [1] conditioning stack:
   blocks are the dual-cone projection derivatives $D\Pi_{\mathcal{K}^*}(\cdot)$
   for both $\mathcal{K}_1$ (on $x$) and $\mathcal{K}_2$ (on $s$). This is
   **diffqcp** [4] (the QP-cone case of cone-program differentiation [3]). Exact
-  but non-smooth at cone boundaries.
+  but non-smooth at cone boundaries. The CPU and CUDA/cuDSS augmented
+  HSDE solves retain a regularized factor as a preconditioner and use bounded
+  defect correction against the unregularized equations. This removes damping
+  in weak directions without factoring an indefinite, potentially singular
+  unregularized system. Correction retains the best residual and stops updating
+  each problem on convergence or non-improvement, with at most seven corrections.
+  CUDA Woodbury differentiation likewise measures its refinement residual against
+  the unregularized normal equations, retaining its regularized preconditioner.
 - **Smoothed.** Replaces the projection Jacobian with its central-path
   (proximal, parameter $\mu$) smoothing for a continuous derivative. See the
   [smoothed differentiation](smoothed-differentiation.md) guide.

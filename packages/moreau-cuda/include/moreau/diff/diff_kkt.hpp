@@ -326,6 +326,12 @@ struct DiffKKT {
     BatchedVector work_rhs_;   // [augdim]
     BatchedVector work_sol_;   // [augdim]
 
+    // Unregularized residual map, shared across batches. Values gather from KKT.
+    device_unique_ptr<int64_t> residual_ro_, residual_ci_, residual_value_idx_;
+    int64_t residual_nnz_ = 0;
+    BatchedVector refinement_residual_, refinement_correction_, refinement_best_;
+    BatchedVector refinement_norm_;  // best residual norm, negative once stopped
+
     // === Riccati-specific data ===
     std::unique_ptr<DiffRiccatiData> diff_riccati_;  // J'J backward pass data
 
@@ -473,6 +479,7 @@ private:
     void end_cudss_execution(cudaStream_t stream);
     void initialize_cudss(cudaStream_t stream);
     void cleanup_cudss();
+    void refineSolution(cudaStream_t stream);
 
     // Riccati backward pass methods
     void initialize_riccati(

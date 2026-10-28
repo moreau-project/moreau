@@ -6530,6 +6530,79 @@ TEST(WoodburyDiffTest, WoodburyNonPowerOfTwoMatchesCuDSS) {
     }
 }
 
+class HSDERefinementTest : public ::testing::TestWithParam<bool> {
+protected:
+    cudaStream_t stream = nullptr;
+
+    void SetUp() override {
+        if (GetParam()) {
+            ASSERT_EQ(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), cudaSuccess);
+        }
+    }
+
+    void TearDown() override {
+        EXPECT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+        if (stream) EXPECT_EQ(cudaStreamDestroy(stream), cudaSuccess);
+    }
+};
+
+TEST_P(HSDERefinementTest, WeakDirectionsForwardAndAdjoint) {
+    // An exact diagonal J gives an independent solution for both orientations.
+    // Different RHS scales exercise per-batch stopping, including a zero RHS.
+    const int64_t ro[] = {0, 1}, ci[] = {0}, aro[] = {0};
+    Cones cones;
+    DiffKKT kkt(1, 0, 3, ro, ci, 1, aro, nullptr, 0, cones, KKTSolverType::CuDSS, stream);
+    std::vector<int64_t> rows(kkt.augdim + 1), cols(kkt.KKT.nnz());
+    ASSERT_EQ(cudaMemcpyAsync(rows.data(), kkt.KKT.rowOffsets(), rows.size() * sizeof(int64_t),
+                             cudaMemcpyDeviceToHost, stream), cudaSuccess);
+    ASSERT_EQ(cudaMemcpyAsync(cols.data(), kkt.KKT.colIndices(), cols.size() * sizeof(int64_t),
+                             cudaMemcpyDeviceToHost, stream), cudaSuccess);
+    ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+    std::vector<double> values(3 * kkt.KKT.nnz(), 0.0);
+    for (int batch = 0; batch < 3; ++batch) {
+        for (int64_t r = 0; r < kkt.augdim; ++r) {
+            for (int64_t k = rows[r]; k < rows[r + 1]; ++k) {
+                if (cols[k] == r) values[batch * kkt.KKT.nnz() + k] = r < kkt.jdim ? 1.0 : -1e-8;
+                if (cols[k] == kkt.jdim + r) values[batch * kkt.KKT.nnz() + k] = r == 0 ? 1e-2 : 1.0;
+            }
+        }
+    }
+    ASSERT_EQ(cudaMemcpyAsync(kkt.KKT.values(), values.data(), values.size() * sizeof(double),
+                             cudaMemcpyHostToDevice, stream), cudaSuccess);
+    kkt.factor(stream);
+    BatchedVector rhs(2, 3, stream), sol(2, 3, stream);
+    const std::vector<double> rhs_values = {1e-2, 1.0, 0.0, 0.0, -2e-2, 3.0};
+    ASSERT_EQ(cudaMemcpyAsync(rhs.data(), rhs_values.data(), rhs_values.size() * sizeof(double),
+                             cudaMemcpyHostToDevice, stream), cudaSuccess);
+    for (bool adjoint : {false, true}) {
+        SCOPED_TRACE(adjoint ? "adjoint" : "forward");
+        if (adjoint) kkt.solveAdjoint(rhs.data(), sol.data(), stream);
+        else kkt.solveForward(rhs.data(), sol.data(), stream);
+        std::vector<double> actual(rhs_values.size());
+        ASSERT_EQ(cudaMemcpyAsync(actual.data(), sol.data(), actual.size() * sizeof(double),
+                                 cudaMemcpyDeviceToHost, stream), cudaSuccess);
+        ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+        const std::vector<double> expected = {1., 1., 0., 0., -2., 3.};
+        for (size_t i = 0; i < expected.size(); ++i) EXPECT_NEAR(actual[i], expected[i], 1e-7);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(CallerStreams, HSDERefinementTest, ::testing::Bool());
+
+TEST(ExpConeDerivativeTest, OutsidePolarMatchesProjectionKKT) {
+    // v=(3,4,-2)=p+3*normal at p=(0,1,1), normal=(1,1,-1).
+    // H here is D Pi_K*(-v) = I - D Pi_K(v).
+    BatchedVector u(3, 1), H(9, 1);
+    copy_to_batched(u, {-3., -4., 2.});
+    compute_exp_derivative(H.data(), u.data(), 0, 1, 1, 3, 0);
+    auto actual = copy_from_batched(H);
+    const double primal[] = {2., -1., 1., -1., 5., 4., 1., 4., 5.};
+    for (int i = 0; i < 9; ++i) {
+        const double identity = i % 4 == 0 ? 1.0 : 0.0;
+        EXPECT_NEAR(actual[i], identity - primal[i] / 9.0, 1e-7);
+    }
+}
+
 // ============================================================================
 // Main
 // ============================================================================

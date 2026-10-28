@@ -8,6 +8,8 @@
 #include "moreau/kkt/riccati.hpp"
 #include "moreau/profiling/profiler.hpp"
 #include <algorithm>
+#include <cmath>
+#include <utility>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -104,6 +106,10 @@ DiffKKT::DiffKKT(
     work_sol_(2 * (n_ + 2*m_ + compute_xn(cones) + 1 + 2 * cones.numSparseSoc + 3 * cones.numGenPowerCones + 3 * cones.numXGenPowerCones + 2 * cones.numSparseXSoc), batch_, stream),
     numSparseSoc_(cones.numSparseSoc),
     base_jdim_(n_ + 2*m_ + compute_xn(cones) + 1),
+    refinement_residual_(type == KKTSolverType::Riccati ? 0 : augdim, batch_, stream),
+    refinement_correction_(type == KKTSolverType::Riccati ? 0 : augdim, batch_, stream),
+    refinement_best_(type == KKTSolverType::Riccati ? 0 : augdim, batch_, stream),
+    refinement_norm_(1, batch_, stream),
     riccati_rhs_(n_ + m_, batch_, stream),
     riccati_bvec_(n_ + m_, batch_, stream),
     riccati_sol0_(n_ + m_, batch_, stream),
@@ -1100,6 +1106,31 @@ DiffKKT::DiffKKT(
             }
         }
     }
+
+    // Build a full-row map for [I J; J' 0], without duplicating matrix values.
+    // Each row is accumulated deterministically, avoiding atomics and host
+    // synchronization in the correction loop. Expansion rows are included.
+    std::vector<std::vector<std::pair<int64_t, int64_t>>> residual_rows(augdim);
+    for (int64_t r = 0; r < augdim; ++r) {
+        for (int64_t k = rowOff[r]; k < rowOff[r + 1]; ++k) {
+            const int64_t c = colIdx[k];
+            if (r == c && r >= jdim) continue;  // omit -epsilon I
+            residual_rows[r].emplace_back(c, k);
+            if (r != c) residual_rows[c].emplace_back(r, k);
+        }
+    }
+    std::vector<int64_t> residual_ro(augdim + 1, 0), residual_ci, residual_idx;
+    for (int64_t r = 0; r < augdim; ++r) {
+        for (const auto& entry : residual_rows[r]) {
+            residual_ci.push_back(entry.first);
+            residual_idx.push_back(entry.second);
+        }
+        residual_ro[r + 1] = residual_ci.size();
+    }
+    residual_nnz_ = residual_ci.size();
+    upload_indices(residual_ro, residual_ro_);
+    upload_indices(residual_ci, residual_ci_);
+    upload_indices(residual_idx, residual_value_idx_);
 
     // Upload all index maps to device
     upload_indices(I_diag_host, I_diag_idx_);
@@ -2512,6 +2543,96 @@ __global__ void extract_lam_kernel(
     }
 }
 
+// Residual of the unregularized augmented system. One thread per row.
+__global__ void hsde_residual_kernel(
+    double* residual, const double* rhs, const double* solution,
+    const int64_t* ro, const int64_t* ci, const int64_t* value_idx,
+    const double* values, int64_t nnz, int64_t dim, int64_t batch_size
+) {
+    const int64_t index = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (index >= dim * batch_size) return;
+    const int64_t batch = index / dim;
+    const int64_t r = index % dim;
+    const double* x = solution + batch * dim;
+    const double* v = values + batch * nnz;
+    double sum = rhs[batch * dim + r];
+    for (int64_t k = ro[r]; k < ro[r + 1]; ++k) sum -= v[value_idx[k]] * x[ci[k]];
+    residual[batch * dim + r] = sum;
+}
+
+// Accept only finite, improving iterates; freeze converged batches on device.
+__global__ void hsde_accept_kernel(
+    double* residual, const double* rhs, const double* solution,
+    double* best, double* previous_norm, int64_t dim
+) {
+    const int64_t batch = blockIdx.x;
+    const int64_t offset = batch * dim;
+    __shared__ double norms[256], rhs_norms[256];
+    double norm = 0.0, rhs_norm = 0.0;
+    for (int64_t i = threadIdx.x; i < dim; i += blockDim.x) {
+        const double r = residual[offset + i];
+        norm = isfinite(r) ? fmax(norm, fabs(r)) : INFINITY;
+        rhs_norm = fmax(rhs_norm, fabs(rhs[offset + i]));
+    }
+    norms[threadIdx.x] = norm;
+    rhs_norms[threadIdx.x] = rhs_norm;
+    __syncthreads();
+    for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+        if (threadIdx.x < stride) {
+            norms[threadIdx.x] = fmax(norms[threadIdx.x], norms[threadIdx.x + stride]);
+            rhs_norms[threadIdx.x] = fmax(rhs_norms[threadIdx.x], rhs_norms[threadIdx.x + stride]);
+        }
+        __syncthreads();
+    }
+    const bool improved = isfinite(norms[0]) && norms[0] < previous_norm[batch];
+    const bool active = improved && norms[0] > 1e-11 * fmax(1.0, rhs_norms[0]);
+    for (int64_t i = threadIdx.x; i < dim; i += blockDim.x) {
+        if (improved) best[offset + i] = solution[offset + i];
+        if (!active) residual[offset + i] = 0.0;
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) previous_norm[batch] = active ? norms[0] : -1.0;
+}
+
+__global__ void hsde_correct_kernel(
+    double* solution, const double* correction, const double* norm, int64_t dim, int64_t batch_size
+) {
+    const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (i < dim * batch_size && norm[i / dim] >= 0.0) solution[i] += correction[i];
+}
+
+void DiffKKT::refineSolution(cudaStream_t stream) {
+    // The cuDSS factor of [I J; J' -epsilon I] is only a preconditioner.
+    // Match the CPU's bounded defect correction, reusing the factor and all
+    // workspace. No allocations, transfers, or synchronization in this loop.
+    refinement_norm_.setToConstant(INFINITY, stream);
+    CUDA_THROW(cudaMemcpyAsync(refinement_best_.data(), work_sol_.data(),
+        work_sol_.memoryUsage(), cudaMemcpyDeviceToDevice, stream));
+    const int64_t blocks = (augdim * batchSize + 255) / 256;
+    for (int step = 0; step < 8; ++step) {
+        MOREAU_KERNEL_LAUNCH(hsde_residual_kernel, blocks, 256, 0, stream,
+            refinement_residual_.data(), work_rhs_.data(), work_sol_.data(),
+            residual_ro_.get(), residual_ci_.get(), residual_value_idx_.get(),
+            KKT.values(), KKT.nnz(), augdim, batchSize);
+        MOREAU_KERNEL_LAUNCH(hsde_accept_kernel, batchSize, 256, 0, stream,
+            refinement_residual_.data(), work_rhs_.data(), work_sol_.data(),
+            refinement_best_.data(), refinement_norm_.data(), augdim);
+        if (step == 7) break;
+        cudssMatrixSetValues(rhs_matrix_, refinement_residual_.data());
+        cudssMatrixSetValues(sol_matrix_, refinement_correction_.data());
+        const auto status = cudssExecute(cudss_handle_, CUDSS_PHASE_SOLVE,
+            cudss_config_, cudss_data_, kkt_matrix_, sol_matrix_, rhs_matrix_);
+        if (status != CUDSS_STATUS_SUCCESS) {
+            throw std::runtime_error(std::string("HSDE defect correction failed: cuDSS ")
+                + cudss_status_string(status));
+        }
+        MOREAU_KERNEL_LAUNCH(hsde_correct_kernel, blocks, 256, 0, stream,
+            work_sol_.data(), refinement_correction_.data(), refinement_norm_.data(), augdim, batchSize);
+    }
+    CUDA_THROW(cudaMemcpyAsync(work_sol_.data(), refinement_best_.data(),
+        work_sol_.memoryUsage(), cudaMemcpyDeviceToDevice, stream));
+}
+
 void DiffKKT::solveAdjoint(
     const double* rhs_bar,
     double* lam,
@@ -2557,8 +2678,11 @@ void DiffKKT::solveAdjoint(
             }
             throw std::runtime_error(msg);
         }
-        end_cudss_execution(stream);
     }
+
+    // Refinement reuses cuDSS, so keep its kernels and solves on the owned stream.
+    refineSolution(cudss_stream_);
+    end_cudss_execution(stream);
 
     // Extract lam from first half (only base_jdim entries, skip expansion vars)
     MOREAU_KERNEL_LAUNCH(extract_lam_kernel, batchSize, 256, 0, stream,
@@ -2658,6 +2782,7 @@ void DiffKKT::solveForward(
         }
         throw std::runtime_error(msg);
     }
+    refineSolution(cudss_stream_);
     end_cudss_execution(stream);
 
     // Extract sol from second half (only base_jdim entries)
@@ -2672,10 +2797,12 @@ size_t DiffKKT::memoryUsage() const noexcept {
     size_t total = work_rhs_.memoryUsage() + work_sol_.memoryUsage() +
                    riccati_rhs_.memoryUsage() + riccati_bvec_.memoryUsage() +
                    riccati_sol0_.memoryUsage() + riccati_sol1_.memoryUsage();
+    total += refinement_residual_.memoryUsage() + refinement_correction_.memoryUsage() +
+             refinement_best_.memoryUsage() + refinement_norm_.memoryUsage();
     if (solverType_ == KKTSolverType::Riccati && diff_riccati_) {
         total += diff_riccati_->memoryUsage();
     } else {
-        total += KKT.memoryUsage();
+        total += KKT.memoryUsage() + sizeof(int64_t) * (augdim + 1 + 2 * residual_nnz_);
     }
     return total;
 }

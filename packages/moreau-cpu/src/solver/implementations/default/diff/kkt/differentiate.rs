@@ -320,6 +320,7 @@ pub fn differentiate_hsde<T: FloatT>(
     );
 
     let full_sol = solve_linear_system(&kkt, &rhs);
+    let full_sol = refine_hsde_solution(&kkt, &rhs, full_sol, |rhs| solve_linear_system(&kkt, rhs));
 
     // Extract solution from second half of augmented solution
     // j_dim includes expansion variables; solution components are at original positions
@@ -491,6 +492,9 @@ pub fn differentiate_adjoint_hsde_with_xcones<T: FloatT>(
     );
 
     let full_sol = solve_linear_system(&kkt, &aug_rhs);
+    let full_sol = refine_hsde_solution(&kkt, &aug_rhs, full_sol, |rhs| {
+        solve_linear_system(&kkt, rhs)
+    });
 
     extract_hsde_gradients_full(&full_sol, P, A, x, z, tau, n, m, xn)
 }
