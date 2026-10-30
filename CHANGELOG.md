@@ -46,6 +46,9 @@ All notable changes to Moreau are documented here. The format follows
   warm starts; it now defaults to zeros (#92).
 - The docs gave the wrong slack row order for PSD mixed with exponential or
   power cones (#55), and several examples were wrong or didn't run (#73).
+- CUDA ordered PSD sparsity graphs with its own minimum-degree search instead of
+  the CPU's AMD, so the two backends could split the same sparse PSD cone into
+  different cliques. CUDA now uses SuiteSparse AMD, vendored (#108).
 - CUDA equilibration of problems with `P = 0` (LPs, SOCPs, SDPs) started each
   Ruiz iteration from stale column norms, so it scaled `A` differently from the
   CPU (#107).
