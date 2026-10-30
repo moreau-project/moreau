@@ -80,6 +80,12 @@ TEST(MultiPsdMre, SmallestCircle02_NoChordalRaw) {
     Settings settings;
     settings.maxIter = 200;
     settings.verbose = true;
+    // The 1e-6 objective check needs more accuracy than the default stopping
+    // tolerances reliably provide for this SDP. Use 1e-9 to leave a margin
+    // without pushing the solve to its numerical floor at 1e-10.
+    settings.ipm.tolFeas = 1e-9;
+    settings.ipm.tolGapAbs = 1e-9;
+    settings.ipm.tolGapRel = 1e-9;
 
     printf("n=%d, m=%d, nnzP=%ld, nnzA=%ld\n", n, m, nnzP, nnzA);
     printf("A_ro size=%zu, A_ci size=%zu, A_val size=%zu\n",
