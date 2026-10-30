@@ -11,9 +11,14 @@ zeros can still give an expensive decomposition, or none at all.
 
 This page explains the mathematics, works through a complete example, and
 describes the CPU and CUDA paths. See [PSD cones](psd-cones.md) for the `svec`
-format and basic API. The merge-setting behavior described here includes the
-changes in [PR #84](https://github.com/moreau-project/moreau/pull/84); the
-published 0.4.1 packages predate those fixes.
+format and basic API.
+
+Both backends use matching approximate minimum degree (AMD) ordering and
+support the same three clique merge strategies. Given the same aggregate
+sparsity pattern and merge setting, they produce the same cliques. To use
+that structure, supply the positions where `b` may be nonzero when compiling
+a fixed-structure problem. The sections below explain how this pattern,
+ordering, and merging determine the reformulation and its cost.
 
 ## From an affine matrix to a graph
 
@@ -180,7 +185,7 @@ of one cone. Moreau exposes three choices through
 | Method | What it does | What to look for |
 |---|---|---|
 | `'clique_graph'` | The default. Searches for permissible merges that reduce a cubic cone-cost estimate. | A compromise between small cones and heavy overlap. |
-| `'parent_child'` | Traverses the clique tree and uses local fill and supernode-size thresholds, currently 8. A supernode is the part of a clique outside its parent separator. | Can merge aggressively, including back into the original cone. |
+| `'parent_child'` | Traverses the clique tree and uses local fill and supernode-size thresholds of 8. A supernode is the part of a clique outside its parent separator. | Can merge aggressively, including back into the original cone. |
 | `'none'` | Keeps the cliques after symbolic factorization, without the additional merge stage. | Useful for understanding the initial decomposition; it still includes fill and supernode construction. |
 
 For clique orders $a,b$ and union order $c$, the cubic score is
@@ -236,14 +241,14 @@ illustration, not a prediction of the ordering chosen by either backend.
 The backend ordering makes this example more instructive. With
 $D_1=D_2=I_8$, one variable for each entry of $B$ in row-major order, and an
 explicit diagonal `b` pattern, both backends produce the following structures
-with the shared AMD ordering introduced in #108:
+using AMD ordering:
 
 | Backend and merge choice | PSD matrix orders | Scalar PSD rows | Added overlap variables | Cubic cone-work proxy |
 |---|---|---:|---:|---:|
 | Original, decomposition off | 16 | 136 | 0 | 4,096 |
 | Both backends, `'none'` | 15 and 9 | 165 | 36 | 4,104 |
 | Both backends, `'clique_graph'` | 16 | 136 | 0 | 4,096 |
-| Either backend, `'parent_child'` | 16 | 136 | 0 | 4,096 |
+| Both backends, `'parent_child'` | 16 | 136 | 0 | 4,096 |
 
 These are structural counts, not timing measurements. Both backends' default
 strategy recombines to the original cone, buying no decomposition. With no
@@ -258,10 +263,9 @@ counterexample, see the treewidth discussion below.
 ### A small band that the merge heuristic recombines
 
 A tridiagonal PSD(8) has seven cliques of order 2 before additional merging.
-On the PR #84 implementation, `'none'` and `'clique_graph'` keep those cliques,
-while `'parent_child'` recombines them into a single PSD(8). With that choice
-there is no smaller cone left to exploit. This case is covered by the CPU
-merge-method and CUDA chordal tests.
+On both backends, `'none'` and `'clique_graph'` keep those cliques, while
+`'parent_child'` recombines them into a single PSD(8). With that choice there
+is no smaller cone left to exploit.
 
 Even keeping the seven small cones does not guarantee a speedup for such a
 small problem: analysis, mappings, and the enlarged variable set can cost
@@ -316,7 +320,6 @@ every batched or framework path does the same.
 
 This solves the three-by-three example above with objective
 $\max(a+b)$. The analytic optimum is $a=b=1/\sqrt{2}$ and $a+b=\sqrt{2}$.
-Use a source build containing PR #84 to exercise all three merge settings.
 
 ```python
 import moreau
@@ -386,26 +389,30 @@ The extra dimensions are internal. Inputs and returned `x`, `s`, and `z` use
 the original problem's dimensions. Recovering a full PSD dual `z` can involve
 PSD completion; its entries outside the aggregate pattern need not be zero.
 
-## CPU and CUDA: common mathematics, different paths
+## Backend behavior
 
 Both backends use a compact clique reformulation on their chordal-enabled
-paths. Matching aggregate patterns and merge settings now produce the same
-cliques, while the implementation paths still incur different overhead.
+paths. CPU graph analysis uses the Rust `amd` crate, a port of SuiteSparse
+AMD; CUDA graph analysis uses vendored SuiteSparse AMD. Both use default
+controls and matching merge semantics, so the same aggregate pattern and
+merge setting give the same clique partition. Graph analysis runs on the
+host for both backends; CUDA accelerates the numerical cone operations and
+KKT solves.
 
 | Stage | CPU | CUDA |
 |---|---|---|
 | Graph analysis | Rust host code; AMD ordering through the Rust `amd` crate. | C++ host code; vendored SuiteSparse AMD with default controls, matching the Rust `amd` ordering. |
-| Clique merging | Honors `'clique_graph'`, `'parent_child'`, and `'none'` through the Python settings binding after #84. | Honors the same strategies after #84, using C++ ports with matched merge semantics. |
+| Clique merging | Honors `'clique_graph'`, `'parent_child'`, and `'none'`. | Honors the same strategies through C++ implementations with matching semantics. |
 | Conversion | Rust builds the compact augmented problem and its value maps. | The C++ Python binding analyzes the structure and constructs augmented CSR data before creating the GPU solver. |
 | Numerical iterations | CPU cone operations and KKT solves. | CUDA cone operations and GPU KKT solves; splitting cones does not move the graph analysis to the GPU. |
 | Recovery | Maps the primal/slack results back and can complete the dual. | Binding-side host code maps results back and can complete the dual; this adds work around the GPU solve. |
 
-The initial ordering and merge strategies agree for the same aggregate graph.
-Entry points can still supply different structural information, especially
-for `b`. Compare final objective values and feasibility in the original
-problem; matching cliques does not imply identical iteration counts or
-bitwise solutions. Finite-precision behavior and the size of the KKT system
-can change with the reformulation.
+Different entry points can supply different structural information, especially
+for `b`, and therefore build different aggregate graphs. Match that information
+before comparing clique partitions. Even with matching cliques, compare final
+objective values and feasibility in the original problem: floating-point
+arithmetic, KKT solvers, and recovery costs can produce different iteration
+counts, timings, and numerical solutions.
 
 ### Framework and differentiation details
 
@@ -414,7 +421,7 @@ The entry point matters as well as the selected device:
 - The CPU Python single-problem adapter can infer the `b` pattern from the
   supplied values. Fixed-structure compiled batches and framework solvers
   should receive an explicit valid pattern when relying on chordal savings.
-- CUDA's Python binding performs the host-side chordal conversion. The current
+- CUDA's Python binding performs the host-side chordal conversion. The
   JAX CUDA **XLA FFI** path constructs the core C++ solver directly and bypasses
   that conversion. Selecting CUDA under JAX therefore does not by itself
   establish that chordal decomposition ran. The callback path and FFI path
@@ -426,9 +433,9 @@ The entry point matters as well as the selected device:
   tracks the convention. Restrict comparisons to the parameters that are
   actually allowed to vary.
 - Dual completion is a separate numerical step after the solve. The CUDA
-  handling of scaling and singular separators was corrected in
-  [PR #81](https://github.com/moreau-project/moreau/pull/81). A completion failure is different from the interior-point
-  method failing to converge.
+  recovery path accounts for solver scaling and handles singular separator
+  blocks. A completion failure is different from the interior-point method
+  failing to converge.
 
 Small cones can be particularly cheap on the CPU, while GPU efficiency also
 depends on having enough work and batching to amortize overhead. Neither
@@ -464,8 +471,8 @@ and residuals decide the practical result.
 - Sun, Andersen, and Vandenberghe, [*Decomposition in Conic Optimization with Partially Separable Structure*](https://arxiv.org/abs/1306.0057): clique conversion and the coupling it introduces.
 - Garstka, Cannon, and Goulart, [*A Clique Graph Based Merging Strategy for Decomposable SDPs*](https://arxiv.org/abs/1911.05615): choosing which overlapping cliques to recombine.
 - Böttcher, Pruessmann, Taraz, and Würfl, [*Bandwidth, Expansion, Treewidth, Separators, and Universality for Bounded Degree Graphs*](https://arxiv.org/abs/0910.3014): why low degree alone does not give small separators.
-- CPU implementation: [`solver/chordal/`](https://github.com/moreau-project/moreau/tree/cbdcb3e0be26ee65c21a03c9f1c54b84474ea70b/packages/moreau-cpu/src/solver/chordal).
-- CUDA implementation: [`chordal_info.cpp`](https://github.com/moreau-project/moreau/blob/cbdcb3e0be26ee65c21a03c9f1c54b84474ea70b/packages/moreau-cuda/src/chordal/chordal_info.cpp), [`merge_strategy.hpp`](https://github.com/moreau-project/moreau/blob/cbdcb3e0be26ee65c21a03c9f1c54b84474ea70b/packages/moreau-cuda/include/moreau/chordal/merge_strategy.hpp), and the [`Python bindings`](https://github.com/moreau-project/moreau/blob/cbdcb3e0be26ee65c21a03c9f1c54b84474ea70b/packages/moreau-cuda/bindings/moreau_bindings.cpp).
+- CPU implementation: [`solver/chordal/`](https://github.com/moreau-project/moreau/tree/main/packages/moreau-cpu/src/solver/chordal).
+- CUDA implementation: [`chordal_info.cpp`](https://github.com/moreau-project/moreau/blob/main/packages/moreau-cuda/src/chordal/chordal_info.cpp), [`merge_strategy.hpp`](https://github.com/moreau-project/moreau/blob/main/packages/moreau-cuda/include/moreau/chordal/merge_strategy.hpp), and the [`Python bindings`](https://github.com/moreau-project/moreau/blob/main/packages/moreau-cuda/bindings/moreau_bindings.cpp).
 
 The figures show graph structure and arithmetic cost estimates, not measured
 benchmarks. Their {download}`generation script <../_scripts/chordal_figures.py>` is included
