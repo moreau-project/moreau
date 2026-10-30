@@ -17,6 +17,9 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Changed
 
+- CUDA wheels build against cuDSS 1.0.0 and require `nvidia-cudss-cu12>=1.0,<1.1`
+  (or `-cu13`), which adds NVRTC as a runtime dependency. Julia (`CUDSS_jll`)
+  stays on cuDSS 0.7.1 until a 1.0 build is registered (#109).
 - `solver="auto"` always picks the IPM. Active-set is used only with
   `solver="active_set"`, so small dense QPs may be slower by default (#97).
 - On CPU, `CompiledSolver` with `direct_solve_method="auto"` lets the Rust core

@@ -7,8 +7,8 @@
 # per step; `all` runs every stage, for use by hand on the machine.
 #
 # The machine needs `devenv` with a `cuda12` environment (CUDA 12, GCC, CMake,
-# GoogleTest), uv, Rust, and CUDSS_ROOT pointing at a cuDSS 0.7 build for
-# CUDA 12. moreau-cuda is pinned to CUDA 12 and cuDSS 0.7 (see its
+# GoogleTest), uv, Rust, and CUDSS_ROOT pointing at a cuDSS 1.0 build for
+# CUDA 12. moreau-cuda is pinned to CUDA 12 and cuDSS 1.0 (see its
 # pyproject.toml), so torch comes from PyTorch's CUDA 12.9 index, the first
 # with Blackwell code.
 set -euo pipefail
@@ -25,7 +25,7 @@ mkdir -p "$work"
 work=$(cd "$work" && pwd)
 source_dir=$(cd "$(dirname "$0")/.." && pwd)
 
-: "${CUDSS_ROOT:?must point at a cuDSS 0.7 build for CUDA 12}"
+: "${CUDSS_ROOT:?must point at a cuDSS 1.0 build for CUDA 12}"
 export MOREAU_CUDA_ARCH=${MOREAU_CUDA_ARCH:-121}
 export UV_LINK_MODE=${UV_LINK_MODE:-copy}
 export CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}
