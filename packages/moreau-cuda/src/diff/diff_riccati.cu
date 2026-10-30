@@ -247,10 +247,10 @@ DiffRiccatiData::DiffRiccatiData(
         ptr.reset(tmp);
         CUDA_THROW(cudaMemcpy(tmp, data, sizeof(int64_t) * count, cudaMemcpyHostToDevice));
     };
-    auto alloc_double = [](device_unique_ptr<double>& ptr, size_t count) {
+    auto alloc_double = [stream](device_unique_ptr<double>& ptr, size_t count) {
         double* tmp; CUDA_THROW(cudaMalloc(&tmp, sizeof(double) * count));
         ptr.reset(tmp);
-        CUDA_THROW(cudaMemset(tmp, 0, sizeof(double) * count));
+        CUDA_THROW(cudaMemsetAsync(tmp, 0, sizeof(double) * count, stream));
     };
 
     upload_i32(d_block_sizes, h_block_sizes.data(), nblocks);
