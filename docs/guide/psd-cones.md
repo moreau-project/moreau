@@ -111,14 +111,18 @@ assert cones.total_constraints() == 11
 ## Chordal Decomposition
 
 Chordal decomposition can replace a sparse PSD slack cone with smaller PSD
-cones connected by additional variables. The reformulation is exact. It is
-enabled by default on the chordal-capable paths, but a useful split depends on
-the **aggregate structure of both `A` and `b`**, the clique merge choice, and
-the solver entry point.
+cones connected by additional variables. This exact reformulation preserves
+the original feasible set and objective. Inputs and returned `x`, `s`, and
+`z` retain the original problem dimensions; the solver manages the added
+overlap variables and recovers the original solution.
 
-The dedicated [Chordal Decomposition](chordal-decomposition.md) guide explains
-the graph and matrix mathematics with figures, a runnable example, structured
-non-examples, CPU/CUDA differences, and a procedure for measuring the benefit.
+Decomposition is enabled by default on the chordal-capable paths. Its graph
+comes from the **aggregate structure of both `A` and `b`**: an entry is absent
+only when every coefficient and constant is structurally zero there. CPU and
+CUDA use matching AMD ordering and merge semantics, so the same aggregate
+pattern and merge choice produce the same cliques on both backends.
+
+Control decomposition through `IPMSettings`:
 
 ```python
 settings = moreau.Settings(
@@ -129,16 +133,31 @@ settings = moreau.Settings(
 )
 ```
 
-Both backends honor `'clique_graph'` (the default), `'parent_child'`, and
-`'none'` after the merge-setting fixes in PR #84. The initial graph orderings
-still differ, so matching merge choices need not produce identical cliques.
+Both backends honor all three merge choices:
+
+| Merge method | Behavior |
+|---|---|
+| `'clique_graph'` | The default; merges cliques using a cubic cone-work estimate. |
+| `'parent_child'` | Uses local fill and size thresholds along the clique tree; it can recombine a small sparse cone completely. |
+| `'none'` | Keeps the cliques from symbolic factorization without additional merging. |
 
 For compiled batches, declare structural zeros of `b` with a valid
-`b_sparsity_pattern` at entry points that accept it. Without that information,
-the conservative pattern can prevent decomposition. Small cliques and modest
-overlap can reduce cone work; fill, extra variables, and recovery overhead can
-erase that saving. Compare end-to-end timing and original-problem residuals
-with decomposition disabled.
+`b_sparsity_pattern` at entry points that accept it. The mask must include all
+positions allowed to vary across the batch and future solves. Without it,
+the conservative pattern can prevent decomposition even when one numerical
+instance is sparse.
+
+The entry point determines where conversion runs. The CPU solver and CUDA
+Python binding provide chordal conversion; JAX's CUDA XLA FFI path bypasses
+the binding-side conversion. Selecting CUDA and enabling the setting alone
+does not establish that a decomposition ran.
+
+Small cliques and modest overlap can reduce cone work; fill, extra variables,
+and recovery overhead can erase that saving. Compare end-to-end timing and
+original-problem residuals with decomposition disabled. The
+[Chordal Decomposition](chordal-decomposition.md) guide provides the graph and
+matrix mathematics, illustrated examples, structural counterexamples, and a
+procedure for checking whether decomposition benefits your workload.
 
 ---
 

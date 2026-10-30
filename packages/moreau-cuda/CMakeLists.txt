@@ -52,7 +52,7 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     endif()
 endif()
 
-project(moreau-cuda LANGUAGES CXX CUDA)
+project(moreau-cuda LANGUAGES C CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -78,6 +78,27 @@ include_directories(/usr/local/include)
 link_directories(/usr/local/lib)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# SuiteSparse AMD (BSD-3-Clause), the fill-reducing ordering for chordal
+# decomposition that the CPU backend also uses. DLONG builds its int64_t
+# interface (amd_l_order); NDEBUG turns off its debug code in every build type.
+set(AMD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse_amd)
+add_library(suitesparse_amd STATIC
+    ${AMD_DIR}/Source/amd_1.c
+    ${AMD_DIR}/Source/amd_2.c
+    ${AMD_DIR}/Source/amd_aat.c
+    ${AMD_DIR}/Source/amd_order.c
+    ${AMD_DIR}/Source/amd_post_tree.c
+    ${AMD_DIR}/Source/amd_postorder.c
+    ${AMD_DIR}/Source/amd_preprocess.c
+    ${AMD_DIR}/Source/amd_valid.c
+)
+target_include_directories(suitesparse_amd PUBLIC ${AMD_DIR}/Include)
+target_compile_definitions(suitesparse_amd PRIVATE DLONG NDEBUG)
+set_target_properties(suitesparse_amd PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+)
 
 # Moreau CUDA library
 add_library(moreau_cuda_lib STATIC
@@ -120,7 +141,7 @@ add_library(moreau_cuda_lib STATIC
 )
 target_include_directories(moreau_cuda_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-target_link_libraries(moreau_cuda_lib PUBLIC cudss CUDA::cudart CUDA::cusparse CUDA::cublas CUDA::cusolver)
+target_link_libraries(moreau_cuda_lib PUBLIC cudss CUDA::cudart CUDA::cusparse CUDA::cublas CUDA::cusolver suitesparse_amd)
 set_property(TARGET moreau_cuda_lib PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET moreau_cuda_lib PROPERTY CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
 
