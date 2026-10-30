@@ -2254,6 +2254,11 @@ void DiffKKT::updateJ(
                         nonneg_H, cones, stream);
         return;
     }
+    // Serialize all access to shared KKT storage, including matrix assembly,
+    // with prior solves and their result extraction on the owned stream.
+    const cudaStream_t caller_stream = stream;
+    begin_cudss_execution(caller_stream);
+    stream = cudss_stream_;
     // First initialize I and -εI diagonals and identity blocks within J
     MOREAU_KERNEL_LAUNCH(init_diff_kkt_values_kernel, batchSize, 256, 0, stream,
         KKT.values(),
@@ -2454,6 +2459,7 @@ void DiffKKT::updateJ(
             batchSize
         );
     }
+    end_cudss_execution(caller_stream);
 }
 
 void DiffKKT::factor(cudaStream_t stream) {
@@ -2643,6 +2649,10 @@ void DiffKKT::solveAdjoint(
         return;
     }
 
+    const cudaStream_t caller_stream = stream;
+    begin_cudss_execution(caller_stream);
+    stream = cudss_stream_;
+
     // Build augmented RHS [0; rhs_bar] with zero padding for expansion vars
     MOREAU_KERNEL_LAUNCH(build_aug_rhs_kernel, batchSize, 256, 0, stream,
         work_rhs_.data(),
@@ -2654,7 +2664,6 @@ void DiffKKT::solveAdjoint(
         cudssMatrixSetValues(rhs_matrix_, work_rhs_.data());
         cudssMatrixSetValues(sol_matrix_, work_sol_.data());
 
-        begin_cudss_execution(stream);
         cudssStatus_t status = cudssExecute(
             cudss_handle_, CUDSS_PHASE_SOLVE,
             cudss_config_, cudss_data_,
@@ -2681,8 +2690,7 @@ void DiffKKT::solveAdjoint(
     }
 
     // Refinement reuses cuDSS, so keep its kernels and solves on the owned stream.
-    refineSolution(cudss_stream_);
-    end_cudss_execution(stream);
+    refineSolution(stream);
 
     // Extract lam from first half (only base_jdim entries, skip expansion vars)
     MOREAU_KERNEL_LAUNCH(extract_lam_kernel, batchSize, 256, 0, stream,
@@ -2690,6 +2698,7 @@ void DiffKKT::solveAdjoint(
         work_sol_.data(),
         base_jdim_, augdim, batchSize
     );
+    end_cudss_execution(caller_stream);
 }
 
 // Kernel to build forward augmented RHS [rhs; 0]
@@ -2747,6 +2756,10 @@ void DiffKKT::solveForward(
     double* sol,
     cudaStream_t stream
 ) {
+    const cudaStream_t caller_stream = stream;
+    begin_cudss_execution(caller_stream);
+    stream = cudss_stream_;
+
     // Build augmented RHS [rhs; 0] with zero padding for expansion vars
     MOREAU_KERNEL_LAUNCH(build_forward_aug_rhs_kernel, batchSize, 256, 0, stream,
         work_rhs_.data(),
@@ -2758,7 +2771,6 @@ void DiffKKT::solveForward(
     cudssMatrixSetValues(rhs_matrix_, work_rhs_.data());
     cudssMatrixSetValues(sol_matrix_, work_sol_.data());
 
-    begin_cudss_execution(stream);
     cudssStatus_t status = cudssExecute(
         cudss_handle_, CUDSS_PHASE_SOLVE,
         cudss_config_, cudss_data_,
@@ -2782,8 +2794,7 @@ void DiffKKT::solveForward(
         }
         throw std::runtime_error(msg);
     }
-    refineSolution(cudss_stream_);
-    end_cudss_execution(stream);
+    refineSolution(stream);
 
     // Extract sol from second half (only base_jdim entries)
     MOREAU_KERNEL_LAUNCH(extract_sol_kernel, batchSize, 256, 0, stream,
@@ -2791,6 +2802,7 @@ void DiffKKT::solveForward(
         work_sol_.data(),
         base_jdim_, jdim, augdim, batchSize
     );
+    end_cudss_execution(caller_stream);
 }
 
 size_t DiffKKT::memoryUsage() const noexcept {

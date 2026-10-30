@@ -316,8 +316,9 @@ struct DiffKKT {
     bool cudss_initialized_ = false;
 
     // cuDSS binds internal state to the analysis stream. Own that stream so
-    // cached factors can outlive any caller stream; events order each phase
-    // with the caller's matrix/RHS producers and solution consumers.
+    // cached factors can outlive any caller stream. Matrix/RHS assembly,
+    // refinement, and result extraction also run there to serialize shared
+    // workspace use across calls. Events order caller inputs and outputs.
     cudaStream_t cudss_stream_ = nullptr;
     cudaEvent_t cudss_input_ready_ = nullptr;
     cudaEvent_t cudss_output_ready_ = nullptr;

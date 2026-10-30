@@ -126,7 +126,8 @@ grad_q = jax.grad(lambda q: solver.solve(P_data, A_data, q, b).x.sum())(q)
 ```
 
 CUDA gradient calls can reuse a solver across sequential JAX executions on
-different execution streams; the backend handles the stream dependencies.
+different execution streams; the backend orders shared backward workspace use
+without requiring callers to synchronize between gradient calls.
 
 ## Batching
 
