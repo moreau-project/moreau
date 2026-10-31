@@ -703,11 +703,13 @@ TEST_F(NumericalPrecisionTest, MixedScaleGradients) {
     BatchedVector dz_bar(m, batchSize);
     BatchedVector ds_bar(m, batchSize);
 
-    // Different scales: 1.0, 1e-10, 1e10
+    // Different scales of L = scale * x[0]. Using x[0] + x[1] would give
+    // zero dq because the equality constraint fixes that sum to b.
+    const std::vector<double> scales = {1.0, 1e-10, 1e10};
     std::vector<double> dx_data = {
-        1.0, 1.0,       // batch 0: normal
-        1e-10, 1e-10,   // batch 1: tiny
-        1e10, 1e10      // batch 2: huge
+        scales[0], 0.0,  // batch 0: normal
+        scales[1], 0.0,  // batch 1: tiny
+        scales[2], 0.0   // batch 2: huge
     };
     copy_to_batched(dx_bar, dx_data);
     dz_bar.setToConstant(0.0, 0);
@@ -726,11 +728,13 @@ TEST_F(NumericalPrecisionTest, MixedScaleGradients) {
             << "dq[" << i << "] is Inf";
     }
 
-    // Gradients should scale proportionally (roughly)
-    // batch 0 and batch 2 should differ by ~1e10
-    double ratio = std::abs(dq_result[4]) / (std::abs(dq_result[0]) + 1e-20);
-    EXPECT_GT(ratio, 1e8) << "Gradient scaling seems off";
-    EXPECT_LT(ratio, 1e12) << "Gradient scaling seems off";
+    // x[0] = (b - q[0] + q[1]) / 2, so dq = scale * [-0.5, 0.5].
+    // Normalize each batch to check even the tiny gradient at the same accuracy.
+    for (int batch = 0; batch < batchSize; ++batch) {
+        SCOPED_TRACE(batch);
+        EXPECT_NEAR(dq_result[batch * n] / scales[batch], -0.5, 1e-7);
+        EXPECT_NEAR(dq_result[batch * n + 1] / scales[batch], 0.5, 1e-7);
+    }
 
     cudaFree(d_P);
     cudaFree(d_A);
