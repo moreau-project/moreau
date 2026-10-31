@@ -39,6 +39,45 @@ use assembly::*;
 /// QDLDL needs a quasi-definite system, so we use moderate regularization
 const REG_GENERAL: f64 = 1e-10;
 
+/// Remove the Tikhonov bias of the augmented HSDE solve by defect correction.
+/// The regularized factor remains a preconditioner; residuals are measured
+/// against [I J; J' 0], so weakly constrained directions are not damped.
+fn refine_hsde_solution<T: FloatT>(
+    kkt: &CscMatrix<T>,
+    rhs: &[T],
+    mut solution: Vec<T>,
+    mut solve: impl FnMut(&[T]) -> Vec<T>,
+) -> Vec<T> {
+    let half = rhs.len() / 2;
+    let reg: T = REG_GENERAL.as_T();
+    let rhs_norm = rhs.iter().fold(T::zero(), |a, &v| T::max(a, v.abs()));
+    let tolerance = T::from_f64(1e-11).unwrap() * T::max(T::one(), rhs_norm);
+    let mut previous_norm = T::infinity();
+    let mut best = solution.clone();
+    for _ in 0..8 {
+        let mut residual = rhs.to_vec();
+        kkt.sym_up()
+            .symv(&mut residual, &solution, -T::one(), T::one());
+        for i in half..rhs.len() {
+            residual[i] -= reg * solution[i];
+        }
+        let norm = residual.iter().fold(T::zero(), |a, &v| T::max(a, v.abs()));
+        if !norm.is_finite() || norm >= previous_norm {
+            break;
+        }
+        best.clone_from(&solution);
+        if norm <= tolerance {
+            break;
+        }
+        previous_norm = norm;
+        let correction = solve(&residual);
+        for (value, delta) in solution.iter_mut().zip(correction) {
+            *value += delta;
+        }
+    }
+    best
+}
+
 /// Count the number of expansion variables for the diff KKT system.
 /// Returns 2 per SocSparse H block (rank-2 expansion) + 3 per GenPowerSparse (rank-3).
 fn count_expansion_vars<T>(H_blocks: &[ConeDerivativeBlock<T>]) -> usize {

@@ -704,13 +704,12 @@ __device__ bool in_exp_interior(double r, double s, double t, double margin) {
 }
 
 // Check if point is in dual exp cone interior
-// Dual exp cone: r < 0 and -r * exp(s/r - 1) <= e * t
+// Dual exp cone: r < 0 and -r * exp(s/r - 1) <= t
 // Interior: strict inequality with margin
 __device__ bool in_exp_dual_interior(double r, double s, double t, double margin) {
-    constexpr double E = 2.718281828459045;
     if (r >= -margin) return false;
     double ratio = fmin(s / r - 1.0, 500.0);  // Prevent exp overflow
-    return -r * exp(ratio) + margin < E * t;
+    return -r * exp(ratio) + margin < t;
 }
 
 // Newton's method to find t in exp cone projection
@@ -772,12 +771,11 @@ __device__ void project_exp_cone_primal(const double* v, double* out) {
         return;
     }
 
-    // Check if -v is in the dual exp cone: {(r,s,t) : r<=0, -r*exp(s/r-1) <= e*t}
+    // Check if -v is in the dual exp cone: {(r,s,t) : r<=0, -r*exp(s/r-1) <= t}
     // If -v in K*, then Π_K(v) = 0 by Moreau decomposition
-    constexpr double E = 2.718281828459045;
     double neg_v[3] = {-r, -s, -t};
     if ((fabs(neg_v[0]) <= EXP_CONE_TOL && neg_v[1] >= 0.0 && neg_v[2] >= 0.0) ||
-        (neg_v[0] < 0.0 && -neg_v[0] * exp(fmin(neg_v[1] / neg_v[0] - 1.0, 500.0)) - E * neg_v[2] <= EXP_CONE_TOL)) {
+        (neg_v[0] < 0.0 && -neg_v[0] * exp(fmin(neg_v[1] / neg_v[0] - 1.0, 500.0)) - neg_v[2] <= EXP_CONE_TOL)) {
         out[0] = 0.0; out[1] = 0.0; out[2] = 0.0;
         return;
     }

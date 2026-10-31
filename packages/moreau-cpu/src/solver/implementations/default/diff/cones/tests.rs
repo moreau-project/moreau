@@ -1909,3 +1909,25 @@ fn test_soc_sparse_apply_matches_dense() {
         );
     }
 }
+
+#[test]
+fn test_exp_projection_and_derivative_outside_polar() {
+    // p=(0,1,1), normal=(1,1,-1), v=p+3*normal. Thus Pi_K(v)=p.
+    // The dual test must be -r*exp(s/r-1) <= t, without an extra e.
+    let v = vec![3.0_f64, 4.0, -2.0];
+    let cones = vec![SupportedConeT::ExponentialConeT()];
+    let projection = get_cone_projection(&v, &cones, false);
+    for (actual, expected) in projection.iter().zip([0.0, 1.0, 1.0]) {
+        assert!((actual - expected).abs() < 1e-7);
+    }
+    // Invert the projection KKT system: I+3*Hess(y*exp(x/y)-z)
+    // is diag(4,1,1), constrained to normal^perp.
+    let expected = [2., -1., 1., -1., 5., 4., 1., 4., 5.];
+    let derivative = get_cone_derivative(&v, &cones, false);
+    let dual = get_cone_derivative(&v.iter().map(|x| -x).collect::<Vec<_>>(), &cones, true);
+    for i in 0..9 {
+        assert!((derivative[0][i] - expected[i] / 9.0).abs() < 1e-7);
+        let identity = if i % 4 == 0 { 1.0 } else { 0.0 };
+        assert!((dual[0][i] - (identity - expected[i] / 9.0)).abs() < 1e-7);
+    }
+}

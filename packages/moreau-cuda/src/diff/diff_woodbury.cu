@@ -2,7 +2,8 @@
  * @file diff_woodbury.cu
  * @brief Woodbury-specialized backward pass — two-level Schur complement solve
  *
- * Solves (J'J + eI)w = rhs_bar via block elimination, then y_out = J*w.
+ * Uses block elimination of J'J + eI as a preconditioner, refines against
+ * J'J w = rhs_bar, then returns y_out = J*w.
  *
  * Algorithm:
  *   1. Eliminate y_s (diagonal D_s = I + H^2 + eI)
@@ -1138,13 +1139,11 @@ void DiffWoodbury::solveAdjoint(const double* rhs_bar, double* y_out, cudaStream
         diff_wb_unpack_jdim_kernel<<<(int)batchSize_, threads, 0, stream>>>(
             y_x_.get(), y_z_.get(), y_s_.get(), y_tau_.get(), in, n_, m_, jdim_, batchSize_);
     };
-    // M·w into Mv_ = J'(J·w) + ε·w, where y_* must already hold w. Reuses jw_.
+    // Unregularized M·w = J'(J·w). The regularized Woodbury chain
+    // remains a preconditioner, matching the CPU/cuDSS defect correction.
     auto Mw = [&](double* Mv) {
         J_matvec(jw_.get(), stream);          // jw = J·w
         Jt_matvec(jw_.get(), Mv, stream);     // Mv = J'(J·w)
-        pack(jw_.get());                      // jw = w (packed)
-        double eps = eps_;
-        CUBLAS_THROW(cublasDaxpy(cublas_, (int)N, &eps, jw_.get(), 1, Mv, 1));  // Mv += ε·w
     };
 
     // Compute sol = J·wacc, the residual mres_ = rhs − M·wacc, its per-batch
@@ -1165,7 +1164,7 @@ void DiffWoodbury::solveAdjoint(const double* rhs_bar, double* y_out, cudaStream
     };
 
     // Solve M w = rhs via the gap Woodbury chain (inner D_x floored → contractive
-    // but inaccurate), then ADAPTIVELY refine on the true M — like the forward
+    // but inaccurate), then ADAPTIVELY refine on the unregularized M — like the forward
     // IPM's convergence loop. Well-conditioned problems converge with 0 steps (no
     // cost); moderate ones refine to tolerance; divergent ones (κ²-limited) break
     // early and backward() falls back to the κ-accurate cuDSS path.

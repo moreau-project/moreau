@@ -25,6 +25,14 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- CPU and CUDA HSDE derivatives could be biased in weakly constrained directions by
+  the regularized differentiation solve. Apply defect correction to the
+  unregularized equations in forward and adjoint differentiation, reusing
+  the factorization in the cached adjoint and CUDA paths. Woodbury backward
+  refinement also targets the unregularized normal equations.
+- Exponential-cone differentiation could incorrectly classify points as polar
+  on both CPU and CUDA because the dual membership test applied the factor
+  `e` twice. Correct the inequality and the resulting projection Jacobians.
 - CUDA chordal solves could stall when iterative refinement increased the KKT
   residual and the default start shifted PSD cones independently of other
   cones. Keep the refinement iterate with the smallest residual and use a
@@ -38,6 +46,9 @@ All notable changes to Moreau are documented here. The format follows
   warm starts; it now defaults to zeros (#92).
 - The docs gave the wrong slack row order for PSD mixed with exponential or
   power cones (#55), and several examples were wrong or didn't run (#73).
+- CUDA ordered PSD sparsity graphs with its own minimum-degree search instead of
+  the CPU's AMD, so the two backends could split the same sparse PSD cone into
+  different cliques. CUDA now uses SuiteSparse AMD, vendored (#108).
 - CUDA equilibration of problems with `P = 0` (LPs, SOCPs, SDPs) started each
   Ruiz iteration from stale column norms, so it scaled `A` differently from the
   CPU (#107).
