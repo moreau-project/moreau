@@ -118,6 +118,16 @@ Each iteration is a **damped Newton step** on this relaxed system $F_\mu$:
 Iterate until the relative residuals $r_x, r_z, r_\tau$ and the gap fall below
 tolerance, then recover $(x, s, z)/\tau$.
 
+Infeasibility is declared when the iterate carries a certificate: $z$ with
+$b^\top z < 0$ and $A^\top z \approx 0$ (primal), or $x$ with $q^\top x < 0$
+and $Px \approx 0$, $Ax + s \approx 0$ (dual). As in Clarabel, these tests run
+once $\kappa/\tau$ is large. Moreau also accepts a certificate without that
+gate when $\|A^\top z\| < \epsilon_{\text{infeas,rel}}\,(-b^\top z)$ (dual:
+$\max(\|Px\|, \|Ax + s\|) < \epsilon_{\text{infeas,rel}}\,(-q^\top x)$),
+which proves that every feasible $x$ has $\|x\| \ge 1/\epsilon_{\text{infeas,rel}}$.
+This catches problems that are both primal and dual infeasible, where the two
+certificates' objectives can cancel so that $\kappa \to 0$ together with $\tau$.
+
 ## Direct conic constraints (new in Moreau)
 
 Direct conic constraints also change the linearized Newton system. A slack

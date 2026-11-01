@@ -37,6 +37,12 @@ All notable changes to Moreau are documented here. The format follows
   scanned (#70).
 - `Solver` and `CompiledSolver.setup()` copy their inputs, so editing the
   caller's arrays afterwards no longer changes the next solve (#70).
+- The IPM could report `Solved` on an LP that is both primal and dual
+  infeasible, at `|x| ~ 1e15` with a constraint violated by 2, because its
+  infeasibility tests run only once `κ/τ` is large and `κ` vanished along with
+  `τ`. CPU and CUDA now also accept a scale-invariant Farkas certificate
+  (`‖Aᵀz‖ < tol_infeas_rel · (−bᵀz)`, and the dual analogue) without that gate,
+  so such problems end `PrimalInfeasible` or `DualInfeasible` (#67).
 - CUDA backward passes could return zero or stale gradients when cached solves
   or newly allocated workspaces crossed CUDA streams (#112).
 - CPU and CUDA HSDE derivatives could be biased in weakly constrained directions by

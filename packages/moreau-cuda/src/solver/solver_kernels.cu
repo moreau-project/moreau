@@ -160,6 +160,8 @@ __global__ void update_info_kernel_impl(
     double* __restrict__ gap_abs,
     double* __restrict__ gap_rel,
     double* __restrict__ ktratio,
+    double* __restrict__ farkas_primal,
+    double* __restrict__ farkas_dual,
     const double* __restrict__ rx,
     const double* __restrict__ rz,
     const double* __restrict__ rtau,
@@ -241,6 +243,13 @@ __global__ void update_info_kernel_impl(
         rz_inf_norm / fmax(1.0, normx + norms)
     );
 
+    // Scale-invariant Farkas residuals, checked without the κ/τ gate (#67); see the CPU
+    // DefaultInfo::update. farkas_p < ε proves every feasible x has ‖x‖ ≥ 1/ε.
+    double neg_bz = -dot_bz[batch] * c_inv;
+    double neg_qx = -dot_qx[batch] * c_inv;
+    double farkas_p = (neg_bz > 0.0) ? rx_inf_norm / neg_bz : INFINITY;
+    double farkas_d = (neg_qx > 0.0) ? fmax(Px_norm * c_inv, rz_inf_norm) / neg_qx : INFINITY;
+
     // Unscale by τ (but NOT normb and normq which are cached equilibrated values)
     normx *= tau_inv;
     normz *= tau_inv;
@@ -271,6 +280,8 @@ __global__ void update_info_kernel_impl(
         gap_abs[batch] = gap_a;
         gap_rel[batch] = gap_r;
         ktratio[batch] = kt_ratio;
+        farkas_primal[batch] = farkas_p;
+        farkas_dual[batch] = farkas_d;
     }
 }
 
@@ -284,6 +295,8 @@ void update_info_kernel(
     double* gap_abs,
     double* gap_rel,
     double* ktratio,
+    double* farkas_primal,
+    double* farkas_dual,
     const double* rx,
     const double* rz,
     const double* rtau,
@@ -323,7 +336,7 @@ void update_info_kernel(
 
     MOREAU_KERNEL_LAUNCH(update_info_kernel_impl, numBlocks, threadsPerBlock, 0, stream,
         cost_primal, cost_dual, res_primal, res_dual,
-        res_primal_inf, res_dual_inf, gap_abs, gap_rel, ktratio,
+        res_primal_inf, res_dual_inf, gap_abs, gap_rel, ktratio, farkas_primal, farkas_dual,
         rx, rz, rtau, dot_qx, dot_bz, tau, kappa, dot_xPx,
         rx_inf, rz_inf, Px, x, z, s,
         z_x, d_xcone_indices, totalXConeNumel,
@@ -525,6 +538,8 @@ __device__ int32_t check_convergence_single_batch(
     double ktratio,
     double res_primal_inf,
     double res_dual_inf,
+    double farkas_primal,
+    double farkas_dual,
     double dot_qx,
     double dot_bz,
     double tolGapAbs,
@@ -562,6 +577,14 @@ __device__ int32_t check_convergence_single_batch(
         return 3; // DualInfeasible
     }
 
+    // Gate-free Farkas certificates, full tolerances only (#67; see CPU check_convergence_full)
+    if (dot_bz < -tolInfeasAbs && farkas_primal < tolInfeasRel) {
+        return 2; // PrimalInfeasible
+    }
+    if (dot_qx < -tolInfeasAbs && farkas_dual < tolInfeasRel) {
+        return 3; // DualInfeasible
+    }
+
     // Note: Reduced tolerance checks (AlmostSolved, etc.) are only done in post_process,
     // not during the main solve loop, to match Clarabel.rs behavior.
     return 0; // Unsolved
@@ -578,6 +601,8 @@ __global__ void check_termination_impl(
     const double* __restrict__ ktratio,
     const double* __restrict__ res_primal_inf,
     const double* __restrict__ res_dual_inf,
+    const double* __restrict__ farkas_primal,
+    const double* __restrict__ farkas_dual,
     const double* __restrict__ dot_qx,
     const double* __restrict__ dot_bz,
     const double* __restrict__ prev_res_primal,
@@ -634,6 +659,7 @@ __global__ void check_termination_impl(
     int32_t conv_status = check_convergence_single_batch(
         gap_abs[b], gap_rel[b], res_primal[b], res_dual[b],
         ktratio[b], res_primal_inf[b], res_dual_inf[b],
+        farkas_primal[b], farkas_dual[b],
         dot_qx[b], dot_bz[b],
         tolGapAbs, tolGapRel, tolFeas, tolInfeasAbs, tolInfeasRel, tolKtRatio,
         reducedTolGapAbs, reducedTolGapRel, reducedTolFeas,
@@ -1523,6 +1549,8 @@ void check_termination_async_kernel(
     const double* ktratio,
     const double* res_primal_inf,
     const double* res_dual_inf,
+    const double* farkas_primal,
+    const double* farkas_dual,
     const double* dot_qx,
     const double* dot_bz,
     const double* prev_res_primal,
@@ -1557,7 +1585,7 @@ void check_termination_async_kernel(
     // Launch termination check kernel (same implementation as check_termination_impl)
     MOREAU_KERNEL_LAUNCH(check_termination_impl, numBlocks, threadsPerBlock, 0, stream,
         status, d_any_done, d_iterations_per_batch, gap_abs, gap_rel, res_primal, res_dual, ktratio,
-        res_primal_inf, res_dual_inf, dot_qx, dot_bz,
+        res_primal_inf, res_dual_inf, farkas_primal, farkas_dual, dot_qx, dot_bz,
         prev_res_primal, prev_res_dual, prev_gap_abs, prev_gap_rel,
         tolGapAbs, tolGapRel, tolFeas, tolInfeasAbs, tolInfeasRel, tolKtRatio,
         reducedTolGapAbs, reducedTolGapRel, reducedTolFeas,

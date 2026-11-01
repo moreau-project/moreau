@@ -37,6 +37,10 @@ pub struct DefaultInfo<T> {
     pub gap_rel: T,
     /// κ/τ ratio
     pub ktratio: T,
+    /// ‖A'z‖ / -b'z, or +∞ unless b'z < 0 (see `update`)
+    pub(crate) farkas_primal: T,
+    /// max(‖Px‖, ‖Ax + s‖) / -q'x, or +∞ unless q'x < 0 (see `update`)
+    pub(crate) farkas_dual: T,
 
     // previous iterate
     /// primal object value from previous iteration
@@ -103,6 +107,8 @@ where
             gap_abs: T::zero(),
             gap_rel: T::zero(),
             ktratio: T::zero(),
+            farkas_primal: T::infinity(),
+            farkas_dual: T::infinity(),
             // Initialize prev_* to represent "no previous iterate" so
             // InsufficientProgress checks don't false-trigger
             prev_cost_primal: T::infinity(),
@@ -263,11 +269,30 @@ where
         };
 
         // primal and dual infeasibility residuals.
-        self.res_primal_inf = (residuals.rx_inf.norm_scaled(dinv) * cinv)
-            / T::max(T::one(), normz + norm_zx_dinv_cinv);
+        let norm_rx_inf = residuals.rx_inf.norm_scaled(dinv) * cinv;
+        let norm_Px = residuals.Px.norm_scaled(dinv);
+        let norm_rz_inf = residuals.rz_inf.norm_scaled(einv);
+        self.res_primal_inf = norm_rx_inf / T::max(T::one(), normz + norm_zx_dinv_cinv);
         self.res_dual_inf = T::max(
-            residuals.Px.norm_scaled(dinv) / T::max(T::one(), normx),
-            residuals.rz_inf.norm_scaled(einv) / T::max(T::one(), normx + norms),
+            norm_Px / T::max(T::one(), normx),
+            norm_rz_inf / T::max(T::one(), normx + norms),
+        );
+
+        // Scale-invariant Farkas residuals, checked without the κ/τ gate (#67). For any feasible
+        // x, b'z = x'A'z + s'z ≥ -‖x‖‖A'z‖, so farkas_primal < ε proves every feasible x has
+        // ‖x‖ ≥ 1/ε; farkas_dual < ε bounds every dual solution the same way. κ/τ misses
+        // problems with both certificates: their objectives can cancel so that κ → 0 with τ.
+        let ratio = |num: T, den: T| {
+            if den > T::zero() {
+                num / den
+            } else {
+                T::infinity()
+            }
+        };
+        self.farkas_primal = ratio(norm_rx_inf, -residuals.dot_bz * cinv);
+        self.farkas_dual = ratio(
+            T::max(norm_Px * cinv, norm_rz_inf),
+            -residuals.dot_qx * cinv,
         );
 
         // now back out the τ scaling so we can normalize the unscaled primal / dual errors
@@ -552,6 +577,16 @@ where
             pinf_status,
             dinf_status,
         );
+
+        // Full tolerances only: reduced ones would certify just ‖x‖ ≥ 2e4, which feasible
+        // problems reach (Maros-Meszaros HUESTIS reaches farkas_primal ≈ 2e-6).
+        if self.status == SolverStatus::Unsolved {
+            if residuals.dot_bz < -tol_infeas_abs && self.farkas_primal < tol_infeas_rel {
+                self.status = pinf_status;
+            } else if residuals.dot_qx < -tol_infeas_abs && self.farkas_dual < tol_infeas_rel {
+                self.status = dinf_status;
+            }
+        }
     }
 
     fn check_convergence_almost(
@@ -815,5 +850,32 @@ mod best_iterate_tests {
         let mut timers = Timers::default();
         info.reset(&mut timers);
         assert!(!info.best_saved);
+    }
+
+    /// #67: a Farkas certificate is accepted without the κ/τ gate, at full tolerances only.
+    #[test]
+    fn farkas_certificate_bypasses_ktratio_gate() {
+        let settings = DefaultSettings::<f64>::default();
+        let mut residuals = DefaultResiduals::<f64>::new(2, 2);
+        residuals.dot_bz = -1.0;
+        let mut info = DefaultInfo::<f64>::new();
+        set_metrics(&mut info, 1.0, 1.0, 1e-3);
+
+        info.farkas_primal = settings.ipm.tol_infeas_rel * 10.0;
+        info.check_convergence_full(&residuals, &settings);
+        assert_eq!(info.status, SolverStatus::Unsolved);
+
+        info.farkas_primal = settings.ipm.tol_infeas_rel / 10.0;
+        info.check_convergence_almost(&residuals, &settings);
+        assert_eq!(info.status, SolverStatus::Unsolved);
+        info.check_convergence_full(&residuals, &settings);
+        assert_eq!(info.status, SolverStatus::PrimalInfeasible);
+
+        let mut info = DefaultInfo::<f64>::new();
+        set_metrics(&mut info, 1.0, 1.0, 1e-3);
+        residuals.dot_qx = -1.0;
+        info.farkas_dual = settings.ipm.tol_infeas_rel / 10.0;
+        info.check_convergence_full(&residuals, &settings);
+        assert_eq!(info.status, SolverStatus::DualInfeasible);
     }
 }
