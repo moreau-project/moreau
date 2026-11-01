@@ -164,9 +164,10 @@ fn test_mixed_chordal_slack_psd_plus_direct_x_psd() {
         settings.ipm.presolve_enable = false;
         settings.ipm.chordal_decomposition_enable = chordal;
         settings.ipm.chordal_decomposition_merge_method = "none".to_string();
-        settings.ipm.tol_gap_abs = 1e-11;
-        settings.ipm.tol_gap_rel = 1e-11;
-        settings.ipm.tol_feas = 1e-11;
+        // Tight enough for the 1e-5 comparisons (1e-8 isn't), above the dual residual floor (~1e-11).
+        settings.ipm.tol_gap_abs = 1e-10;
+        settings.ipm.tol_gap_rel = 1e-10;
+        settings.ipm.tol_feas = 1e-10;
         let mut solver = DefaultSolver::new_with_xcones(
             &P,
             &q,

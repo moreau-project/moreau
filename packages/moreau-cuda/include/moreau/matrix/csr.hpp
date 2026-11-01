@@ -14,7 +14,8 @@ namespace moreau {
 
 struct CSR {
 public:
-    CSR(int n_, int m_, int nnz_, int batchSize_)
+    // Initialize storage on the stream that will populate the matrix.
+    CSR(int n_, int m_, int nnz_, int batchSize_, cudaStream_t stream = 0)
     : n_(n_), m_(m_), nnz_(nnz_), batchSize_(batchSize_) 
     {
         if (m_ < 0 || n_ < 0 || nnz_ < 0 || batchSize_ <= 0)
@@ -24,7 +25,7 @@ public:
         const size_t ciBytes = sizeof(int64_t) * nnz_;
         const size_t valBytes = sizeof(double)  * batchSize_ * nnz_;
 
-        auto dmalloc = [](size_t bytes) -> void* {
+        auto dmalloc = [stream](size_t bytes) -> void* {
             if (!bytes) return nullptr;
             void* p = nullptr;
             cudaError_t e = cudaMalloc(&p, bytes);
@@ -32,7 +33,11 @@ public:
             if (e != cudaSuccess) throw std::runtime_error(cudaGetErrorString(e));
             // CRITICAL: Zero the memory to prevent state corruption
             // cudaMalloc can return previously-used memory with stale data
-            cudaMemset(p, 0, bytes);
+            e = cudaMemsetAsync(p, 0, bytes, stream);
+            if (e != cudaSuccess) {
+                cudaFree(p);
+                throw std::runtime_error(cudaGetErrorString(e));
+            }
             return p;
         };
 

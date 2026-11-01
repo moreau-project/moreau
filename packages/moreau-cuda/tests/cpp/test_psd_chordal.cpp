@@ -328,6 +328,32 @@ TEST_F(SymbolicLDLTest, ArrowPattern) {
     EXPECT_GT(result.L_colptr.back(), 0);
 }
 
+// The CPU orders a PSD cone's graph with SuiteSparse AMD (the Rust amd crate
+// with its default Control, through QDLDL). CUDA must order it the same way to
+// find the same cliques. The expected permutations are the amd crate's.
+TEST_F(SymbolicLDLTest, OrderingMatchesCpuAmd) {
+    // The 4-cycle 0-1-2-3-0, where every vertex has degree 2: AMD eliminates
+    // vertex 3 first, so the chordal extension adds the chord (0,2), not (1,3).
+    std::vector<int64_t> cycle_colptr = {0, 1, 3, 5, 8};
+    std::vector<int64_t> cycle_rowind = {0, 0, 1, 1, 2, 0, 2, 3};
+    EXPECT_EQ(symbolic_ldl(cycle_colptr.data(), cycle_rowind.data(), 4).perm,
+              (std::vector<int64_t>{3, 0, 1, 2}));
+
+    // The order-24 PSD cone of the E8 program in #82
+    std::vector<int64_t> e8_colptr = {0, 1, 2, 3, 5, 6, 8, 10, 17, 23, 27, 31, 35,
+                                      41, 47, 52, 61, 71, 77, 83, 96, 109, 118, 127, 136};
+    std::vector<int64_t> e8_rowind = {
+        0, 1, 2, 2, 3, 4, 2, 5, 3, 6, 0, 1, 2, 4, 5, 6, 7, 0, 1, 3, 5, 6, 8, 3, 4, 6, 9,
+        0, 7, 8, 10, 1, 7, 8, 11, 1, 3, 4, 8, 11, 12, 0, 3, 4, 7, 10, 13, 6, 7, 8, 9, 14,
+        0, 1, 4, 6, 7, 10, 11, 14, 15, 0, 1, 3, 5, 6, 8, 9, 10, 11, 16, 4, 6, 8, 9, 14, 17,
+        2, 3, 4, 5, 15, 18, 1, 2, 3, 8, 9, 10, 12, 13, 14, 16, 17, 18, 19, 0, 2, 4, 5, 7, 9,
+        11, 12, 13, 15, 17, 18, 20, 2, 4, 5, 7, 8, 15, 16, 18, 21, 1, 3, 4, 7, 11, 12, 19, 20,
+        22, 0, 3, 4, 8, 10, 13, 19, 20, 23};
+    EXPECT_EQ(symbolic_ldl(e8_colptr.data(), e8_rowind.data(), 24).perm,
+              (std::vector<int64_t>{23, 13, 17, 14, 5, 21, 2, 18, 6, 9, 0, 10,
+                                    15, 16, 1, 3, 4, 7, 8, 12, 19, 20, 22, 11}));
+}
+
 // ============================================================================
 // SuperNodeTree tests
 // ============================================================================

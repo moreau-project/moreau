@@ -315,9 +315,23 @@ struct DiffKKT {
     cudssMatrix_t sol_matrix_ = nullptr;
     bool cudss_initialized_ = false;
 
+    // cuDSS binds internal state to the analysis stream. Own that stream so
+    // cached factors can outlive any caller stream. Matrix/RHS assembly,
+    // refinement, and result extraction also run there to serialize shared
+    // workspace use across calls. Events order caller inputs and outputs.
+    cudaStream_t cudss_stream_ = nullptr;
+    cudaEvent_t cudss_input_ready_ = nullptr;
+    cudaEvent_t cudss_output_ready_ = nullptr;
+
     // Work vectors (cuDSS path)
     BatchedVector work_rhs_;   // [augdim]
     BatchedVector work_sol_;   // [augdim]
+
+    // Unregularized residual map, shared across batches. Values gather from KKT.
+    device_unique_ptr<int64_t> residual_ro_, residual_ci_, residual_value_idx_;
+    int64_t residual_nnz_ = 0;
+    BatchedVector refinement_residual_, refinement_correction_, refinement_best_;
+    BatchedVector refinement_norm_;  // best residual norm, negative once stopped
 
     // === Riccati-specific data ===
     std::unique_ptr<DiffRiccatiData> diff_riccati_;  // J'J backward pass data
@@ -462,8 +476,11 @@ struct DiffKKT {
     const int64_t* getXSocSparseDims() const noexcept { return d_xcone_soc_sparse_dims_.get(); }
 
 private:
+    void begin_cudss_execution(cudaStream_t stream);
+    void end_cudss_execution(cudaStream_t stream);
     void initialize_cudss(cudaStream_t stream);
     void cleanup_cudss();
+    void refineSolution(cudaStream_t stream);
 
     // Riccati backward pass methods
     void initialize_riccati(

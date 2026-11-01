@@ -98,6 +98,23 @@ src/
 
 Headers in `include/moreau/**` mirror the `src/` tree. Tests in
 `tests/cpp/` (gtest binaries built with the main CMake config).
+`third_party/suitesparse_amd/` vendors SuiteSparse AMD (unmodified sources
+plus a small `SuiteSparse_config.h` stand-in): the chordal decomposition
+orders each PSD cone's sparsity graph with it, as the CPU does through the
+Rust `amd` crate, so both backends find the same cliques.
+
+`diff/diff_kkt.cu` keeps cuDSS analysis, matrix/RHS assembly, factorization,
+solves, refinement, and result extraction on an owned CUDA stream. This orders
+shared workspace use across calls. Preallocated events connect it to the caller's
+stream, including when JAX reuses a cached differentiation system on a different stream.
+Backward vectors and CSR storage initialize on the caller's stream, including
+lazy workspace allocation, Riccati workspace initialization, and direct-cone resizes.
+`tests/cpp/test_diff.cpp` covers stream changes for single and batched gradients,
+matrix updates, direct-cone dual cotangents, cold unconstrained solves, and
+forward/adjoint solves with cached factors. Queued native solves and matrix
+updates alternate nonblocking streams without synchronization between calls.
+`tests/cpp/test_riccati.cpp` checks first-use backward initialization on a
+nonblocking stream for equality and nonnegative MPC problems.
 
 ### Direct conic constraints and slack cones
 

@@ -78,6 +78,7 @@ from ._types import (
     _AUTO_TUNE_MARGIN,
     _should_retry_cold,
     _warn_warm_retry,
+    _check_backward_statuses,
 )
 from typing import Optional, Sequence, Union
 
@@ -108,6 +109,9 @@ from ._backend import (
 
 # Validation helpers (private, re-exported here for backend modules)
 from ._validation import (
+    _canonical_csr,
+    _check_cones,
+    _real_vector,
     _to_csr,
     _validate_problem_dimensions,
     _validate_csr_structure,
@@ -229,6 +233,13 @@ class Solver:
         cones: Cones,
         settings: Optional[Settings] = None,
     ) -> None:
+        _check_cones(cones)
+        # Validate and copy inputs first: well-formed CSR with duplicates summed,
+        # real finite values, and no aliasing of the caller's arrays.
+        P = _canonical_csr("P", P)
+        A = _canonical_csr("A", A)
+        q = _real_vector("q", q)
+        b = _real_vector("b", b, allow_inf=True)
         # Validate problem dimensions first (before any other processing)
         _validate_problem_dimensions(P, q, A, b, cones)
 
@@ -581,6 +592,8 @@ class Solver:
             dict with keys ``dq``, ``db``, ``dP_values``, ``dA_values``,
             each mapped to a numpy array of the corresponding shape.
         """
+        if self._info is not None:
+            _check_backward_statuses(self._info.status, dx, dz, ds, dz_x)
         return self._impl.backward(dx, dz, ds, dz_x=dz_x)
 
     @property
@@ -830,8 +843,9 @@ class CompiledSolver:
         # Validate dimensions before converting to avoid confusing errors
         _validate_setup_values(self._batch_size, self._nnz_P, self._nnz_A, P_values, A_values)
 
-        P_values = np.asarray(P_values, dtype=np.float64)
-        A_values = np.asarray(A_values, dtype=np.float64)
+        # Copy so later edits to the caller's arrays can't change stored values.
+        P_values = np.array(P_values, dtype=np.float64, copy=True)
+        A_values = np.array(A_values, dtype=np.float64, copy=True)
 
         # Don't tile 1D to 2D here - let the backend handle shared P/A
         # efficiently via setup_shared() which equilibrates once
@@ -1221,6 +1235,8 @@ class CompiledSolver:
             dict with keys ``dq``, ``db``, ``dP_values``, ``dA_values``,
             each mapped to a numpy array of the corresponding batched shape.
         """
+        if self._info is not None:
+            _check_backward_statuses(self._info.status, dx, dz, ds, dz_x)
         return self._impl.backward(dx, dz, ds, dz_x=dz_x)
 
     @property

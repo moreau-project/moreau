@@ -8,6 +8,8 @@
 #include "moreau/kkt/riccati.hpp"
 #include "moreau/profiling/profiler.hpp"
 #include <algorithm>
+#include <cmath>
+#include <utility>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -100,15 +102,19 @@ DiffKKT::DiffKKT(
     jdim(n_ + 2*m_ + compute_xn(cones) + 1 + 2 * cones.numSparseSoc + 3 * cones.numGenPowerCones + 3 * cones.numXGenPowerCones + 2 * cones.numSparseXSoc),
     augdim(2 * (n_ + 2*m_ + compute_xn(cones) + 1 + 2 * cones.numSparseSoc + 3 * cones.numGenPowerCones + 3 * cones.numXGenPowerCones + 2 * cones.numSparseXSoc)),
     solverType_(type),
-    work_rhs_(2 * (n_ + 2*m_ + compute_xn(cones) + 1 + 2 * cones.numSparseSoc + 3 * cones.numGenPowerCones + 3 * cones.numXGenPowerCones + 2 * cones.numSparseXSoc), batch_),
-    work_sol_(2 * (n_ + 2*m_ + compute_xn(cones) + 1 + 2 * cones.numSparseSoc + 3 * cones.numGenPowerCones + 3 * cones.numXGenPowerCones + 2 * cones.numSparseXSoc), batch_),
+    work_rhs_(2 * (n_ + 2*m_ + compute_xn(cones) + 1 + 2 * cones.numSparseSoc + 3 * cones.numGenPowerCones + 3 * cones.numXGenPowerCones + 2 * cones.numSparseXSoc), batch_, stream),
+    work_sol_(2 * (n_ + 2*m_ + compute_xn(cones) + 1 + 2 * cones.numSparseSoc + 3 * cones.numGenPowerCones + 3 * cones.numXGenPowerCones + 2 * cones.numSparseXSoc), batch_, stream),
     numSparseSoc_(cones.numSparseSoc),
     base_jdim_(n_ + 2*m_ + compute_xn(cones) + 1),
-    riccati_rhs_(n_ + m_, batch_),
-    riccati_bvec_(n_ + m_, batch_),
-    riccati_sol0_(n_ + m_, batch_),
-    riccati_sol1_(n_ + m_, batch_),
-    riccati_scalars_(2, batch_)
+    refinement_residual_(type == KKTSolverType::Riccati ? 0 : augdim, batch_, stream),
+    refinement_correction_(type == KKTSolverType::Riccati ? 0 : augdim, batch_, stream),
+    refinement_best_(type == KKTSolverType::Riccati ? 0 : augdim, batch_, stream),
+    refinement_norm_(1, batch_, stream),
+    riccati_rhs_(n_ + m_, batch_, stream),
+    riccati_bvec_(n_ + m_, batch_, stream),
+    riccati_sol0_(n_ + m_, batch_, stream),
+    riccati_sol1_(n_ + m_, batch_, stream),
+    riccati_scalars_(2, batch_, stream)
 {
     // Direct-x cone metadata cached on `this` for use throughout the
     // sparsity build and `updateJ`.
@@ -945,7 +951,7 @@ DiffKKT::DiffKKT(
 
     // Create CSR and upload
     int64_t nnzKKT = nnz;
-    CSR kkt(augdim, augdim, nnzKKT, batchSize);
+    CSR kkt(augdim, augdim, nnzKKT, batchSize, stream);
     kkt.indicesCpuToGpu(rowOff.data(), colIdx.data(), stream);
 
     // Upload index maps to device
@@ -1100,6 +1106,31 @@ DiffKKT::DiffKKT(
             }
         }
     }
+
+    // Build a full-row map for [I J; J' 0], without duplicating matrix values.
+    // Each row is accumulated deterministically, avoiding atomics and host
+    // synchronization in the correction loop. Expansion rows are included.
+    std::vector<std::vector<std::pair<int64_t, int64_t>>> residual_rows(augdim);
+    for (int64_t r = 0; r < augdim; ++r) {
+        for (int64_t k = rowOff[r]; k < rowOff[r + 1]; ++k) {
+            const int64_t c = colIdx[k];
+            if (r == c && r >= jdim) continue;  // omit -epsilon I
+            residual_rows[r].emplace_back(c, k);
+            if (r != c) residual_rows[c].emplace_back(r, k);
+        }
+    }
+    std::vector<int64_t> residual_ro(augdim + 1, 0), residual_ci, residual_idx;
+    for (int64_t r = 0; r < augdim; ++r) {
+        for (const auto& entry : residual_rows[r]) {
+            residual_ci.push_back(entry.first);
+            residual_idx.push_back(entry.second);
+        }
+        residual_ro[r + 1] = residual_ci.size();
+    }
+    residual_nnz_ = residual_ci.size();
+    upload_indices(residual_ro, residual_ro_);
+    upload_indices(residual_ci, residual_ci_);
+    upload_indices(residual_idx, residual_value_idx_);
 
     // Upload all index maps to device
     upload_indices(I_diag_host, I_diag_idx_);
@@ -1430,7 +1461,12 @@ DiffKKT::DiffKKT(
     KKT = std::move(kkt);
 
     // Initialize cuDSS solver
-    initialize_cudss(stream);
+    try {
+        initialize_cudss(stream);
+    } catch (...) {
+        cleanup_cudss();
+        throw;
+    }
 }
 
 DiffKKT::~DiffKKT() {
@@ -1439,6 +1475,16 @@ DiffKKT::~DiffKKT() {
     } else {
         cleanup_cudss();
     }
+}
+
+void DiffKKT::begin_cudss_execution(cudaStream_t stream) {
+    CUDA_THROW(cudaEventRecord(cudss_input_ready_, stream));
+    CUDA_THROW(cudaStreamWaitEvent(cudss_stream_, cudss_input_ready_, 0));
+}
+
+void DiffKKT::end_cudss_execution(cudaStream_t stream) {
+    CUDA_THROW(cudaEventRecord(cudss_output_ready_, cudss_stream_));
+    CUDA_THROW(cudaStreamWaitEvent(stream, cudss_output_ready_, 0));
 }
 
 void DiffKKT::initialize_cudss(cudaStream_t stream) {
@@ -1452,7 +1498,17 @@ void DiffKKT::initialize_cudss(cudaStream_t stream) {
             + cudss_status_string(status));
     }
 
-    cudssSetStream(cudss_handle_, stream);
+    // Keep every phase on the stream used for analysis. Rebinding the handle
+    // between phases can leave cuDSS/cuBLAS on different streams (CUDSS-1632).
+    CUDA_THROW(cudaStreamCreateWithFlags(&cudss_stream_, cudaStreamNonBlocking));
+    CUDA_THROW(cudaEventCreateWithFlags(&cudss_input_ready_, cudaEventDisableTiming));
+    CUDA_THROW(cudaEventCreateWithFlags(&cudss_output_ready_, cudaEventDisableTiming));
+    status = cudssSetStream(cudss_handle_, cudss_stream_);
+    if (status != CUDSS_STATUS_SUCCESS) {
+        throw std::runtime_error(
+            std::string("DiffKKT cudssSetStream failed: cuDSS ")
+            + cudss_status_string(status));
+    }
 
     // Create config
     status = cudssConfigCreate(&cudss_config_);
@@ -1542,6 +1598,7 @@ void DiffKKT::initialize_cudss(cudaStream_t stream) {
     }
 
     // Symbolic analysis
+    begin_cudss_execution(stream);
     status = cudssExecute(
         cudss_handle_, CUDSS_PHASE_ANALYSIS,
         cudss_config_, cudss_data_,
@@ -1562,11 +1619,12 @@ void DiffKKT::initialize_cudss(cudaStream_t stream) {
             + ", batch=" + std::to_string(batchSize) + ")");
     }
 
+    end_cudss_execution(stream);
     cudss_initialized_ = true;
 }
 
 void DiffKKT::cleanup_cudss() {
-    if (!cudss_initialized_) return;
+    if (!cudss_handle_) return;
 
     cudaDeviceSynchronize();
 
@@ -1576,6 +1634,9 @@ void DiffKKT::cleanup_cudss() {
     if (cudss_data_) cudssDataDestroy(cudss_handle_, cudss_data_);
     if (cudss_config_) cudssConfigDestroy(cudss_config_);
     if (cudss_handle_) cudssDestroy(cudss_handle_);
+    if (cudss_input_ready_) CUDA_LOG(cudaEventDestroy(cudss_input_ready_));
+    if (cudss_output_ready_) CUDA_LOG(cudaEventDestroy(cudss_output_ready_));
+    if (cudss_stream_) CUDA_LOG(cudaStreamDestroy(cudss_stream_));
 
     sol_matrix_ = nullptr;
     rhs_matrix_ = nullptr;
@@ -1583,6 +1644,9 @@ void DiffKKT::cleanup_cudss() {
     cudss_data_ = nullptr;
     cudss_config_ = nullptr;
     cudss_handle_ = nullptr;
+    cudss_input_ready_ = nullptr;
+    cudss_output_ready_ = nullptr;
+    cudss_stream_ = nullptr;
     cudss_initialized_ = false;
 }
 
@@ -2190,6 +2254,11 @@ void DiffKKT::updateJ(
                         nonneg_H, cones, stream);
         return;
     }
+    // Serialize all access to shared KKT storage, including matrix assembly,
+    // with prior solves and their result extraction on the owned stream.
+    const cudaStream_t caller_stream = stream;
+    begin_cudss_execution(caller_stream);
+    stream = cudss_stream_;
     // First initialize I and -εI diagonals and identity blocks within J
     MOREAU_KERNEL_LAUNCH(init_diff_kkt_values_kernel, batchSize, 256, 0, stream,
         KKT.values(),
@@ -2390,6 +2459,7 @@ void DiffKKT::updateJ(
             batchSize
         );
     }
+    end_cudss_execution(caller_stream);
 }
 
 void DiffKKT::factor(cudaStream_t stream) {
@@ -2402,6 +2472,7 @@ void DiffKKT::factor(cudaStream_t stream) {
         throw std::runtime_error("cuDSS not initialized");
     }
 
+    begin_cudss_execution(stream);
     cudssStatus_t status = cudssExecute(
         cudss_handle_, CUDSS_PHASE_FACTORIZATION,
         cudss_config_, cudss_data_,
@@ -2427,6 +2498,7 @@ void DiffKKT::factor(cudaStream_t stream) {
         }
         throw std::runtime_error(msg);
     }
+    end_cudss_execution(stream);
 }
 
 // Kernel to build augmented RHS [0; rhs_bar]
@@ -2477,6 +2549,96 @@ __global__ void extract_lam_kernel(
     }
 }
 
+// Residual of the unregularized augmented system. One thread per row.
+__global__ void hsde_residual_kernel(
+    double* residual, const double* rhs, const double* solution,
+    const int64_t* ro, const int64_t* ci, const int64_t* value_idx,
+    const double* values, int64_t nnz, int64_t dim, int64_t batch_size
+) {
+    const int64_t index = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (index >= dim * batch_size) return;
+    const int64_t batch = index / dim;
+    const int64_t r = index % dim;
+    const double* x = solution + batch * dim;
+    const double* v = values + batch * nnz;
+    double sum = rhs[batch * dim + r];
+    for (int64_t k = ro[r]; k < ro[r + 1]; ++k) sum -= v[value_idx[k]] * x[ci[k]];
+    residual[batch * dim + r] = sum;
+}
+
+// Accept only finite, improving iterates; freeze converged batches on device.
+__global__ void hsde_accept_kernel(
+    double* residual, const double* rhs, const double* solution,
+    double* best, double* previous_norm, int64_t dim
+) {
+    const int64_t batch = blockIdx.x;
+    const int64_t offset = batch * dim;
+    __shared__ double norms[256], rhs_norms[256];
+    double norm = 0.0, rhs_norm = 0.0;
+    for (int64_t i = threadIdx.x; i < dim; i += blockDim.x) {
+        const double r = residual[offset + i];
+        norm = isfinite(r) ? fmax(norm, fabs(r)) : INFINITY;
+        rhs_norm = fmax(rhs_norm, fabs(rhs[offset + i]));
+    }
+    norms[threadIdx.x] = norm;
+    rhs_norms[threadIdx.x] = rhs_norm;
+    __syncthreads();
+    for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+        if (threadIdx.x < stride) {
+            norms[threadIdx.x] = fmax(norms[threadIdx.x], norms[threadIdx.x + stride]);
+            rhs_norms[threadIdx.x] = fmax(rhs_norms[threadIdx.x], rhs_norms[threadIdx.x + stride]);
+        }
+        __syncthreads();
+    }
+    const bool improved = isfinite(norms[0]) && norms[0] < previous_norm[batch];
+    const bool active = improved && norms[0] > 1e-11 * fmax(1.0, rhs_norms[0]);
+    for (int64_t i = threadIdx.x; i < dim; i += blockDim.x) {
+        if (improved) best[offset + i] = solution[offset + i];
+        if (!active) residual[offset + i] = 0.0;
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) previous_norm[batch] = active ? norms[0] : -1.0;
+}
+
+__global__ void hsde_correct_kernel(
+    double* solution, const double* correction, const double* norm, int64_t dim, int64_t batch_size
+) {
+    const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (i < dim * batch_size && norm[i / dim] >= 0.0) solution[i] += correction[i];
+}
+
+void DiffKKT::refineSolution(cudaStream_t stream) {
+    // The cuDSS factor of [I J; J' -epsilon I] is only a preconditioner.
+    // Match the CPU's bounded defect correction, reusing the factor and all
+    // workspace. No allocations, transfers, or synchronization in this loop.
+    refinement_norm_.setToConstant(INFINITY, stream);
+    CUDA_THROW(cudaMemcpyAsync(refinement_best_.data(), work_sol_.data(),
+        work_sol_.memoryUsage(), cudaMemcpyDeviceToDevice, stream));
+    const int64_t blocks = (augdim * batchSize + 255) / 256;
+    for (int step = 0; step < 8; ++step) {
+        MOREAU_KERNEL_LAUNCH(hsde_residual_kernel, blocks, 256, 0, stream,
+            refinement_residual_.data(), work_rhs_.data(), work_sol_.data(),
+            residual_ro_.get(), residual_ci_.get(), residual_value_idx_.get(),
+            KKT.values(), KKT.nnz(), augdim, batchSize);
+        MOREAU_KERNEL_LAUNCH(hsde_accept_kernel, batchSize, 256, 0, stream,
+            refinement_residual_.data(), work_rhs_.data(), work_sol_.data(),
+            refinement_best_.data(), refinement_norm_.data(), augdim);
+        if (step == 7) break;
+        cudssMatrixSetValues(rhs_matrix_, refinement_residual_.data());
+        cudssMatrixSetValues(sol_matrix_, refinement_correction_.data());
+        const auto status = cudssExecute(cudss_handle_, CUDSS_PHASE_SOLVE,
+            cudss_config_, cudss_data_, kkt_matrix_, sol_matrix_, rhs_matrix_);
+        if (status != CUDSS_STATUS_SUCCESS) {
+            throw std::runtime_error(std::string("HSDE defect correction failed: cuDSS ")
+                + cudss_status_string(status));
+        }
+        MOREAU_KERNEL_LAUNCH(hsde_correct_kernel, blocks, 256, 0, stream,
+            work_sol_.data(), refinement_correction_.data(), refinement_norm_.data(), augdim, batchSize);
+    }
+    CUDA_THROW(cudaMemcpyAsync(work_sol_.data(), refinement_best_.data(),
+        work_sol_.memoryUsage(), cudaMemcpyDeviceToDevice, stream));
+}
+
 void DiffKKT::solveAdjoint(
     const double* rhs_bar,
     double* lam,
@@ -2487,6 +2649,9 @@ void DiffKKT::solveAdjoint(
         return;
     }
 
+    const cudaStream_t caller_stream = stream;
+    begin_cudss_execution(caller_stream);
+    stream = cudss_stream_;
 
     // Build augmented RHS [0; rhs_bar] with zero padding for expansion vars
     MOREAU_KERNEL_LAUNCH(build_aug_rhs_kernel, batchSize, 256, 0, stream,
@@ -2524,12 +2689,16 @@ void DiffKKT::solveAdjoint(
         }
     }
 
+    // Refinement reuses cuDSS, so keep its kernels and solves on the owned stream.
+    refineSolution(stream);
+
     // Extract lam from first half (only base_jdim entries, skip expansion vars)
     MOREAU_KERNEL_LAUNCH(extract_lam_kernel, batchSize, 256, 0, stream,
         lam,
         work_sol_.data(),
         base_jdim_, augdim, batchSize
     );
+    end_cudss_execution(caller_stream);
 }
 
 // Kernel to build forward augmented RHS [rhs; 0]
@@ -2587,6 +2756,10 @@ void DiffKKT::solveForward(
     double* sol,
     cudaStream_t stream
 ) {
+    const cudaStream_t caller_stream = stream;
+    begin_cudss_execution(caller_stream);
+    stream = cudss_stream_;
+
     // Build augmented RHS [rhs; 0] with zero padding for expansion vars
     MOREAU_KERNEL_LAUNCH(build_forward_aug_rhs_kernel, batchSize, 256, 0, stream,
         work_rhs_.data(),
@@ -2621,6 +2794,7 @@ void DiffKKT::solveForward(
         }
         throw std::runtime_error(msg);
     }
+    refineSolution(stream);
 
     // Extract sol from second half (only base_jdim entries)
     MOREAU_KERNEL_LAUNCH(extract_sol_kernel, batchSize, 256, 0, stream,
@@ -2628,16 +2802,19 @@ void DiffKKT::solveForward(
         work_sol_.data(),
         base_jdim_, jdim, augdim, batchSize
     );
+    end_cudss_execution(caller_stream);
 }
 
 size_t DiffKKT::memoryUsage() const noexcept {
     size_t total = work_rhs_.memoryUsage() + work_sol_.memoryUsage() +
                    riccati_rhs_.memoryUsage() + riccati_bvec_.memoryUsage() +
                    riccati_sol0_.memoryUsage() + riccati_sol1_.memoryUsage();
+    total += refinement_residual_.memoryUsage() + refinement_correction_.memoryUsage() +
+             refinement_best_.memoryUsage() + refinement_norm_.memoryUsage();
     if (solverType_ == KKTSolverType::Riccati && diff_riccati_) {
         total += diff_riccati_->memoryUsage();
     } else {
-        total += KKT.memoryUsage();
+        total += KKT.memoryUsage() + sizeof(int64_t) * (augdim + 1 + 2 * residual_nnz_);
     }
     return total;
 }
