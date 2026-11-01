@@ -20,12 +20,11 @@ fn in_exp<T: FloatT>(x: &[T; 3]) -> bool {
 fn in_exp_dual<T: FloatT>(x: &[T; 3]) -> bool {
     let (r, s, t) = (x[0], x[1], x[2]);
     let tol: T = CONE_TOL.as_T();
-    let e: T = std::f64::consts::E.as_T();
 
-    // Dual exp cone: {(r, s, t) : r <= 0 and -r * exp(s/r - 1) <= e * t}
+    // Dual exp cone: {(r, s, t) : r <= 0 and -r * exp(s/r - 1) <= t}
     // Special case: r = 0 requires s >= 0 and t >= 0
     (r.abs() <= tol && s >= T::zero() && t >= T::zero())
-        || (r < T::zero() && -r * (s / r - T::one()).exp() - e * t <= tol)
+        || (r < T::zero() && -r * (s / r - T::one()).exp() - t <= tol)
 }
 
 fn in_exp_interior<T: FloatT>(x: &[T; 3], margin: T) -> bool {
@@ -35,10 +34,9 @@ fn in_exp_interior<T: FloatT>(x: &[T; 3], margin: T) -> bool {
 
 fn in_exp_dual_interior<T: FloatT>(x: &[T; 3], margin: T) -> bool {
     let (r, s, t) = (x[0], x[1], x[2]);
-    let e: T = std::f64::consts::E.as_T();
-    // Dual exp cone: r < 0 and -r * exp(s/r - 1) <= e * t
+    // Dual exp cone: r < 0 and -r * exp(s/r - 1) <= t
     // Interior: strict inequality with margin
-    r < -margin && -r * (s / r - T::one()).exp() + margin < e * t
+    r < -margin && -r * (s / r - T::one()).exp() + margin < t
 }
 
 fn exp_newton_one_d<T: FloatT>(rho: T, y_hat: T, z_hat: T) -> T {

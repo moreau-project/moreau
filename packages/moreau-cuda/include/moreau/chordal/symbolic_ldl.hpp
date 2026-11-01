@@ -1,11 +1,13 @@
 #pragma once
 
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
 #include <limits>
 #include <numeric>
+#include <stdexcept>
 #include <vector>
+
+#include "amd.h"
 
 namespace moreau {
 namespace chordal {
@@ -28,56 +30,11 @@ static constexpr int64_t UNKNOWN = -1;
 // AMD (Approximate Minimum Degree) ordering
 // --------------------------------------------------------------------------
 
-// Builds a full (symmetric) adjacency list from upper-triangular CSC input.
-// The input is the upper triangle of a symmetric matrix in CSC format.
-// Returns adjacency list as (adj_ptr, adj_list) where adj_ptr[i]..adj_ptr[i+1]
-// gives the neighbors of vertex i (excluding self-loops).
-inline void build_adjacency(
-    const int64_t* colptr,
-    const int64_t* rowind,
-    int64_t n,
-    std::vector<int64_t>& adj_ptr,
-    std::vector<int64_t>& adj_list
-) {
-    // Count degree for each vertex (from upper triangle, both directions)
-    std::vector<int64_t> degree(n, 0);
-    for (int64_t j = 0; j < n; ++j) {
-        for (int64_t p = colptr[j]; p < colptr[j + 1]; ++p) {
-            int64_t i = rowind[p];
-            if (i != j) {  // skip diagonal
-                degree[i]++;
-                degree[j]++;
-            }
-        }
-    }
-
-    // Build adj_ptr as cumulative sum
-    adj_ptr.resize(n + 1);
-    adj_ptr[0] = 0;
-    for (int64_t i = 0; i < n; ++i) {
-        adj_ptr[i + 1] = adj_ptr[i] + degree[i];
-    }
-
-    // Fill adjacency list
-    adj_list.resize(adj_ptr[n]);
-    std::vector<int64_t> pos(adj_ptr.begin(), adj_ptr.begin() + n);
-
-    for (int64_t j = 0; j < n; ++j) {
-        for (int64_t p = colptr[j]; p < colptr[j + 1]; ++p) {
-            int64_t i = rowind[p];
-            if (i != j) {
-                adj_list[pos[i]++] = j;
-                adj_list[pos[j]++] = i;
-            }
-        }
-    }
-}
-
-// Simple minimum-degree ordering.
-// For each step, eliminates the node with minimum degree in the
-// remaining graph, updating the degrees of its neighbors.
-// Uses an external-degree approximation (not exact AMD, but sufficient
-// for sparsity detection in chordal decomposition).
+// Fill-reducing ordering of a symmetric pattern given by its upper triangle in
+// CSC format, by SuiteSparse AMD with its default controls (rows with more than
+// max(16, 10 sqrt(n)) entries are dense and ordered last; aggressive
+// absorption). The CPU backend gets the same ordering from the Rust amd crate,
+// a port of SuiteSparse AMD, so both backends find the same cliques.
 inline void amd_ordering(
     const int64_t* colptr,
     const int64_t* rowind,
@@ -87,83 +44,10 @@ inline void amd_ordering(
 ) {
     perm.resize(n);
     iperm.resize(n);
-
-    if (n == 0) return;
-
-    // Build full adjacency structure
-    std::vector<int64_t> adj_ptr, adj_list;
-    build_adjacency(colptr, rowind, n, adj_ptr, adj_list);
-
-    // Track current degree of each node and whether it's been eliminated
-    std::vector<int64_t> degree(n);
-    for (int64_t i = 0; i < n; ++i) {
-        degree[i] = adj_ptr[i + 1] - adj_ptr[i];
+    if (amd_l_order(n, colptr, rowind, perm.data(), nullptr, nullptr) < AMD_OK) {
+        throw std::runtime_error("AMD ordering of a PSD sparsity pattern failed");
     }
-    std::vector<bool> eliminated(n, false);
-
-    // For each node, maintain a dynamic neighbor set.
-    // We use sorted vectors for simplicity since these matrices are small
-    // (PSD cone dimensions, not the full problem).
-    std::vector<std::vector<int64_t>> neighbors(n);
-    for (int64_t i = 0; i < n; ++i) {
-        neighbors[i].reserve(degree[i]);
-        for (int64_t p = adj_ptr[i]; p < adj_ptr[i + 1]; ++p) {
-            neighbors[i].push_back(adj_list[p]);
-        }
-        std::sort(neighbors[i].begin(), neighbors[i].end());
-    }
-
-    for (int64_t step = 0; step < n; ++step) {
-        // Find non-eliminated node with minimum degree
-        int64_t min_deg = n + 1;
-        int64_t pivot = -1;
-        for (int64_t i = 0; i < n; ++i) {
-            if (!eliminated[i] && degree[i] < min_deg) {
-                min_deg = degree[i];
-                pivot = i;
-            }
-        }
-        assert(pivot >= 0);
-
-        perm[step] = pivot;
-        iperm[pivot] = step;
-        eliminated[pivot] = true;
-
-        // Get active neighbors of pivot
-        std::vector<int64_t> active_nbrs;
-        active_nbrs.reserve(neighbors[pivot].size());
-        for (int64_t nb : neighbors[pivot]) {
-            if (!eliminated[nb]) {
-                active_nbrs.push_back(nb);
-            }
-        }
-
-        // Add edges between all pairs of active neighbors (fill-in).
-        // This is the key step: when we eliminate a node, all its
-        // neighbors become connected (clique formation).
-        for (size_t a = 0; a < active_nbrs.size(); ++a) {
-            int64_t u = active_nbrs[a];
-            // Remove pivot from u's neighbor list
-            auto& nu = neighbors[u];
-            nu.erase(std::remove(nu.begin(), nu.end(), pivot), nu.end());
-
-            for (size_t b = a + 1; b < active_nbrs.size(); ++b) {
-                int64_t v = active_nbrs[b];
-                // Add edge u-v if not already present
-                if (!std::binary_search(nu.begin(), nu.end(), v)) {
-                    // Insert maintaining sorted order
-                    nu.insert(std::lower_bound(nu.begin(), nu.end(), v), v);
-                    auto& nv = neighbors[v];
-                    nv.insert(std::lower_bound(nv.begin(), nv.end(), u), u);
-                }
-            }
-            degree[u] = static_cast<int64_t>(nu.size());
-        }
-
-        // Active neighbors handled above; eliminated nodes need no update.
-        degree[pivot] = 0;
-        neighbors[pivot].clear();
-    }
+    for (int64_t k = 0; k < n; ++k) iperm[perm[k]] = k;
 }
 
 // --------------------------------------------------------------------------

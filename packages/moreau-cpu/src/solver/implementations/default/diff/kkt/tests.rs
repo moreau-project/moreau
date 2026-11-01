@@ -1342,3 +1342,14 @@ fn test_genpow_sparse_kkt_matches_dense() {
         max_abs_diff
     );
 }
+
+#[test]
+fn test_hsde_refinement_removes_regularization_bias() {
+    let kkt = dense_to_csc_upper(&[1.0, 1e-3, 1e-3, -REG_GENERAL], 2);
+    let rhs = [0.0, 1e-3];
+    let initial = solve_linear_system(&kkt, &rhs);
+    assert!((initial[1] + 1000.0).abs() > 1.0);
+    let refined = refine_hsde_solution(&kkt, &rhs, initial, |rhs| solve_linear_system(&kkt, rhs));
+    assert!((refined[0] - 1.0).abs() < 1e-8);
+    assert!((refined[1] + 1000.0).abs() < 1e-5);
+}
