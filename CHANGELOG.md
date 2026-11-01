@@ -37,6 +37,8 @@ All notable changes to Moreau are documented here. The format follows
   scanned (#70).
 - `Solver` and `CompiledSolver.setup()` copy their inputs, so editing the
   caller's arrays afterwards no longer changes the next solve (#70).
+- CUDA backward passes could return zero or stale gradients when cached solves
+  or newly allocated workspaces crossed CUDA streams (#112).
 - CPU and CUDA HSDE derivatives could be biased in weakly constrained directions by
   the regularized differentiation solve. Apply defect correction to the
   unregularized equations in forward and adjoint differentiation, reusing
