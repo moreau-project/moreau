@@ -19,6 +19,8 @@ void Solution::post_process(
     int64_t m,
     int64_t batchSize,
     const EquilibrationData& equilibration,
+    const BatchedVector& q,
+    const BatchedVector& b,
     Variables& variables,
     const Info& info,
     bool equilibration_enabled,
@@ -45,10 +47,14 @@ void Solution::post_process(
     // Set objective values to NaN for infeasible batches (matching CPU solver)
     set_infeasible_obj_nan(obj_val, obj_val_dual, info.status_device, batchSize, stream);
 
-    // Normalize by τ (optimal) or κ (infeasible) per batch, matching CPU solver.
-    // For infeasible problems, dividing by κ produces a proper infeasibility certificate.
-    // Use saved raw variables to avoid NaN values if solver continued past convergence.
-    build_normalization_scale(normalization_scale, τ_raw, κ_raw, info.status_device, batchSize, stream);
+    // Normalize by τ (optimal) or the certificate scale (infeasible) per batch, matching CPU
+    // solver. Use saved raw variables to avoid NaN values if solver continued past convergence.
+    BatchedVector dot_qx(1, batchSize);
+    BatchedVector dot_bz(1, batchSize);
+    dot_batched(dot_qx, q, x_raw, stream);
+    dot_batched(dot_bz, b, z_raw, stream);
+    build_normalization_scale(normalization_scale, τ_raw, κ_raw, dot_qx, dot_bz, equilibration.c,
+                              info.status_device, batchSize, stream);
 
     BatchedVector x_normalized(n, batchSize);
     BatchedVector s_normalized(m, batchSize);

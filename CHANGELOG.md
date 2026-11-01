@@ -43,6 +43,10 @@ All notable changes to Moreau are documented here. The format follows
   `τ`. CPU and CUDA now also accept a scale-invariant Farkas certificate
   (`‖Aᵀz‖ < tol_infeas_rel · (−bᵀz)`, and the dual analogue) without that gate,
   so such problems end `PrimalInfeasible` or `DualInfeasible` (#67).
+- Infeasibility certificates were divided by `κ`, which vanishes when both
+  certificates exist, so they could come back scaled up to `|bᵀz| ~ 1e11`. They
+  are now divided by at least `−bᵀz` (resp. `−qᵀx`), so `bᵀz` (`qᵀx`) lies in
+  `[−1, 0)`; certificates that already did are unchanged (#67).
 - CUDA backward passes could return zero or stale gradients when cached solves
   or newly allocated workspaces crossed CUDA streams (#112).
 - CPU and CUDA HSDE derivatives could be biased in weakly constrained directions by

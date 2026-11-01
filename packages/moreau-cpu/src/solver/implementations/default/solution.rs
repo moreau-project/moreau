@@ -106,7 +106,7 @@ where
 
         // unscale the variables to get a solution
         // to the internal problem as we solved it
-        variables.unscale(data, is_infeasible);
+        variables.unscale(data, info.status);
 
         // unwind the chordal decomp and presolve, in the
         // reverse of the order in which they were applied

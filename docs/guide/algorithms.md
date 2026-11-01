@@ -72,7 +72,9 @@ KKT system:
 - **One map covers every outcome.** At a root with $\tau > 0$ the QP solution is
   recovered by dividing through, $(x, s, z)/\tau$. A root with
   $\tau = 0,\ \kappa > 0$ is an infeasibility/unboundedness certificate
-  (recovered via $1/\kappa$). Feasible, infeasible, and unbounded problems are
+  (recovered via $1/\kappa$, or via $1/(-b^\top z)$ resp. $1/(-q^\top x)$ when
+  that is smaller, so the certificate always has $b^\top z \in [-1, 0)$
+  resp. $q^\top x \in [-1, 0)$). Feasible, infeasible, and unbounded problems are
   all just roots of the *same* $F$ — no separate phase-I, no special-casing.
 - **Homogeneous but *not* self-dual — $x^\top P x/\tau$ is why.** With $P = 0$
   (an LP or linear-objective conic program) this is the classic *self-dual*

@@ -225,7 +225,7 @@ class TestInfeasibilityEdgeCases:
         assert y.min() > 0 and np.abs(A.T @ y).max() < 1e-12 and np.isclose(b @ y, -1.0)
         m, n = A.shape
 
-        _, info = _solve_qp(
+        sol, info = _solve_qp(
             sparse.csr_matrix((n, n)),
             q,
             sparse.csr_matrix(A),
@@ -233,10 +233,16 @@ class TestInfeasibilityEdgeCases:
             moreau.Cones(num_nonneg_cones=m),
             device=device,
         )
-        assert info.status in (
-            moreau.SolverStatus.PrimalInfeasible,
-            moreau.SolverStatus.DualInfeasible,
-        )
+        # The returned certificate is normalized to b'z = -1 (q'x = -1), even though kappa -> 0.
+        if info.status == moreau.SolverStatus.PrimalInfeasible:
+            assert sol.z.min() >= -1e-8
+            assert np.isclose(b @ sol.z, -1.0, rtol=1e-6)
+            assert np.linalg.norm(A.T @ sol.z) < 1e-6
+        else:
+            assert info.status == moreau.SolverStatus.DualInfeasible
+            assert sol.s.min() >= -1e-8
+            assert np.isclose(q @ sol.x, -1.0, rtol=1e-6)
+            assert np.linalg.norm(A @ sol.x + sol.s) < 1e-6
 
     def test_unbounded_no_constraints(self):
         """min -x with only x >= 0 — dual infeasible (unbounded)."""

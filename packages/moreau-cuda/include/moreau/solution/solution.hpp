@@ -37,7 +37,7 @@ struct Solution {
     BatchedVector z_raw;    // Raw dual [batchSize][m]
     BatchedVector s_raw;    // Raw slack [batchSize][m]
     BatchedVector z_x_raw;  // Raw direct dual paired with the saved primal iterate
-    BatchedVector normalization_scale; // τ for solutions, κ for certificates
+    BatchedVector normalization_scale; // τ for solutions, see build_normalization_scale for certificates
     BatchedVector τ_raw;    // Raw τ [batchSize][1]
     BatchedVector κ_raw;    // Raw κ [batchSize][1]
     BatchedVector cost_primal_raw;  // Saved primal cost at convergence [batchSize][1]
@@ -169,6 +169,8 @@ struct Solution {
         int64_t m,
         int64_t batchSize,
         const struct EquilibrationData& equilibration,
+        const BatchedVector& q,
+        const BatchedVector& b,
         class Variables& variables,
         const struct Info& info,
         bool equilibration_enabled,

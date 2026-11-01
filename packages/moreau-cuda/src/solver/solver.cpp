@@ -2378,6 +2378,8 @@ void CompiledSolver::runIPMLoop(cudaStream_t stream) {
     solution.post_process(
         data.n, data.m, data.batchSize,
         data.equilibration,
+        data.q,
+        data.b,
         variables,
         info,
         settings.ipm.equilibrationSettings.enable,
