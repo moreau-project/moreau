@@ -37,7 +37,7 @@ use assembly::*;
 
 /// Regularization for the KKT system
 /// QDLDL needs a quasi-definite system, so we use moderate regularization
-const REG_GENERAL: f64 = 1e-8;
+const REG_GENERAL: f64 = 1e-10;
 
 /// Remove the Tikhonov bias of the augmented HSDE solve by defect correction.
 /// The regularized factor remains a preconditioner; residuals are measured
