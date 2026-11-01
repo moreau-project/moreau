@@ -79,6 +79,8 @@ share an owned cuDSS stream so that a later call cannot overwrite workspace
 still used by an earlier call. Riccati backward workspaces initialize on the
 execution stream that first uses them.
 
+On CPU, the backward pass raises if the loss depends on a problem that returned no solution (e.g. `PrimalInfeasible`). Mask those problems out of the loss. See [Gradients of failed solves](basic-usage.md#gradients-of-failed-solves). JAX on CUDA does not run this check yet.
+
 ---
 
 ## Batching with `jax.vmap`
