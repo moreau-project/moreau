@@ -72,7 +72,9 @@ KKT system:
 - **One map covers every outcome.** At a root with $\tau > 0$ the QP solution is
   recovered by dividing through, $(x, s, z)/\tau$. A root with
   $\tau = 0,\ \kappa > 0$ is an infeasibility/unboundedness certificate
-  (recovered via $1/\kappa$). Feasible, infeasible, and unbounded problems are
+  (recovered via $1/\kappa$, or via $1/(-b^\top z)$ resp. $1/(-q^\top x)$ when
+  that is smaller, so the certificate always has $b^\top z \in [-1, 0)$
+  resp. $q^\top x \in [-1, 0)$). Feasible, infeasible, and unbounded problems are
   all just roots of the *same* $F$ — no separate phase-I, no special-casing.
 - **Homogeneous but *not* self-dual — $x^\top P x/\tau$ is why.** With $P = 0$
   (an LP or linear-objective conic program) this is the classic *self-dual*
@@ -117,6 +119,16 @@ Each iteration is a **damped Newton step** on this relaxed system $F_\mu$:
 
 Iterate until the relative residuals $r_x, r_z, r_\tau$ and the gap fall below
 tolerance, then recover $(x, s, z)/\tau$.
+
+Infeasibility is declared when the iterate carries a certificate: $z$ with
+$b^\top z < 0$ and $A^\top z \approx 0$ (primal), or $x$ with $q^\top x < 0$
+and $Px \approx 0$, $Ax + s \approx 0$ (dual). As in Clarabel, these tests run
+once $\kappa/\tau$ is large. Moreau also accepts a certificate without that
+gate when $\|A^\top z\| < \epsilon_{\text{infeas,rel}}\,(-b^\top z)$ (dual:
+$\max(\|Px\|, \|Ax + s\|) < \epsilon_{\text{infeas,rel}}\,(-q^\top x)$),
+which proves that every feasible $x$ has $\|x\| \ge 1/\epsilon_{\text{infeas,rel}}$.
+This catches problems that are both primal and dual infeasible, where the two
+certificates' objectives can cancel so that $\kappa \to 0$ together with $\tau$.
 
 ## Direct conic constraints (new in Moreau)
 

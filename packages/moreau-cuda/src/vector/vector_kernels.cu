@@ -1714,13 +1714,17 @@ void fused_warm_start_scaling(
         n, m, batchSize);
 }
 
-// Build per-batch normalization scale: τ for optimal, κ for infeasible
+// Build per-batch normalization scale: τ for optimal; for certificates κ, raised so that the
+// unscaled b'z (primal) or q'x (dual) is at least -1 (#67; see CPU Variables::unscale).
 // SolverStatus enum: PrimalInfeasible=2, DualInfeasible=3,
 //                    AlmostPrimalInfeasible=5, AlmostDualInfeasible=6
 __global__ void build_normalization_scale_kernel(
     double* __restrict__ scale,
     const double* __restrict__ tau,
     const double* __restrict__ kappa,
+    const double* __restrict__ dot_qx,
+    const double* __restrict__ dot_bz,
+    const double* __restrict__ c,
     const int32_t* __restrict__ status,
     int64_t batch_size)
 {
@@ -1728,16 +1732,22 @@ __global__ void build_normalization_scale_kernel(
     if (b >= batch_size) return;
 
     int32_t s = status[b];
-    // Infeasible statuses: 2 (PrimalInfeasible), 3 (DualInfeasible),
-    //                      5 (AlmostPrimalInfeasible), 6 (AlmostDualInfeasible)
-    bool is_infeasible = (s == 2 || s == 3 || s == 5 || s == 6);
-    scale[b] = is_infeasible ? kappa[b] : tau[b];
+    if (s == 2 || s == 5) {
+        scale[b] = fmax(kappa[b], -dot_bz[b] / c[b]);
+    } else if (s == 3 || s == 6) {
+        scale[b] = fmax(kappa[b], -dot_qx[b] / c[b]);
+    } else {
+        scale[b] = tau[b];
+    }
 }
 
 void build_normalization_scale(
     BatchedVector& scale,
     const BatchedVector& tau,
     const BatchedVector& kappa,
+    const BatchedVector& dot_qx,
+    const BatchedVector& dot_bz,
+    const BatchedVector& c,
     const int32_t* status,
     int64_t batchSize,
     cudaStream_t stream)
@@ -1745,11 +1755,13 @@ void build_normalization_scale(
     assert(scale.n() == 1 && scale.batchSize() == batchSize);
     assert(tau.n() == 1 && tau.batchSize() == batchSize);
     assert(kappa.n() == 1 && kappa.batchSize() == batchSize);
+    assert(dot_qx.n() == 1 && dot_bz.n() == 1 && c.n() == 1);
 
     dim3 blk(256, 1, 1);
     dim3 grd((batchSize + blk.x - 1) / blk.x, 1, 1);
     MOREAU_KERNEL_LAUNCH(build_normalization_scale_kernel, grd, blk, 0, stream,
-        scale.data(), tau.data(), kappa.data(), status, batchSize);
+        scale.data(), tau.data(), kappa.data(), dot_qx.data(), dot_bz.data(), c.data(),
+        status, batchSize);
 }
 
 // Set objective values to NaN for infeasible batches (matching CPU solver behavior)

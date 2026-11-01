@@ -53,6 +53,8 @@ struct Info {
     BatchedVector gap_rel;            // Relative duality gap [batchSize]
 
     BatchedVector ktratio;            // κ/τ ratio [batchSize]
+    BatchedVector farkas_primal;      // ‖A'z‖ / -b'z, +inf unless b'z < 0 [batchSize]
+    BatchedVector farkas_dual;        // max(‖Px‖, ‖Ax + s‖) / -q'x, +inf unless q'x < 0 [batchSize]
 
     // Previous iteration metrics
     BatchedVector prev_cost_primal;   // Previous primal objective [batchSize]
@@ -106,6 +108,8 @@ struct Info {
           gap_abs(1, batchSize),
           gap_rel(1, batchSize),
           ktratio(1, batchSize),
+          farkas_primal(1, batchSize),
+          farkas_dual(1, batchSize),
           prev_cost_primal(1, batchSize),
           prev_cost_dual(1, batchSize),
           prev_res_primal(1, batchSize),
@@ -179,6 +183,8 @@ struct Info {
           gap_abs(std::move(other.gap_abs)),
           gap_rel(std::move(other.gap_rel)),
           ktratio(std::move(other.ktratio)),
+          farkas_primal(std::move(other.farkas_primal)),
+          farkas_dual(std::move(other.farkas_dual)),
           prev_cost_primal(std::move(other.prev_cost_primal)),
           prev_cost_dual(std::move(other.prev_cost_dual)),
           prev_res_primal(std::move(other.prev_res_primal)),
@@ -231,6 +237,8 @@ struct Info {
             gap_abs = std::move(other.gap_abs);
             gap_rel = std::move(other.gap_rel);
             ktratio = std::move(other.ktratio);
+            farkas_primal = std::move(other.farkas_primal);
+            farkas_dual = std::move(other.farkas_dual);
             prev_cost_primal = std::move(other.prev_cost_primal);
             prev_cost_dual = std::move(other.prev_cost_dual);
             prev_res_primal = std::move(other.prev_res_primal);
@@ -437,6 +445,7 @@ struct Info {
                res_primal.memoryUsage() + res_dual.memoryUsage() +
                res_primal_inf.memoryUsage() + res_dual_inf.memoryUsage() +
                gap_abs.memoryUsage() + gap_rel.memoryUsage() + ktratio.memoryUsage() +
+               farkas_primal.memoryUsage() + farkas_dual.memoryUsage() +
                prev_cost_primal.memoryUsage() + prev_cost_dual.memoryUsage() +
                prev_res_primal.memoryUsage() + prev_res_dual.memoryUsage() +
                prev_gap_abs.memoryUsage() + prev_gap_rel.memoryUsage();

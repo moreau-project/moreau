@@ -3,6 +3,8 @@ Tests for numerical edge cases: ill-conditioning, badly scaled problems,
 infeasibility boundaries, and degenerate problem structures.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from scipy import sparse
@@ -211,6 +213,36 @@ class TestInfeasibilityEdgeCases:
             moreau.SolverStatus.PrimalInfeasible,
             moreau.SolverStatus.AlmostPrimalInfeasible,
         )
+
+    def test_infeasible_lp_with_null_space_ray(self, device):
+        """Issue #67: the data carry a Farkas certificate y (y >= 0, A'y = 0, b'y = -1) and A
+        has null-space rays d with q'd != 0, so the LP is primal and dual infeasible. The IPM
+        drifted along x = t*d, z = t*y, where the two rays' objectives cancel and kappa -> 0
+        with tau, so the kappa/tau-gated certificate checks never ran and the point passed as
+        Solved at |x| ~ 1e15."""
+        data = np.load(Path(__file__).parent / "data" / "infeasible_lp_issue67.npz")
+        A, b, q, y = data["A"], data["b"], data["q"], data["y"]
+        assert y.min() > 0 and np.abs(A.T @ y).max() < 1e-12 and np.isclose(b @ y, -1.0)
+        m, n = A.shape
+
+        sol, info = _solve_qp(
+            sparse.csr_matrix((n, n)),
+            q,
+            sparse.csr_matrix(A),
+            b,
+            moreau.Cones(num_nonneg_cones=m),
+            device=device,
+        )
+        # The returned certificate is normalized to b'z = -1 (q'x = -1), even though kappa -> 0.
+        if info.status == moreau.SolverStatus.PrimalInfeasible:
+            assert sol.z.min() >= -1e-8
+            assert np.isclose(b @ sol.z, -1.0, rtol=1e-6)
+            assert np.linalg.norm(A.T @ sol.z) < 1e-6
+        else:
+            assert info.status == moreau.SolverStatus.DualInfeasible
+            assert sol.s.min() >= -1e-8
+            assert np.isclose(q @ sol.x, -1.0, rtol=1e-6)
+            assert np.linalg.norm(A @ sol.x + sol.s) < 1e-6
 
     def test_unbounded_no_constraints(self):
         """min -x with only x >= 0 — dual infeasible (unbounded)."""

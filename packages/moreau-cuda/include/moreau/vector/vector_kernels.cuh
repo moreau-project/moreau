@@ -439,15 +439,18 @@ void fused_warm_start_scaling(
 );
 
 /**
- * @brief Build per-batch normalization scale: τ for optimal batches, κ for infeasible batches
+ * @brief Build per-batch normalization scale: τ for optimal batches; for infeasible ones
+ *        max(κ, -b'z / c) (primal) or max(κ, -q'x / c) (dual), matching CPU Variables::unscale
  *
- * Used in solution post-processing to match CPU solver behavior where
- * infeasibility certificates are normalized by κ instead of τ.
+ * dot_qx and dot_bz are q'x and b'z of the raw (equilibrated) iterate, c the cost scaling.
  */
 void build_normalization_scale(
     BatchedVector& scale,
     const BatchedVector& tau,
     const BatchedVector& kappa,
+    const BatchedVector& dot_qx,
+    const BatchedVector& dot_bz,
+    const BatchedVector& c,
     const int32_t* status,
     int64_t batchSize,
     cudaStream_t stream = 0

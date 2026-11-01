@@ -3,7 +3,7 @@ use crate::algebra::*;
 use crate::solver::core::{
     cones::{CompositeCone, CompositeXCone, Cone, PrimalOrDualCone},
     traits::{Settings, Variables},
-    ScalingStrategy, StepDirection,
+    ScalingStrategy, SolverStatus, StepDirection,
 };
 use crate::utils::debug::{debug_block, debug_println};
 
@@ -560,22 +560,25 @@ where
         }
     }
 
-    pub(crate) fn unscale(&mut self, data: &DefaultProblemData<T>, is_infeasible: bool) {
-        // if we have an infeasible problem, normalize
-        // using κ to get an infeasibility certificate.
-        // Otherwise use τ to get an unscaled solution.
-        let scaleinv = {
-            if is_infeasible {
-                T::recip(self.κ)
-            } else {
-                T::recip(self.τ)
+    pub(crate) fn unscale(&mut self, data: &DefaultProblemData<T>, status: SolverStatus) {
+        // Divide by τ to get a solution, or by κ to get a certificate, as in Clarabel. κ ≈
+        // -b'z - q'x (LP), so when both certificates are present their objectives can cancel
+        // and κ → 0 (#67): never divide by less than -b'z (or -q'x) of the unscaled problem,
+        // so the certificate has b'z (or q'x) in [-1, 0).
+        let cinv = T::recip(data.equilibration.c);
+        let scaleinv = T::recip(match status {
+            SolverStatus::PrimalInfeasible | SolverStatus::AlmostPrimalInfeasible => {
+                T::max(self.κ, -data.b.dot(&self.z) * cinv)
             }
-        };
+            SolverStatus::DualInfeasible | SolverStatus::AlmostDualInfeasible => {
+                T::max(self.κ, -data.q.dot(&self.x) * cinv)
+            }
+            _ => self.τ,
+        });
 
         // also undo the equilibration
         let d = &data.equilibration.d;
         let (e, einv) = (&data.equilibration.e, &data.equilibration.einv);
-        let cinv = T::recip(data.equilibration.c);
 
         self.x.hadamard(d).scale(scaleinv);
         self.z.hadamard(e).scale(scaleinv * cinv);
