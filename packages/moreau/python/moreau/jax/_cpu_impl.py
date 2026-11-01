@@ -140,10 +140,7 @@ class JaxSolverCpu:
     def _get_or_create_solver(self, batch_size: int, b: Optional[np.ndarray] = None):
         """Get or create a CPU solver for the given batch size."""
         if batch_size not in self._cpu_solvers:
-            # Check if active-set solver is requested
-            solver_type = getattr(self._settings, "solver", None)
-            use_active_set = solver_type is not None and "active_set" in str(solver_type).lower()
-            if use_active_set:
+            if self._use_active_set:
                 from moreau_cpu._cpu import ActiveSetSolver
 
                 settings_with_grad = self._settings.model_copy(update={"enable_grad": True})
@@ -218,27 +215,18 @@ class JaxSolverCpu:
 
 def _solve_cpu_callback(
     solver_id: int,
+    with_state: bool,
     P_data: np.ndarray,
     A_data: np.ndarray,
     q: np.ndarray,
     b: np.ndarray,
-) -> Tuple[
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-]:
+) -> Tuple[np.ndarray, ...]:
     """Callback function that runs on CPU (called from pure_callback).
 
     Returns 10 arrays: x, z, s, z_x, status, obj_val, iterations, solve_time,
-    setup_time, construction_time. `z_x` has zero length on slack-only
-    problems (total_x_dim = 0).
+    setup_time, construction_time, plus the flat active-set backward state if
+    ``with_state``. `z_x` has zero length on slack-only problems
+    (total_x_dim = 0).
     """
     solver_wrapper = _SOLVER_REGISTRY[solver_id]
 
@@ -341,23 +329,11 @@ def _solve_cpu_callback(
         setup_time = np.full(batch_size, setup_time_val, dtype=np.float64)
         construction_time = np.full(batch_size, construction_time_val, dtype=np.float64)
 
+    outputs = (x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time)
+    if not with_state:
+        return outputs
     state = _flatten_backward_state(solver_wrapper, result.get("_backward_state"), batch_size)
-    if squeeze_output:
-        state = state.squeeze(0)
-
-    return (
-        x,
-        z,
-        s,
-        z_x,
-        status,
-        obj_val,
-        iterations,
-        solve_time,
-        setup_time,
-        construction_time,
-        state,
-    )
+    return outputs + (state.squeeze(0) if squeeze_output else state,)
 
 
 # Order and per-problem sizes of the active-set state fields in a flat row.
@@ -554,14 +530,15 @@ def _backward_cpu_callback(
     return dP, dA, dq, db
 
 
-def _solve_cpu_with_state(
+def _solve_cpu_pure(
     solver_id: int,
     P_data: jnp.ndarray,
     A_data: jnp.ndarray,
     q: jnp.ndarray,
     b: jnp.ndarray,
+    with_state: bool,
 ) -> Tuple[jnp.ndarray, ...]:
-    """The 10 solve outputs plus the flat active-set backward state."""
+    """The 10 solve outputs, plus the flat active-set backward state if ``with_state``."""
     solver_wrapper = _SOLVER_REGISTRY[solver_id]
     n, m = solver_wrapper._n, solver_wrapper._m
     total_xn = solver_wrapper._total_x_dim
@@ -595,25 +572,28 @@ def _solve_cpu_with_state(
         setup_time_shape = batch_scalar_shape
         construction_time_shape = batch_scalar_shape
 
-    state_len = solver_wrapper._state_len
-    state_shape = jax.ShapeDtypeStruct(
-        (state_len,) if q.ndim == 1 else (q.shape[0], state_len), jnp.float64
+    shapes = (
+        x_shape,
+        z_shape,
+        s_shape,
+        z_x_shape,
+        status_shape,
+        obj_val_shape,
+        iterations_shape,
+        solve_time_shape,
+        setup_time_shape,
+        construction_time_shape,
     )
+    if with_state:
+        state_len = solver_wrapper._state_len
+        shapes += (
+            jax.ShapeDtypeStruct(
+                (state_len,) if q.ndim == 1 else (q.shape[0], state_len), jnp.float64
+            ),
+        )
     return jax.pure_callback(
-        partial(_solve_cpu_callback, solver_id),
-        (
-            x_shape,
-            z_shape,
-            s_shape,
-            z_x_shape,
-            status_shape,
-            obj_val_shape,
-            iterations_shape,
-            solve_time_shape,
-            setup_time_shape,
-            construction_time_shape,
-            state_shape,
-        ),
+        partial(_solve_cpu_callback, solver_id, with_state),
+        shapes,
         P_data,
         A_data,
         q,
@@ -631,7 +611,7 @@ def _solve_cpu_raw(
     b: jnp.ndarray,
 ) -> Tuple[jnp.ndarray, ...]:
     """Solve conic QP on CPU. Returns (x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time)."""
-    return _solve_cpu_with_state(solver_id, P_data, A_data, q, b)[:10]
+    return _solve_cpu_pure(solver_id, P_data, A_data, q, b, with_state=False)
 
 
 def _solve_cpu_fwd(
@@ -643,7 +623,7 @@ def _solve_cpu_fwd(
 ) -> Tuple[Tuple[jnp.ndarray, ...], Any]:
     """Forward pass with saved residuals for backward."""
     x, z, s, z_x, status, obj_val, iterations, solve_time, setup_time, construction_time, state = (
-        _solve_cpu_with_state(solver_id, P_data, A_data, q, b)
+        _solve_cpu_pure(solver_id, P_data, A_data, q, b, with_state=True)
     )
 
     # Save everything needed for backward (including z_x for direct dz_x, and
