@@ -17,6 +17,13 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Changed
 
+- **Breaking:** `Settings`, `IPMSettings` and `ActiveSetSettings` reject
+  unknown fields with a pydantic `ValidationError` instead of ignoring them.
+  Remove or correct misspelled settings (#70).
+- **Breaking:** malformed CSR input and duplicate entries raise `ValueError`,
+  and complex, string or object arrays raise `TypeError`, instead of being
+  accepted. Call `.sum_duplicates()` on scipy matrices and pass real float
+  arrays (#70).
 - `solver="auto"` always picks the IPM. Active-set is used only with
   `solver="active_set"`, so small dense QPs may be slower by default (#97).
 - On CPU, `CompiledSolver` with `direct_solve_method="auto"` lets the Rust core
@@ -25,6 +32,11 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- NaN or Inf in `P`, `A` or `q`, or NaN in `b`, raises `ValueError` instead of
+  returning `Solved` with a wrong or NaN solution. CUDA tensors are not
+  scanned (#70).
+- `Solver` and `CompiledSolver.setup()` copy their inputs, so editing the
+  caller's arrays afterwards no longer changes the next solve (#70).
 - CUDA backward passes could return zero or stale gradients when cached solves
   or newly allocated workspaces crossed CUDA streams (#112).
 - CPU and CUDA HSDE derivatives could be biased in weakly constrained directions by
