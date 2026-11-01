@@ -206,7 +206,7 @@ class TestCones:
 
 
 class TestActiveSetIterationLimit:
-    """Regression for #45: Settings.max_iter (the IPM's limit) capped active-set."""
+    """Regression for #45: the IPM's default max_iter capped active-set."""
 
     def _solve(self, **settings_kwargs):
         # min 0.5||x||^2 - 10 sum(x) s.t. x <= 1: all n bounds end up active and
@@ -219,16 +219,25 @@ class TestActiveSetIterationLimit:
         solution = solver.solve()
         return solver.info, solution
 
-    def test_max_iter_does_not_limit_active_set(self):
-        info, solution = self._solve()
-        assert info.status == moreau.SolverStatus.Solved
-        assert info.iterations > 200
-        np.testing.assert_allclose(solution.x, 1.0, atol=1e-8)
-
-    def test_iter_limit_limits_active_set(self):
-        info, _ = self._solve(active_set_settings=moreau.ActiveSetSettings(iter_limit=50))
-        assert info.status == moreau.SolverStatus.MaxIterations
-        assert info.iterations <= 50
+    @pytest.mark.parametrize(
+        "settings_kwargs, capped",
+        [
+            ({}, False),
+            ({"max_iter": 50}, True),
+            ({"active_set_settings": moreau.ActiveSetSettings(iter_limit=50)}, True),
+            ({"max_iter": 50, "active_set_settings": moreau.ActiveSetSettings()}, False),
+        ],
+        ids=["default", "max_iter", "iter_limit", "both"],
+    )
+    def test_iteration_limit(self, settings_kwargs, capped):
+        info, solution = self._solve(**settings_kwargs)
+        if capped:
+            assert info.status == moreau.SolverStatus.MaxIterations
+            assert info.iterations <= 50
+        else:
+            assert info.status == moreau.SolverStatus.Solved
+            assert info.iterations > 200
+            np.testing.assert_allclose(solution.x, 1.0, atol=1e-8)
 
 
 class TestSolverNumpy:

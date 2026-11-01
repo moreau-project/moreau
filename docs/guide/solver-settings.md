@@ -258,8 +258,9 @@ settings = moreau.Settings(
 )
 ```
 
-`Settings.max_iter` limits the IPM only. The active-set solver is limited by
-`ActiveSetSettings.iter_limit` (default 10000), so set that to cap it.
+The active-set solver is limited by `ActiveSetSettings.iter_limit` (default
+10000), not by the IPM's default `max_iter`. An explicitly set
+`Settings.max_iter` still caps it when `active_set_settings` is not given.
 
 The active-set solver stores `P` and `A` as dense matrices, so its memory grows
 with `n² + m·n` rather than with the number of nonzeros. A solve typically needs

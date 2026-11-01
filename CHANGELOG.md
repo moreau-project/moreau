@@ -25,6 +25,9 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- The CPU active-set solver is no longer capped at the IPM's default 200
+  iterations; it uses `ActiveSetSettings.iter_limit` (default 10000) unless
+  `Settings.max_iter` is set explicitly (#45).
 - CPU and CUDA HSDE derivatives could be biased in weakly constrained directions by
   the regularized differentiation solve. Apply defect correction to the
   unregularized equations in forward and adjoint differentiation, reusing

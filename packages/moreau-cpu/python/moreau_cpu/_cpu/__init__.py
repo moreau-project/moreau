@@ -357,6 +357,8 @@ class ActiveSetSolver:
                 ]:
                     if hasattr(as_src, attr):
                         as_settings_kwargs[attr] = getattr(as_src, attr)
+            elif "max_iter" in settings.model_fields_set:
+                as_settings_kwargs["iter_limit"] = settings.max_iter
             if hasattr(settings, "time_limit") and settings.time_limit is not None:
                 tl = settings.time_limit
                 if tl != float("inf"):
