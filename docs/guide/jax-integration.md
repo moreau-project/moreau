@@ -71,6 +71,14 @@ q_grad = jax.grad(loss_fn)(q)
 
 Gradients are computed using the **implicit function theorem** on the KKT conditions of the optimization problem. This is much more memory-efficient than unrolling the solver's iterations and allows for differentiating through exact solutions.
 
+On CUDA, a solver can be reused across sequential JAX executions even when XLA
+changes its execution stream. The backend handles the stream dependencies for
+cached backward solves, so callers do not need to synchronize manually between
+gradient calls. Matrix assembly, RHS preparation, solves, and result extraction
+share an owned cuDSS stream so that a later call cannot overwrite workspace
+still used by an earlier call. Riccati backward workspaces initialize on the
+execution stream that first uses them.
+
 ---
 
 ## Batching with `jax.vmap`

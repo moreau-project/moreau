@@ -25,6 +25,8 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- CUDA backward passes could return zero or stale gradients when cached solves
+  or newly allocated workspaces crossed CUDA streams (#112).
 - CPU and CUDA HSDE derivatives could be biased in weakly constrained directions by
   the regularized differentiation solve. Apply defect correction to the
   unregularized equations in forward and adjoint differentiation, reusing
