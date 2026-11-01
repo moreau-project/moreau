@@ -54,3 +54,9 @@ All notable changes to Moreau are documented here. The format follows
 - CUDA equilibration of problems with `P = 0` (LPs, SOCPs, SDPs) started each
   Ruiz iteration from stale column norms, so it scaled `A` differently from the
   CPU (#107).
+- Backward (`backward()`, PyTorch autograd, JAX `grad` on CPU) returned
+  meaningless gradients for problems that ended with no solution (e.g.
+  `PrimalInfeasible`, `NumericalError`). It now raises `RuntimeError` naming the
+  batch indices when such a problem has a nonzero upstream gradient. To migrate,
+  mask failed problems out of the loss using `solver.info.status`; JAX on CUDA
+  does not run this check yet (#74).

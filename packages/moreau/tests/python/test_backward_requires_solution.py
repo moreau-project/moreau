@@ -209,6 +209,19 @@ class TestTorch:
             solver.backward(torch.ones(2, N, dtype=torch.float64))
 
 
+def test_torch_batched_masked_failure_shared_PA():
+    # IPM only: batched active-set backward with shared P/A is #75.
+    solver, _, _, q, b = _torch_problem("ipm", batched=True)
+    P = torch.tensor(P_VALS, dtype=torch.float64, requires_grad=True)
+    A = torch.tensor(A_VALS, dtype=torch.float64, requires_grad=True)
+    solver.solve(P, A, q, b).x[0].sum().backward()
+    # x* = b[0] / A[0] = 1, so dx*/dA[0] = -b[0] / A[0]^2 = 1; the failed problem adds 0.
+    torch.testing.assert_close(
+        A.grad, torch.tensor([1.0, 0.0], dtype=torch.float64), atol=1e-6, rtol=0
+    )
+    torch.testing.assert_close(P.grad, torch.zeros(1, dtype=torch.float64), atol=1e-6, rtol=0)
+
+
 @pytest.fixture
 def jax_x64():
     jax = pytest.importorskip("jax")

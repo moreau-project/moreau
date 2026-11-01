@@ -49,10 +49,11 @@ def _get_impl(handle: int):
 
 
 def _status_tensor(status) -> torch.Tensor:
-    """Per-problem status codes as an int64 CPU tensor (0-d for one problem)."""
-    if isinstance(status, (list, tuple)) or getattr(status, "ndim", 0) > 0:
-        return torch.tensor([int(st) for st in status], dtype=torch.int64)
-    return torch.tensor(int(status), dtype=torch.int64)
+    """Per-problem status codes as an int64 CPU tensor (0-d for one problem).
+
+    A CUDA status tensor is copied to the host in one transfer.
+    """
+    return torch.as_tensor(status).to("cpu", torch.int64)
 
 
 def _check_backward_statuses_torch(status: torch.Tensor, *upstreams: torch.Tensor) -> None:
