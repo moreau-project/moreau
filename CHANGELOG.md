@@ -37,6 +37,10 @@ All notable changes to Moreau are documented here. The format follows
   residual and the default start shifted PSD cones independently of other
   cones. Keep the refinement iterate with the smallest residual and use a
   common interior shift across cones for each problem (#110).
+- JAX `solver="active_set"` gradients used the working set of the most recent
+  solve, so a `Solver` called more than once inside `jax.grad`, or
+  differentiated with `jax.jacrev`, got wrong gradients or failed. Each solve is now
+  differentiated with its own state (#57).
 - CPU chordal decomposition filled `A`'s values in the wrong order, so it could
   solve a different problem and report `Solved` (#79).
 - CUDA PSD solves could return NaN after shifting an all-zero PSD block, from a

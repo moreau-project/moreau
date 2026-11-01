@@ -103,8 +103,29 @@ def test_jacrev(kind):
 
 
 @pytest.mark.parametrize("kind", SOLVERS)
-def test_vmap_grad_uses_each_problems_state(kind):
+def test_vmap_grad_of_two_batched_solves(kind):
     solver = _solver(kind)
-    qs = jnp.stack([Q1, Q2])
-    grads = jax.vmap(jax.grad(lambda q: solver.solve(P, A, q, B).x.sum()))(qs)
-    np.testing.assert_allclose(grads, [[-1.0, 0.0], [0.0, -1.0]], atol=1e-6)
+
+    def loss(q):
+        return solver.solve(P, A, q, B).x.sum() + solver.solve(P, A, -q, B).x.sum()
+
+    grads = jax.vmap(jax.grad(loss))(jnp.stack([Q1, Q2]))
+    np.testing.assert_allclose(grads, [[-1.0, 1.0], [1.0, -1.0]], atol=1e-6)
+
+
+@pytest.mark.parametrize("kind", SOLVERS)
+def test_P_and_A_grads_of_two_solves(kind):
+    # With b = -1/2 (x >= 1/2), the constraint on the coordinate q pushes up is
+    # active: d(sum x)/dP = q_i/P_i^2 on free coordinates, d(sum x)/dA = -b_i/A_i^2
+    # on active ones.
+    solver = _solver(kind)
+    b = -0.5 * jnp.ones(2)
+
+    def loss(p1, a1, p2, a2):
+        return solver.solve(p1, a1, Q1, b).x.sum() + solver.solve(p2, a2, Q2, b).x.sum()
+
+    dp1, da1, dp2, da2 = jax.grad(loss, argnums=(0, 1, 2, 3))(P, A, P, A)
+    np.testing.assert_allclose(dp1, [-1.0, 0.0], atol=1e-6)
+    np.testing.assert_allclose(da1, [0.0, 0.5], atol=1e-6)
+    np.testing.assert_allclose(dp2, [0.0, -1.0], atol=1e-6)
+    np.testing.assert_allclose(da2, [0.5, 0.0], atol=1e-6)
