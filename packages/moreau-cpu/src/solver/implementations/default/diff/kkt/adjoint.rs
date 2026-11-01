@@ -533,8 +533,16 @@ pub(super) fn solve_adjoint_hsde_cached<T: FloatT>(
 
     // Solve
     let mut full_sol = vec![T::zero(); aug_rhs.len()];
-    let mut rhs_buf = aug_rhs;
+    let mut rhs_buf = aug_rhs.clone();
     state.factor.solve(&state.kkt, &mut full_sol, &mut rhs_buf);
+    let full_sol = refine_hsde_solution(&state.kkt, &aug_rhs, full_sol, |rhs| {
+        let mut correction = vec![T::zero(); rhs.len()];
+        let mut rhs_buf = rhs.to_vec();
+        state
+            .factor
+            .solve(&state.kkt, &mut correction, &mut rhs_buf);
+        correction
+    });
 
     extract_hsde_gradients_full(&full_sol, P, A, x, z, tau, n, m, xn)
 }

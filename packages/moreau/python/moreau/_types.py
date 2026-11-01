@@ -425,7 +425,7 @@ class IPMSettings(BaseModel):
         equilibrate_enable: Enable matrix equilibration (default: True)
         direct_solve_method: KKT solver method (default: 'auto')
             Options: 'auto', 'qdldl', 'faer-1t', 'faer-nt', 'faer', 'cudss', 'riccati', 'woodbury'
-            Note: 'qdldl' is CPU-only; 'cudss'/'woodbury' are CUDA-only; 'riccati' requires
+            Note: 'qdldl' is CPU-only; 'cudss', 'riccati' and 'woodbury' are CUDA-only; 'riccati' requires
             block-tridiagonal structure (MPC/LQR problems); 'woodbury' requires diagonal P +
             low-rank A (portfolio-type problems).
 
@@ -448,7 +448,7 @@ class IPMSettings(BaseModel):
         >>> settings = Settings(ipm_settings=ipm, device='cuda')
     """
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     # Convergence tolerances
     tol_gap_abs: Annotated[float, Field(gt=0)] = 1e-8
@@ -555,7 +555,7 @@ class ActiveSetSettings(BaseModel):
             Larger values produce smoother gradients at the cost of accuracy.
     """
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     primal_tol: Annotated[float, Field(gt=0)] = 1e-6
     dual_tol: Annotated[float, Field(gt=0)] = 1e-12
@@ -607,7 +607,7 @@ class Settings(BaseModel):
         >>> settings = Settings(ipm_settings=ipm, device='cuda')
     """
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     # Solver selection
     solver: Union[SolverType, str] = SolverType.AUTO
