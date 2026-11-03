@@ -148,6 +148,7 @@ Julia MOI wrapper. Links against `moreau-c`. Released under Apache 2.0.
 | `packages/moreau-cpu/tests/*.rs` | Rust integration tests (IPM, active-set, cones, backward) |
 | `packages/moreau-cuda/tests/cpp/*.cpp` | GPU gtest binaries (per-kernel + end-to-end) |
 | `packages/moreau/tests/python/*.py` | Unified-API integration tests |
+| `packages/moreau/tests/python/test_examples.py` | Runs each `examples/*.py` script; skips when its optional dependency is missing |
 | `packages/moreau/tests/python/bench/*.py` | Decision-gate benchmarks (checked-in artifacts) |
 
 Critical Rule 6 in CLAUDE.md: prefer C++/Rust tests for fast inner-loop

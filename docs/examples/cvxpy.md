@@ -11,11 +11,13 @@ For comprehensive documentation, see the [CVXPY Integration Guide](../guide/cvxp
 :::{admonition} Requirements
 :class: tip
 
-Moreau support requires **cvxpy >= 1.8.2** and **cvxpylayers >= 1.0.4**:
+Moreau support requires **cvxpy 1.8.x** and **cvxpylayers 1.1.x**:
 
 ```bash
-pip install 'cvxpy>=1.8.2' 'cvxpylayers>=1.0.4'
+pip install 'cvxpy>=1.8.2,<1.9' 'cvxpylayers>=1.1,<1.2'
 ```
+
+cvxpylayers 1.2 with cvxpy 1.9 silently drops variable constraints such as `x >= 0` when using Moreau.
 :::
 
 ## Using Moreau with CVXPY

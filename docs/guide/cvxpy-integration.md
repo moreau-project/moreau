@@ -5,11 +5,13 @@ Moreau can be used as a solver backend for [CVXPY](https://github.com/cvxpy/cvxp
 :::{admonition} Requirements
 :class: tip
 
-Moreau support requires **cvxpy >= 1.8.2** and **cvxpylayers >= 1.0.4**:
+Moreau support requires **cvxpy >= 1.8.2**:
 
 ```bash
-pip install 'cvxpy>=1.8.2' 'cvxpylayers>=1.0.4'
+pip install 'cvxpy>=1.8.2'
 ```
+
+For cvxpylayers, see the version pins in [cvxpylayers Integration](cvxpylayers-integration.md).
 :::
 
 ## Quick Start
