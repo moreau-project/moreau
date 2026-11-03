@@ -150,7 +150,7 @@ A = sparse.csr_array([
 Cones define the constraint types. The order matters:
 
 ```python
-cones = moreau.Cones(
+mixed_cones = moreau.Cones(
     num_zero_cones=1,      # Equality constraints (first)
     num_nonneg_cones=3,    # Inequality constraints
     so_cone_dims=[3, 5],   # Second-order cones (dim 3 and dim 5)

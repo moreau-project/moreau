@@ -110,7 +110,7 @@ for label, make_v in cases.items():
     print(f"=== {label} ===")
     print(f"  v[0] (t) = {t:.4f},  ||v[1:]|| = {nx:.4f}")
 
-    for device in ("cpu", "cuda"):
+    for device in moreau.available_devices():
         x_sol, dq_sol = solve_and_grad(v, device)
         # dq = d(sum x)/dq = -d(sum x)/dv  since q = -v
         g_sol = -dq_sol
@@ -128,4 +128,6 @@ for label, make_v in cases.items():
 
     print()
 
-print("ALL PASSED" if all_pass else "SOME FAILED")
+if not all_pass:
+    raise SystemExit("SOME FAILED")
+print("ALL PASSED")
