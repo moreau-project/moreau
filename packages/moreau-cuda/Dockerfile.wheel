@@ -67,6 +67,7 @@ ENV CUDA_HOME="/usr/local/cuda"
 # CUDSS_SUFFIX is "cuda12" for CUDA 12.x, "cuda13" for CUDA 13.x.
 # Redist path uses linux-<x86_64|sbsa>/ mirroring the CUDA repo layout.
 WORKDIR /opt
+ENV CUDSS_ROOT=/opt/cudss
 RUN CUDSS_TARBALL="libcudss-linux-${CUDA_ARCH_LABEL}-${CUDSS_VERSION}_${CUDSS_SUFFIX}-archive.tar.xz" && \
     case "${CUDSS_VERSION}-${CUDA_ARCH_LABEL}-${CUDSS_SUFFIX}" in \
         1.0.0.35-x86_64-cuda12) CUDSS_SHA256="b8c882c3ebc8b319886f5a06e74311c5eea09846925ba5a19892de4921201746" ;; \
@@ -78,10 +79,8 @@ RUN CUDSS_TARBALL="libcudss-linux-${CUDA_ARCH_LABEL}-${CUDSS_VERSION}_${CUDSS_SU
     curl -sL -o "${CUDSS_TARBALL}" "https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-${CUDA_ARCH_LABEL}/${CUDSS_TARBALL}" && \
     echo "${CUDSS_SHA256}  ${CUDSS_TARBALL}" | sha256sum -c - && \
     tar -xJf "${CUDSS_TARBALL}" && \
-    cp -r libcudss-*/lib/* /usr/local/lib/ && \
-    cp -r libcudss-*/include/* /usr/local/include/ && \
-    ldconfig && \
-    rm -rf libcudss-* "${CUDSS_TARBALL}"
+    mv libcudss-*/ "${CUDSS_ROOT}" && \
+    rm "${CUDSS_TARBALL}"
 
 # Set up Python from manylinux image
 # manylinux2014 has Python interpreters in /opt/python/cpXXX-cpXXX/
@@ -114,6 +113,13 @@ WORKDIR /workspace/packages/moreau-cuda
 RUN pip wheel . -w dist_raw/ --no-deps --no-build-isolation \
     --config-settings=cmake.define.MOREAU_BUILD_TESTS=OFF \
     --config-settings=cmake.define.MOREAU_BUILD_EXAMPLES=OFF
+
+# The wheel must load the same cuDSS ABI that its PyPI dependency provides.
+RUN python -m zipfile -e dist_raw/*.whl /tmp/wheel-link-check && \
+    for lib in /tmp/wheel-link-check/moreau_cuda/_moreau_cuda*.so \
+               /tmp/wheel-link-check/moreau_cuda/lib_moreau_jax_ffi.so; do \
+        readelf -d "$lib" | grep -F 'Shared library: [libcudss.so.1]' || exit 1; \
+    done && rm -rf /tmp/wheel-link-check
 
 # Tag wheel as manylinux_2_28.
 # libsodium is statically linked (see CMakeLists.txt), and all NVIDIA/CUDA libs
