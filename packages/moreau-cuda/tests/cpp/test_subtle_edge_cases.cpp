@@ -703,11 +703,11 @@ TEST_F(NumericalPrecisionTest, MixedScaleGradients) {
     BatchedVector dz_bar(m, batchSize);
     BatchedVector ds_bar(m, batchSize);
 
-    // Different scales: 1.0, 1e-10, 1e10
-    std::vector<double> dx_data = {
-        1.0, 1.0,       // batch 0: normal
-        1e-10, 1e-10,   // batch 1: tiny
-        1e10, 1e10      // batch 2: huge
+    // Use cotangents tangent to x[0] + x[1] = 1, scaled per batch.
+    const std::vector<double> dx_data = {
+        1.0, -1.0,
+        1e-10, -1e-10,
+        1e10, -1e10
     };
     copy_to_batched(dx_bar, dx_data);
     dz_bar.setToConstant(0.0, 0);
@@ -718,19 +718,11 @@ TEST_F(NumericalPrecisionTest, MixedScaleGradients) {
 
     auto dq_result = copy_from_batched(solver.diff_state()->dq);
 
-    // All gradients should be finite
+    // With P = I, dx/dq is the negative projector onto the tangent space.
+    // Each dq should therefore equal -dx_bar, with the same relative accuracy.
     for (size_t i = 0; i < dq_result.size(); i++) {
-        EXPECT_FALSE(std::isnan(dq_result[i]))
-            << "dq[" << i << "] is NaN";
-        EXPECT_FALSE(std::isinf(dq_result[i]))
-            << "dq[" << i << "] is Inf";
+        EXPECT_NEAR(dq_result[i] / -dx_data[i], 1.0, 1e-6) << "dq[" << i << "]";
     }
-
-    // Gradients should scale proportionally (roughly)
-    // batch 0 and batch 2 should differ by ~1e10
-    double ratio = std::abs(dq_result[4]) / (std::abs(dq_result[0]) + 1e-20);
-    EXPECT_GT(ratio, 1e8) << "Gradient scaling seems off";
-    EXPECT_LT(ratio, 1e12) << "Gradient scaling seems off";
 
     cudaFree(d_P);
     cudaFree(d_A);
