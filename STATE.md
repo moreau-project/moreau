@@ -73,8 +73,14 @@ composite direct conic constraints. Symmetric and nonsymmetric helpers live in
 
 Tests in `tests/` (top-level integration tests).
 
-`default/compiled_solver.rs` shares Rayon pools among live compiled solvers
-with the same thread count. The process-wide cache holds weak references;
+Browser WASM (`wasm32-unknown-unknown`, no default features) uses QDLDL and
+sequential batch execution through `utils/batch.rs`. Native batches use Rayon.
+`tests/browser.rs` runs portable solve and derivative checks natively and in
+Firefox through `.github/workflows/ci-wasm.yml`. See `docs/guide/webassembly.md`.
+
+`default/compiled_solver.rs` uses `utils/batch.rs` to share Rayon pools among
+live native compiled solvers with the same thread count. The process-wide
+cache holds weak references;
 solvers own the workers and release them when the last owner is dropped.
 Its unit test checks sharing, and `tests/python/test_thread_pool_lifecycle.py`
 checks constructing a fresh child solver after releasing parent solvers and

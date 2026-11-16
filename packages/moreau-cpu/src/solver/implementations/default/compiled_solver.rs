@@ -8,67 +8,14 @@ use crate::solver::core::cones::Cone;
 use crate::solver::core::cones::SupportedXConeT;
 use crate::solver::core::traits::*;
 use crate::solver::SupportedConeT;
+use crate::timers::Instant;
 use crate::utils::banner;
+use crate::utils::batch::{batch_iter, batch_range, BatchExecutor};
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use rayon::prelude::*;
-use std::collections::HashMap;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
-use std::time::Instant;
-
-/// Share rayon workers between live solvers with the same thread count.
-/// Only solvers own the pools: after the last solver is dropped, a later
-/// constructor must create fresh workers, including after a subsequent fork.
-fn shared_thread_pool(num_threads: usize) -> Result<Arc<rayon::ThreadPool>, SolverError> {
-    static POOLS: OnceLock<Mutex<HashMap<usize, Weak<rayon::ThreadPool>>>> = OnceLock::new();
-    let mut pools = POOLS.get_or_init(Default::default).lock().unwrap();
-    if let Some(pool) = pools.get(&num_threads).and_then(Weak::upgrade) {
-        return Ok(pool);
-    }
-    pools.retain(|_, pool| pool.strong_count() > 0);
-    let pool = Arc::new(
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .build()
-            .map_err(|_e| SolverError::BadInputData("Failed to configure thread pool"))?,
-    );
-    pools.insert(num_threads, Arc::downgrade(&pool));
-    Ok(pool)
-}
-
-#[cfg(test)]
-mod thread_pool_tests {
-    use super::*;
-
-    #[test]
-    fn live_solvers_share_workers_only_for_matching_thread_counts() {
-        let make_solver = |num_threads| {
-            CompiledSolver::new(
-                1,
-                1,
-                &[0, 0],
-                &[],
-                &[0, 1],
-                &[0],
-                &[SupportedConeT::NonnegativeConeT(1)],
-                DefaultSettings::<f64> {
-                    verbose: false,
-                    ..DefaultSettings::default()
-                },
-                num_threads,
-                false,
-            )
-            .unwrap()
-        };
-        let first = make_solver(2);
-        let second = make_solver(2);
-        let different = make_solver(3);
-        assert!(Arc::ptr_eq(&first.thread_pool, &second.thread_pool));
-        assert!(!Arc::ptr_eq(&first.thread_pool, &different.thread_pool));
-        assert_eq!(first.num_threads(), 2);
-        assert_eq!(different.num_threads(), 3);
-    }
-}
+use std::sync::{Mutex, RwLock};
 
 // Keep smoothing away from a numerically singular cone boundary. This floor
 // controls the interior perturbation, not whether the warm point has converged.
@@ -253,8 +200,8 @@ pub struct CompiledSolver<T: FloatT> {
     dir_cones: Vec<SupportedXConeT>,
     /// Solver settings
     settings: DefaultSettings<T>,
-    /// Thread pool for parallel processing, shared by all solvers with the same thread count
-    thread_pool: Arc<rayon::ThreadPool>,
+    /// Batch execution policy for the target.
+    executor: BatchExecutor,
     /// Pre-allocated solvers - one per problem slot for correct solution caching
     solver_pool: Vec<Mutex<DefaultSolver<T>>>,
     /// Current batch size (number of solvers in pool)
@@ -452,7 +399,8 @@ impl<T: FloatT> CompiledSolver<T> {
         // (and thus the dir_cones index set) is preserved. We thread dir_cones
         // through the augmented solver below.
 
-        let thread_pool = shared_thread_pool(num_threads)?;
+        let executor = BatchExecutor::new(num_threads)?;
+        let num_threads = executor.num_threads();
 
         // Ensure settings are appropriate for batch mode.
         settings.core_mut().ipm.presolve_enable = false;
@@ -730,7 +678,7 @@ impl<T: FloatT> CompiledSolver<T> {
             cones: cones_internal,
             dir_cones: dir_cones.to_vec(),
             settings,
-            thread_pool,
+            executor,
             solver_pool,
             batch_size: num_threads,
             num_threads,
@@ -979,9 +927,8 @@ impl<T: FloatT> CompiledSolver<T> {
         // Setup and equilibrate P, A for each problem, in parallel across
         // the batch (each problem owns its pooled solver). Collect preserves
         // batch order.
-        let per_problem: Vec<(Vec<T>, Vec<T>, Vec<T>)> = self.thread_pool.install(|| {
-            (0..batch_size)
-                .into_par_iter()
+        let per_problem: Vec<(Vec<T>, Vec<T>, Vec<T>)> = self.executor.install(|| {
+            batch_range(0..batch_size)
                 .map(|i| {
                     // Slice into flat buffer — zero allocation for the input
                     let P_values = &P_values_flat[i * nnz_p_csr..(i + 1) * nnz_p_csr];
@@ -1514,9 +1461,9 @@ impl<T: FloatT> CompiledSolver<T> {
             base_p.resize(batch_size, Vec::new());
         }
 
-        let results: Result<Vec<_>, _> = self.thread_pool.install(|| {
-            qs.par_iter()
-                .zip(bs.par_iter())
+        let results: Result<Vec<_>, _> = self.executor.install(|| {
+            batch_iter(qs)
+                .zip(batch_iter(bs))
                 .enumerate()
                 .map(|(i, (q, b))| {
                     let mut solver = self.solver_pool[i].lock().unwrap();
@@ -2145,9 +2092,8 @@ impl<T: FloatT> CompiledSolver<T> {
 
         // Process in parallel using pre-allocated solvers from the pool
         let num_solvers = self.solver_pool.len();
-        let results: Result<Vec<_>, _> = self.thread_pool.install(|| {
-            problems
-                .par_iter()
+        let results: Result<Vec<_>, _> = self.executor.install(|| {
+            batch_iter(problems)
                 .enumerate()
                 .map(|(i, problem)| {
                     // Get solver from pool (round-robin assignment)
@@ -2382,9 +2328,8 @@ impl<T: FloatT> CompiledSolver<T> {
         drop(cache); // Release lock before parallel section
 
         let num_grad_states = self.grad_states.len();
-        let results: Result<Vec<_>, _> = self.thread_pool.install(|| {
-            upstream_grads
-                .par_iter()
+        let results: Result<Vec<_>, _> = self.executor.install(|| {
+            batch_iter(upstream_grads)
                 .enumerate()
                 .map(|(i, grads)| {
                     // Get solver from pool (round-robin)
@@ -2712,9 +2657,8 @@ impl<T: FloatT> CompiledSolver<T> {
         let num_grad_states = self.grad_states.len();
         let diff_method = self.settings.ipm.diff_method;
 
-        let results: Result<Vec<_>, _> = self.thread_pool.install(|| {
-            upstream_grads
-                .par_iter()
+        let results: Result<Vec<_>, _> = self.executor.install(|| {
+            batch_iter(upstream_grads)
                 .enumerate()
                 .map(|(i, grads)| {
                     let solver_idx = i % num_solvers;
@@ -2883,7 +2827,7 @@ impl<T: FloatT> CompiledSolver<T> {
 
     /// Get the number of threads configured
     pub fn num_threads(&self) -> usize {
-        self.thread_pool.current_num_threads()
+        self.executor.num_threads()
     }
 
     /// Get problem dimensions
