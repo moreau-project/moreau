@@ -32,11 +32,12 @@ class _ImplHandle(np.ndarray):
 
     from_numpy retains this array until the last storage alias is released,
     including detach() aliases made by autograd's saved-tensor machinery.
-    A weak registry alone loses solvers constructed locally during forward.
+    Keep the handle one-dimensional: older Inductor versions copy scalar
+    inputs and can free the owner before the backward custom op runs.
     """
 
     def __new__(cls, solver):
-        handle = np.array(solver._impl_handle, dtype=np.int64).view(cls)
+        handle = np.array([solver._impl_handle], dtype=np.int64).view(cls)
         handle.impl = solver._impl
         return handle
 
@@ -109,7 +110,7 @@ def _solve_fake(P, A, q, b, handle, direct_dual_size, active_set, warm):
         b.new_empty(b.shape),
         b.new_empty(b.shape),
         q.new_empty(zx_shape),
-        torch.empty((), dtype=torch.int64, device="cpu"),
+        torch.empty((1,), dtype=torch.int64, device="cpu"),
         torch.empty(q.shape[:-1], dtype=torch.int64, device="cpu"),
         state,
     )
