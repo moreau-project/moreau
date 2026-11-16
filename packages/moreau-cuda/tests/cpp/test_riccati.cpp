@@ -1025,7 +1025,8 @@ TEST(RiccatiBackwardTest, GradientsMatchCuDSS) {
 // backward passes on one problem. Seed dL/dx = ones, dL/dz = dL/ds = 0.
 struct BackwardGradErrors { double dq, db, dP, dA; };
 
-static BackwardGradErrors riccati_vs_cudss_backward(const MPCProblem& p, int batchSize) {
+static BackwardGradErrors riccati_vs_cudss_backward(const MPCProblem& p, int batchSize,
+                                                  cudaStream_t stream = nullptr) {
     auto upload = [&](const std::vector<double>& h) {
         std::vector<double> batched;
         for (int r = 0; r < batchSize; ++r) batched.insert(batched.end(), h.begin(), h.end());
@@ -1050,9 +1051,11 @@ static BackwardGradErrors riccati_vs_cudss_backward(const MPCProblem& p, int bat
         BatchedVector dx_bar(p.n, batchSize), dz_bar(p.m, batchSize), ds_bar(p.m, batchSize);
         std::vector<double> ones(p.n * batchSize, 1.0);
         cudaMemcpy(dx_bar.data(), ones.data(), sizeof(double) * ones.size(), cudaMemcpyHostToDevice);
-        dz_bar.setToConstant(0.0); ds_bar.setToConstant(0.0);
-        backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, 0);
+        // Initialize cotangents before the first backward on the caller stream.
         cudaDeviceSynchronize();
+        dz_bar.setToConstant(0.0, stream); ds_bar.setToConstant(0.0, stream);
+        backward(*solver.diff_state(), dx_bar, dz_bar, ds_bar, solver, stream);
+        cudaStreamSynchronize(stream);
 
         dq.resize(p.n * batchSize); db.resize(p.m * batchSize);
         dP.resize(p.nnzP * batchSize); dA.resize(p.nnzA * batchSize);
@@ -1074,6 +1077,28 @@ static BackwardGradErrors riccati_vs_cudss_backward(const MPCProblem& p, int bat
     };
     cudaFree(d_P); cudaFree(d_A); cudaFree(d_q); cudaFree(d_b);
     return { err(cdq, rdq), err(cdb, rdb), err(cdP, rdP), err(cdA, rdA) };
+}
+
+TEST(RiccatiBackwardTest, FirstBackwardOnNonblockingStream) {
+    cudaStream_t stream = nullptr;
+    ASSERT_EQ(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), cudaSuccess);
+    for (int batch_size : {1, 4}) {
+        for (bool equality_only : {true, false}) {
+            auto problem = buildMPCProblem(8, 4, 2, batch_size, equality_only);
+            for (size_t i = 0; i < problem.q_values.size(); ++i)
+                problem.q_values[i] = 0.1 * (1.0 + i % 7);
+            for (int trial = 0; trial < 5; ++trial) {
+                SCOPED_TRACE(::testing::Message() << "batch " << batch_size
+                    << ", equality_only " << equality_only << ", trial " << trial);
+                const auto error = riccati_vs_cudss_backward(problem, batch_size, stream);
+                EXPECT_LT(error.dq, 1e-3);
+                EXPECT_LT(error.db, 1e-3);
+                EXPECT_LT(error.dP, 1e-3);
+                EXPECT_LT(error.dA, 1e-3);
+            }
+        }
+    }
+    EXPECT_EQ(cudaStreamDestroy(stream), cudaSuccess);
 }
 
 // Backward through a *scrambled* MPC: the forward recovers the band via RCM and

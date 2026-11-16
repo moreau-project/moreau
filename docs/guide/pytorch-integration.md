@@ -98,6 +98,7 @@ Unlike some other libraries that differentiate through solver iterations (unroll
 - **Efficiency**: Requires constant memory regardless of the number of solver iterations.
 - **Accuracy**: Differentiates through the exact solution, avoiding "gradient vanish/explosion" issues common in unrolled solvers.
 - **Support**: Moreau supports differentiating with respect to ALL problem parameters ($P, A, q, b$).
+- **Failed solves**: backward raises `RuntimeError` if the loss depends on a problem that returned no solution (e.g. `PrimalInfeasible`). Mask those problems out of the loss. See [Gradients of failed solves](basic-usage.md#gradients-of-failed-solves).
 
 ---
 

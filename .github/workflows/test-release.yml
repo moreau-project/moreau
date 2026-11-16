@@ -150,8 +150,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # setup-python has no Python 3.9 for ubuntu-latest (26.04); keep testing
+          # the declared minimum (requires-python >= 3.9) on 24.04.
           - arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             python: '3.9'
           - arch: x86_64
             runner: ubuntu-latest

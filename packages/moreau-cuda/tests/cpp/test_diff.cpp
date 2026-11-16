@@ -15,6 +15,8 @@
 #include <vector>
 #include <cmath>
 #include <random>
+#include <chrono>
+#include <thread>
 
 #include "moreau/diff/diff.hpp"
 #include "moreau/diff/diff_kkt.hpp"
@@ -22,6 +24,7 @@
 #include "moreau/solver/solver.hpp"
 #include "moreau/cones/cones.hpp"
 #include "moreau/vector/vector.hpp"
+#include "moreau/vector/vector_kernels.cuh"
 #include "moreau/kkt/woodbury_kernels.cuh"
 
 using namespace moreau;
@@ -5317,6 +5320,347 @@ static std::vector<double> backward_dq(CompiledSolver& solver, const std::vector
     return copy_from_batched(solver.diff_state()->dq);
 }
 
+class BackwardStreamTest : public ::testing::TestWithParam<int64_t> {
+protected:
+    cudaStream_t streams[2] = {};
+
+    void SetUp() override {
+        ASSERT_EQ(cudaStreamCreateWithFlags(&streams[0], cudaStreamNonBlocking), cudaSuccess);
+        ASSERT_EQ(cudaStreamCreateWithFlags(&streams[1], cudaStreamNonBlocking), cudaSuccess);
+    }
+
+    void TearDown() override {
+        EXPECT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        for (auto stream : streams) {
+            if (stream) EXPECT_EQ(cudaStreamDestroy(stream), cudaSuccess);
+        }
+    }
+
+    CompiledSolver make_solver() {
+        Settings settings;
+        settings.verbose = false;
+        settings.enableGrad = true;
+        settings.ipm.diffMethod = DiffMethod::Exact;
+        settings.ipm.kktSolverType = KKTSolverType::CuDSS;
+        return make_nonneg_solver(std::vector<double>(2 * GetParam(), 1.0),
+                                  settings, GetParam());
+    }
+};
+
+TEST_P(BackwardStreamTest, CachedSolverFollowsStream) {
+    const int64_t batch_size = GetParam();
+    auto solver = make_solver();
+    // Prime the cached factorization and RHS with a zero cotangent. A stale
+    // cuDSS stream can then return exactly zero for a later nonzero gradient.
+    auto initial = backward_dq(solver, std::vector<double>(2 * batch_size, 0.0));
+    for (double value : initial) EXPECT_NEAR(value, 0.0, 1e-6);
+
+    BatchedVector dx(2, batch_size), dz(2, batch_size), ds(2, batch_size);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    const cudaStream_t sequence[] = {streams[0], streams[1], nullptr};
+    for (int i = 0; i < 12; ++i) {
+        auto stream = sequence[i % 3];
+        double weight = i % 2 ? -2.0 : 3.0;
+        dx.setToConstant(weight, stream);
+        dz.setToConstant(0.0, stream);
+        ds.setToConstant(0.0, stream);
+        backward(*solver.diff_state(), dx, dz, ds, solver, stream);
+        std::vector<double> dq(2 * batch_size);
+        ASSERT_EQ(cudaMemcpyAsync(dq.data(), solver.diff_state()->dq.data(),
+                  dq.size() * sizeof(double), cudaMemcpyDeviceToHost, stream), cudaSuccess);
+        ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+        for (double value : dq) {
+            EXPECT_NEAR(value, -weight, 1e-6) << "iteration " << i;
+        }
+        ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    }
+}
+
+TEST_P(BackwardStreamTest, SolvesFollowStreamWithoutRefactorization) {
+    const int64_t batch_size = GetParam();
+    auto solver = make_solver();
+    backward_dq(solver, std::vector<double>(2 * batch_size, 0.0));
+    auto& kkt = *solver.diff_kkt_;
+    BatchedVector rhs(solver.diff_state()->rhs.n(), batch_size);
+    BatchedVector result(rhs.n(), batch_size);
+
+    for (bool adjoint : {false, true}) {
+        SCOPED_TRACE(adjoint ? "adjoint" : "forward");
+        rhs.setToConstant(1.0);
+        if (adjoint) kkt.solveAdjoint(rhs.data(), result.data());
+        else kkt.solveForward(rhs.data(), result.data());
+        ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        const auto reference = copy_from_batched(result);
+        double norm = 0.0;
+        for (double value : reference) norm += value * value;
+        ASSERT_GT(norm, 1e-6);
+
+        // No factor() call here: each solve must establish its own stream dependencies.
+        for (int i = 0; i < 6; ++i) {
+            auto stream = streams[i % 2];
+            double weight = i % 2 ? -2.0 : 3.0;
+            rhs.setToConstant(weight, stream);
+            if (adjoint) kkt.solveAdjoint(rhs.data(), result.data(), stream);
+            else kkt.solveForward(rhs.data(), result.data(), stream);
+            std::vector<double> actual(reference.size());
+            ASSERT_EQ(cudaMemcpyAsync(actual.data(), result.data(),
+                      actual.size() * sizeof(double), cudaMemcpyDeviceToHost, stream), cudaSuccess);
+            ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+            for (size_t j = 0; j < actual.size(); ++j) {
+                EXPECT_NEAR(actual[j], weight * reference[j], 1e-6)
+                    << "iteration " << i << ", entry " << j;
+            }
+            ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        }
+    }
+}
+
+TEST_P(BackwardStreamTest, FactorizationWaitsForMatrixUpdates) {
+    const int64_t batch_size = GetParam();
+    auto solver = make_solver();
+    backward_dq(solver, std::vector<double>(2 * batch_size, 0.0));
+    auto& kkt = *solver.diff_kkt_;
+    BatchedVector values(kkt.KKT.values(), kkt.KKT.nnz(), batch_size);
+    BatchedVector rhs(solver.diff_state()->rhs.n(), batch_size);
+    BatchedVector result(rhs.n(), batch_size);
+    rhs.setToConstant(1.0);
+    kkt.solveForward(rhs.data(), result.data());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    const auto reference = copy_from_batched(result);
+
+    double matrix_scale = 1.0;
+    for (int i = 0; i < 6; ++i) {
+        auto stream = streams[i % 2];
+        const double scale = i % 2 ? 0.5 : 2.0;
+        matrix_scale *= scale;
+        // Scaling K by c scales the solution of K y = rhs by 1/c.
+        scale_by_scalar(values, scale, stream);
+        kkt.factor(stream);
+        kkt.solveForward(rhs.data(), result.data(), stream);
+        std::vector<double> actual(reference.size());
+        ASSERT_EQ(cudaMemcpyAsync(actual.data(), result.data(),
+                  actual.size() * sizeof(double), cudaMemcpyDeviceToHost, stream), cudaSuccess);
+        ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+        for (size_t j = 0; j < actual.size(); ++j) {
+            EXPECT_NEAR(actual[j], reference[j] / matrix_scale, 1e-6)
+                << "iteration " << i << ", entry " << j;
+        }
+        ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    }
+}
+
+TEST_P(BackwardStreamTest, QueuedSolvesAlternateStreamsWithoutSynchronization) {
+    const int64_t batch_size = GetParam();
+    auto solver = make_solver();
+    backward_dq(solver, std::vector<double>(2 * batch_size, 0.0));
+    auto& kkt = *solver.diff_kkt_;
+    const int64_t dim = solver.diff_state()->rhs.n();
+    BatchedVector rhs(dim, batch_size), result(dim, batch_size);
+    rhs.setToConstant(1.0);
+    kkt.solveForward(rhs.data(), result.data());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    const auto forward_reference = copy_from_batched(result);
+    kkt.solveAdjoint(rhs.data(), result.data());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    const auto adjoint_reference = copy_from_batched(result);
+
+    // Allocate every call's inputs and outputs before queuing work: cudaMalloc,
+    // cudaFree, and pageable host copies could otherwise hide the race.
+    constexpr int calls = 12;
+    std::vector<BatchedVector> inputs, outputs;
+    inputs.reserve(calls);
+    outputs.reserve(calls);
+    for (int i = 0; i < calls; ++i) {
+        inputs.emplace_back(dim, batch_size);
+        outputs.emplace_back(dim, batch_size);
+    }
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    // Delay the first caller so the next stream reaches the shared workspace
+    // first unless the solver establishes the dependency itself.
+    ASSERT_EQ(cudaLaunchHostFunc(streams[0], [](void*) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }, nullptr), cudaSuccess);
+    for (int i = 0; i < calls; ++i) {
+        const auto stream = streams[i % 2];
+        inputs[i].setToConstant(i + 1.0, stream);
+        if (i % 2) kkt.solveAdjoint(inputs[i].data(), outputs[i].data(), stream);
+        else kkt.solveForward(inputs[i].data(), outputs[i].data(), stream);
+    }
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    for (int i = 0; i < calls; ++i) {
+        const auto actual = copy_from_batched(outputs[i]);
+        const auto& reference = i % 2 ? adjoint_reference : forward_reference;
+        for (size_t j = 0; j < actual.size(); ++j) {
+            EXPECT_NEAR(actual[j], (i + 1.0) * reference[j], 1e-6)
+                << "call " << i << ", entry " << j;
+        }
+    }
+}
+
+TEST_P(BackwardStreamTest, QueuedMatrixUpdatesAlternateStreamsWithoutSynchronization) {
+    const int64_t batch_size = GetParam();
+    const int64_t P_ro[] = {0, 1}, P_ci[] = {0}, A_ro[] = {0};
+    const Cones cones;
+    DiffKKT kkt(1, 0, batch_size, P_ro, P_ci, 1, A_ro, nullptr, 0, cones);
+    BatchedVector zero(1, batch_size), one(1, batch_size), rhs(2, batch_size);
+    zero.setToConstant(0.0);
+    one.setToConstant(1.0);
+    rhs.setToConstant(1.0);
+    constexpr int calls = 12;
+    std::vector<BatchedVector> matrices, outputs;
+    matrices.reserve(calls);
+    outputs.reserve(calls);
+    for (int i = 0; i < calls; ++i) {
+        matrices.emplace_back(1, batch_size);
+        matrices.back().setToConstant(i + 1.0);
+        outputs.emplace_back(2, batch_size);
+    }
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    for (int i = 0; i < calls; ++i) {
+        const auto stream = streams[i % 2];
+        // No cones, q = c1 = 0, c3 = 1: J = diag(P, 1).
+        kkt.updateJ(matrices[i].data(), 1, nullptr, 0,
+            zero.data(), nullptr, zero.data(), nullptr, one.data(),
+            nullptr,  // nonnegative
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,  // SOC
+            nullptr, nullptr, nullptr,  // exponential, power, PSD
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,  // genpow
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,  // direct cones
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,  // direct genpow
+            nullptr, nullptr, nullptr, nullptr, nullptr,  // direct SOC
+            cones, stream);
+        kkt.factor(stream);
+        // Keep this solve pending while the next caller assembles a new J.
+        if (i % 2 == 0) {
+            ASSERT_EQ(cudaLaunchHostFunc(stream, [](void*) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }, nullptr), cudaSuccess);
+        }
+        if (i % 2) kkt.solveAdjoint(rhs.data(), outputs[i].data(), stream);
+        else kkt.solveForward(rhs.data(), outputs[i].data(), stream);
+    }
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    for (int i = 0; i < calls; ++i) {
+        const auto actual = copy_from_batched(outputs[i]);
+        for (int64_t b = 0; b < batch_size; ++b) {
+            EXPECT_NEAR(actual[2*b], 1.0 / (i + 1.0), 1e-6) << "call " << i;
+            EXPECT_NEAR(actual[2*b+1], 1.0, 1e-6) << "call " << i;
+        }
+    }
+}
+
+TEST_P(BackwardStreamTest, CacheOutlivesAnalysisCallerStream) {
+    const int64_t batch_size = GetParam();
+    auto solver = make_solver();
+    init_diff_kkt(solver, streams[0]);
+    ASSERT_EQ(cudaStreamSynchronize(streams[0]), cudaSuccess);
+    ASSERT_EQ(cudaStreamDestroy(streams[0]), cudaSuccess);
+    streams[0] = nullptr;
+
+    auto stream = streams[1];
+    BatchedVector dx(2, batch_size), dz(2, batch_size), ds(2, batch_size);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    dx.setToConstant(1.0, stream);
+    dz.setToConstant(0.0, stream);
+    ds.setToConstant(0.0, stream);
+    backward(*solver.diff_state(), dx, dz, ds, solver, stream);
+    std::vector<double> dq(2 * batch_size);
+    ASSERT_EQ(cudaMemcpyAsync(dq.data(), solver.diff_state()->dq.data(),
+              dq.size() * sizeof(double), cudaMemcpyDeviceToHost, stream), cudaSuccess);
+    ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+    for (double value : dq) EXPECT_NEAR(value, -1.0, 1e-6);
+}
+
+TEST_P(BackwardStreamTest, DirectConeDualCotangentFollowsStream) {
+    const int64_t batch_size = GetParam();
+    const std::vector<int64_t> P_ro = {0, 1, 2, 3};
+    const std::vector<int64_t> P_ci = {0, 1, 2};
+    const std::vector<int64_t> A_ro = {0};
+    std::vector<double> P_host(3 * batch_size), q_host(3 * batch_size);
+    for (int64_t i = 0; i < batch_size; ++i) {
+        P_host[3*i] = 2.0;
+        P_host[3*i+1] = 3.0;
+        P_host[3*i+2] = 4.0;
+        q_host[3*i] = -3.0;
+        q_host[3*i+1] = 2.0;
+        q_host[3*i+2] = -1.0;
+    }
+    BatchedVector P(3, batch_size), q(3, batch_size);
+    P.cpuToGpu(P_host.data());
+    q.cpuToGpu(q_host.data());
+    Cones cones;
+    cones.dir_cones.push_back(SupportedXConeT{XConeKind::Nonneg, {0, 1, 2}});
+    Settings settings;
+    settings.verbose = false;
+    settings.enableGrad = true;
+    settings.ipm.diffMethod = DiffMethod::Exact;
+    settings.ipm.kktSolverType = KKTSolverType::CuDSS;
+    CompiledSolver solver(3, 0, batch_size,
+                          P_ro.data(), P_ci.data(), 3,
+                          A_ro.data(), nullptr, 0, cones, settings);
+    solver.solveAll(P.data(), nullptr, q.data(), nullptr);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+    for (int i = 0; i < 6; ++i) {
+        auto stream = streams[i % 2];
+        BatchedVector dx(3, batch_size, stream), dz(0, batch_size, stream);
+        BatchedVector ds(0, batch_size, stream), dz_x(3, batch_size, stream);
+        const double weight = i % 2 ? -2.0 : 3.0;
+        dx.setToConstant(1.0, stream);
+        dz_x.setToConstant(weight, stream);
+        backward_with_dz_x(*solver.diff_state(), dx, dz, ds, &dz_x, solver, stream);
+        std::vector<double> dq(3 * batch_size);
+        ASSERT_EQ(cudaMemcpyAsync(dq.data(), solver.diff_state()->dq.data(),
+                  dq.size() * sizeof(double), cudaMemcpyDeviceToHost, stream), cudaSuccess);
+        ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+        for (int64_t j = 0; j < batch_size; ++j) {
+            EXPECT_NEAR(dq[3*j], -0.5, 1e-6);
+            EXPECT_NEAR(dq[3*j+1], weight, 1e-6);
+            EXPECT_NEAR(dq[3*j+2], -0.25, 1e-6);
+        }
+    }
+}
+
+TEST_P(BackwardStreamTest, FirstUnconstrainedBackwardOnNonblockingStream) {
+    const int64_t batch_size = GetParam();
+    const std::vector<int64_t> P_ro = {0, 1, 2, 3};
+    const std::vector<int64_t> P_ci = {0, 1, 2};
+    const std::vector<int64_t> A_ro = {0};
+    BatchedVector P(3, batch_size), q(3, batch_size);
+    P.setToConstant(2.0);
+    std::vector<double> q_host(3 * batch_size);
+    for (int64_t i = 0; i < batch_size; ++i) {
+        q_host[3*i] = 1.0;
+        q_host[3*i+1] = -2.0;
+        q_host[3*i+2] = 0.5;
+    }
+    q.cpuToGpu(q_host.data());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    for (int trial = 0; trial < 10; ++trial) {
+        Settings settings;
+        settings.verbose = false;
+        settings.enableGrad = true;
+        settings.ipm.diffMethod = DiffMethod::Exact;
+        settings.ipm.kktSolverType = KKTSolverType::CuDSS;
+        CompiledSolver solver(3, 0, batch_size,
+                              P_ro.data(), P_ci.data(), 3,
+                              A_ro.data(), nullptr, 0, Cones(), settings);
+        solver.solveAll(P.data(), nullptr, q.data(), nullptr);
+        BatchedVector dx(3, batch_size), dz(0, batch_size), ds(0, batch_size);
+        ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        auto stream = streams[trial % 2];
+        dx.setToConstant(1.0, stream);
+        backward(*solver.diff_state(), dx, dz, ds, solver, stream);
+        std::vector<double> dq(3 * batch_size);
+        ASSERT_EQ(cudaMemcpyAsync(dq.data(), solver.diff_state()->dq.data(),
+                  dq.size() * sizeof(double), cudaMemcpyDeviceToHost, stream), cudaSuccess);
+        ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+        for (double value : dq) EXPECT_NEAR(value, -0.5, 1e-6) << "trial " << trial;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(BatchSizes, BackwardStreamTest, ::testing::Values(1, 4));
+
 TEST(SmoothedDiffTest, SmoothedDiffersFromExact) {
     // With q near zero, x* ≈ 0 (constraint boundary).
     // Exact and Smoothed (mu=0.1) should produce visibly different gradients.
@@ -6288,15 +6632,34 @@ TEST(WoodburyDiffTest, WoodburyNonPowerOfTwoMatchesCuDSS) {
     }
 }
 
-TEST(HSDERefinementTest, WeakDirectionsForwardAndAdjoint) {
+class HSDERefinementTest : public ::testing::TestWithParam<bool> {
+protected:
+    cudaStream_t stream = nullptr;
+
+    void SetUp() override {
+        if (GetParam()) {
+            ASSERT_EQ(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), cudaSuccess);
+        }
+    }
+
+    void TearDown() override {
+        EXPECT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
+        if (stream) EXPECT_EQ(cudaStreamDestroy(stream), cudaSuccess);
+    }
+};
+
+TEST_P(HSDERefinementTest, WeakDirectionsForwardAndAdjoint) {
     // An exact diagonal J gives an independent solution for both orientations.
     // Different RHS scales exercise per-batch stopping, including a zero RHS.
     const int64_t ro[] = {0, 1}, ci[] = {0}, aro[] = {0};
     Cones cones;
-    DiffKKT kkt(1, 0, 3, ro, ci, 1, aro, nullptr, 0, cones, KKTSolverType::CuDSS);
+    DiffKKT kkt(1, 0, 3, ro, ci, 1, aro, nullptr, 0, cones, KKTSolverType::CuDSS, stream);
     std::vector<int64_t> rows(kkt.augdim + 1), cols(kkt.KKT.nnz());
-    cudaMemcpy(rows.data(), kkt.KKT.rowOffsets(), rows.size() * sizeof(int64_t), cudaMemcpyDeviceToHost);
-    cudaMemcpy(cols.data(), kkt.KKT.colIndices(), cols.size() * sizeof(int64_t), cudaMemcpyDeviceToHost);
+    ASSERT_EQ(cudaMemcpyAsync(rows.data(), kkt.KKT.rowOffsets(), rows.size() * sizeof(int64_t),
+                             cudaMemcpyDeviceToHost, stream), cudaSuccess);
+    ASSERT_EQ(cudaMemcpyAsync(cols.data(), kkt.KKT.colIndices(), cols.size() * sizeof(int64_t),
+                             cudaMemcpyDeviceToHost, stream), cudaSuccess);
+    ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
     std::vector<double> values(3 * kkt.KKT.nnz(), 0.0);
     for (int batch = 0; batch < 3; ++batch) {
         for (int64_t r = 0; r < kkt.augdim; ++r) {
@@ -6306,19 +6669,27 @@ TEST(HSDERefinementTest, WeakDirectionsForwardAndAdjoint) {
             }
         }
     }
-    cudaMemcpy(kkt.KKT.values(), values.data(), values.size() * sizeof(double), cudaMemcpyHostToDevice);
-    kkt.factor();
-    BatchedVector rhs(2, 3), sol(2, 3);
-    copy_to_batched(rhs, {1e-2, 1.0, 0.0, 0.0, -2e-2, 3.0});
+    ASSERT_EQ(cudaMemcpyAsync(kkt.KKT.values(), values.data(), values.size() * sizeof(double),
+                             cudaMemcpyHostToDevice, stream), cudaSuccess);
+    kkt.factor(stream);
+    BatchedVector rhs(2, 3, stream), sol(2, 3, stream);
+    const std::vector<double> rhs_values = {1e-2, 1.0, 0.0, 0.0, -2e-2, 3.0};
+    ASSERT_EQ(cudaMemcpyAsync(rhs.data(), rhs_values.data(), rhs_values.size() * sizeof(double),
+                             cudaMemcpyHostToDevice, stream), cudaSuccess);
     for (bool adjoint : {false, true}) {
         SCOPED_TRACE(adjoint ? "adjoint" : "forward");
-        if (adjoint) kkt.solveAdjoint(rhs.data(), sol.data());
-        else kkt.solveForward(rhs.data(), sol.data());
-        auto actual = copy_from_batched(sol);
+        if (adjoint) kkt.solveAdjoint(rhs.data(), sol.data(), stream);
+        else kkt.solveForward(rhs.data(), sol.data(), stream);
+        std::vector<double> actual(rhs_values.size());
+        ASSERT_EQ(cudaMemcpyAsync(actual.data(), sol.data(), actual.size() * sizeof(double),
+                                 cudaMemcpyDeviceToHost, stream), cudaSuccess);
+        ASSERT_EQ(cudaStreamSynchronize(stream), cudaSuccess);
         const std::vector<double> expected = {1., 1., 0., 0., -2., 3.};
         for (size_t i = 0; i < expected.size(); ++i) EXPECT_NEAR(actual[i], expected[i], 1e-7);
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(CallerStreams, HSDERefinementTest, ::testing::Bool());
 
 TEST(ExpConeDerivativeTest, OutsidePolarMatchesProjectionKKT) {
     // v=(3,4,-2)=p+3*normal at p=(0,1,1), normal=(1,1,-1).

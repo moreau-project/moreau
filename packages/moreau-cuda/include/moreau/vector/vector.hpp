@@ -11,8 +11,9 @@
 namespace moreau {
 
 struct BatchedVector {
-    // construct & allocate (always owning)
-    BatchedVector(int n_, int batchSize_)
+    // Construct and allocate (always owning). Zero on the stream that will
+    // first use the vector, so initialization is ordered before its kernels.
+    BatchedVector(int n_, int batchSize_, cudaStream_t stream = 0)
         : n_(n_), batchSize_(batchSize_), data_(nullptr), external_data_(nullptr)
     {
         if (n_ < 0 || batchSize_ <= 0)
@@ -36,9 +37,9 @@ struct BatchedVector {
             if (e == cudaErrorMemoryAllocation) throw std::bad_alloc{};
             if (e != cudaSuccess) throw std::runtime_error(cudaGetErrorString(e));
 
-            // CRITICAL: Zero the memory immediately to prevent state corruption
-            // cudaMalloc can return previously-used memory with stale data
-            e = cudaMemset(p, 0, bytes);
+            // cudaMalloc can return previously used memory with stale data.
+            // Order the clear with the kernels that will use this storage.
+            e = cudaMemsetAsync(p, 0, bytes, stream);
             if (e != cudaSuccess) {
                 // Clean up the allocated memory before throwing
                 cudaFree(p);

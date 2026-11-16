@@ -32,37 +32,37 @@ DiffState::DiffState(
     int64_t totalXConeNumel_
 )
     : n(n_), m(m_), batchSize(batchSize_),
-      x(n_, batchSize_),
-      z(m_, batchSize_),
-      s(m_, batchSize_),
-      tau(1, batchSize_),
-      u(m_, batchSize_),
-      pi_u(m_, batchSize_),
-      z_x(totalXConeNumel_ > 0 ? totalXConeNumel_ : 1, batchSize_),
+      x(n_, batchSize_, stream),
+      z(m_, batchSize_, stream),
+      s(m_, batchSize_, stream),
+      tau(1, batchSize_, stream),
+      u(m_, batchSize_, stream),
+      pi_u(m_, batchSize_, stream),
+      z_x(totalXConeNumel_ > 0 ? totalXConeNumel_ : 1, batchSize_, stream),
       totalXConeNumel(totalXConeNumel_),
-      d(n_, batchSize_),
-      dinv(n_, batchSize_),
-      e(m_, batchSize_),
-      einv(m_, batchSize_),
-      c_scale(1, batchSize_),
-      work_n(n_, batchSize_),
-      work_m(m_, batchSize_),
-      work_m2(m_, batchSize_),
+      d(n_, batchSize_, stream),
+      dinv(n_, batchSize_, stream),
+      e(m_, batchSize_, stream),
+      einv(m_, batchSize_, stream),
+      c_scale(1, batchSize_, stream),
+      work_n(n_, batchSize_, stream),
+      work_m(m_, batchSize_, stream),
+      work_m2(m_, batchSize_, stream),
       // HSDE size: n + 2m + xn + 1 (when direct-x cones present, the
       // augmented system adds xn extra rows/cols).
-      rhs(n_ + 2 * m_ + totalXConeNumel_ + 1, batchSize_),
-      sol(n_ + 2 * m_ + totalXConeNumel_ + 1, batchSize_),
-      c1(n_, batchSize_),
-      c2(m_, batchSize_),
-      c3(1, batchSize_),
-      smoothing_x(n_, batchSize_),
-      smoothing_z(m_, batchSize_),
-      smoothing_s(m_, batchSize_),
-      smoothing_mu(1, batchSize_),
-      dP_values(nnzP, batchSize_),
-      dq(n_, batchSize_),
-      dA_values(nnzA, batchSize_),
-      db(m_, batchSize_)
+      rhs(n_ + 2 * m_ + totalXConeNumel_ + 1, batchSize_, stream),
+      sol(n_ + 2 * m_ + totalXConeNumel_ + 1, batchSize_, stream),
+      c1(n_, batchSize_, stream),
+      c2(m_, batchSize_, stream),
+      c3(1, batchSize_, stream),
+      smoothing_x(n_, batchSize_, stream),
+      smoothing_z(m_, batchSize_, stream),
+      smoothing_s(m_, batchSize_, stream),
+      smoothing_mu(1, batchSize_, stream),
+      dP_values(nnzP, batchSize_, stream),
+      dq(n_, batchSize_, stream),
+      dA_values(nnzA, batchSize_, stream),
+      db(m_, batchSize_, stream)
 {
     // Initialize all work vectors to zero
     x.setToConstant(0.0, stream);
@@ -115,18 +115,18 @@ size_t DiffState::memoryUsage() const noexcept {
 BackwardWorkspace::BackwardWorkspace(int64_t n_, int64_t m_, int64_t batchSize_, cudaStream_t stream)
     : n(n_), m(m_), batchSize(batchSize_),
       // HSDE path vectors
-      x_eq(n_, batchSize_),
-      z_eq(m_, batchSize_),
-      s_eq(m_, batchSize_),
-      u_eq(m_, batchSize_),
-      pi_u_eq(m_, batchSize_),
-      Px_eq(n_, batchSize_),
+      x_eq(n_, batchSize_, stream),
+      z_eq(m_, batchSize_, stream),
+      s_eq(m_, batchSize_, stream),
+      u_eq(m_, batchSize_, stream),
+      pi_u_eq(m_, batchSize_, stream),
+      Px_eq(n_, batchSize_, stream),
       // Equilibrated upstream gradient vectors
-      dx_eq(n_, batchSize_),
-      dz_eq(m_, batchSize_),
-      ds_eq(m_, batchSize_),
+      dx_eq(n_, batchSize_, stream),
+      dz_eq(m_, batchSize_, stream),
+      ds_eq(m_, batchSize_, stream),
       // Smoothed diff workspace
-      smoothing_mu_comp(1, batchSize_)
+      smoothing_mu_comp(1, batchSize_, stream)
 {
     // Initialize all work vectors to zero
     x_eq.setToConstant(0.0, stream);
@@ -151,59 +151,59 @@ ConeDerivatives::ConeDerivatives(
     cudaStream_t stream
 )
     : batchSize(batchSize_),
-      nonneg_H(cones.numNonnegCones > 0 ? cones.numNonnegCones : 1, batchSize_),
+      nonneg_H(cones.numNonnegCones > 0 ? cones.numNonnegCones : 1, batchSize_, stream),
       // Dense SOC (dim <= 4): upper triangle = dim*(dim+1)/2 per cone
-      soc_H(1, batchSize_),  // resized below
+      soc_H(1, batchSize_, stream),  // resized below
       // Sparse SOC (dim > 4): diagonal + rank-2
-      soc_sparse_diag(1, batchSize_),  // resized below
-      soc_sparse_v1(1, batchSize_),
-      soc_sparse_v2(1, batchSize_),
-      soc_sparse_c1(1, batchSize_),
-      soc_sparse_c2(1, batchSize_),
+      soc_sparse_diag(1, batchSize_, stream),  // resized below
+      soc_sparse_v1(1, batchSize_, stream),
+      soc_sparse_v2(1, batchSize_, stream),
+      soc_sparse_c1(1, batchSize_, stream),
+      soc_sparse_c2(1, batchSize_, stream),
       // Exp and power cones are NOT self-dual, so derivatives are NOT symmetric
       // We need full 9 elements per cone (not just upper triangle 6)
-      exp_H(cones.numExpCones > 0 ? cones.numExpCones * 9 : 1, batchSize_),
-      power_H(cones.numPowerCones > 0 ? cones.numPowerCones * 9 : 1, batchSize_),
+      exp_H(cones.numExpCones > 0 ? cones.numExpCones * 9 : 1, batchSize_, stream),
+      power_H(cones.numPowerCones > 0 ? cones.numPowerCones * 9 : 1, batchSize_, stream),
       // PSD cones: dense upper triangle svec_dim×svec_dim per cone
-      psd_H(cones.totalPsdHsEntries > 0 ? cones.totalPsdHsEntries : 1, batchSize_),
+      psd_H(cones.totalPsdHsEntries > 0 ? cones.totalPsdHsEntries : 1, batchSize_, stream),
       // PSD eigendecomp cache
-      psd_eigvals(cones.totalPsdMatDim > 0 ? cones.totalPsdMatDim : 1, batchSize_),
-      psd_eigvecs(cones.totalPsdMatSqDim > 0 ? cones.totalPsdMatSqDim : 1, batchSize_),
-      psd_omega(cones.totalPsdMatSqDim > 0 ? cones.totalPsdMatSqDim : 1, batchSize_),
-      psd_work_mat(cones.totalPsdMatSqDim > 0 ? cones.totalPsdMatSqDim : 1, batchSize_),
-      psd_work_mat2(cones.totalPsdMatSqDim > 0 ? cones.totalPsdMatSqDim : 1, batchSize_),
-      psd_work_svec(cones.totalPsdSvecDim > 0 ? cones.totalPsdSvecDim : 1, batchSize_),
-      genpow_sparse_diag(1, batchSize_),
-      genpow_sparse_left1(1, batchSize_),
-      genpow_sparse_right1(1, batchSize_),
-      genpow_sparse_left2(1, batchSize_),
-      genpow_sparse_right2(1, batchSize_),
-      genpow_sparse_left3(1, batchSize_),
-      genpow_sparse_c3(1, batchSize_),
-      genpow_diff_work_vec(1, batchSize_),
-      genpow_diff_work_dim1(1, batchSize_),
+      psd_eigvals(cones.totalPsdMatDim > 0 ? cones.totalPsdMatDim : 1, batchSize_, stream),
+      psd_eigvecs(cones.totalPsdMatSqDim > 0 ? cones.totalPsdMatSqDim : 1, batchSize_, stream),
+      psd_omega(cones.totalPsdMatSqDim > 0 ? cones.totalPsdMatSqDim : 1, batchSize_, stream),
+      psd_work_mat(cones.totalPsdMatSqDim > 0 ? cones.totalPsdMatSqDim : 1, batchSize_, stream),
+      psd_work_mat2(cones.totalPsdMatSqDim > 0 ? cones.totalPsdMatSqDim : 1, batchSize_, stream),
+      psd_work_svec(cones.totalPsdSvecDim > 0 ? cones.totalPsdSvecDim : 1, batchSize_, stream),
+      genpow_sparse_diag(1, batchSize_, stream),
+      genpow_sparse_left1(1, batchSize_, stream),
+      genpow_sparse_right1(1, batchSize_, stream),
+      genpow_sparse_left2(1, batchSize_, stream),
+      genpow_sparse_right2(1, batchSize_, stream),
+      genpow_sparse_left3(1, batchSize_, stream),
+      genpow_sparse_c3(1, batchSize_, stream),
+      genpow_diff_work_vec(1, batchSize_, stream),
+      genpow_diff_work_dim1(1, batchSize_, stream),
       // Direct-x cone derivative storage; resized below based on cones.dir_cones.
-      xcone_nonneg_H(1, batchSize_),
-      xcone_soc_H(1, batchSize_),
-      xcone_psd_H(1, batchSize_),
-      xcone_exp_H(1, batchSize_),
-      xcone_pow_H(1, batchSize_),
-      xcone_genpow_H(1, batchSize_),
+      xcone_nonneg_H(1, batchSize_, stream),
+      xcone_soc_H(1, batchSize_, stream),
+      xcone_psd_H(1, batchSize_, stream),
+      xcone_exp_H(1, batchSize_, stream),
+      xcone_pow_H(1, batchSize_, stream),
+      xcone_genpow_H(1, batchSize_, stream),
       // Direct-x GenPow backward workspaces and rank-3 scratch.
-      xcone_genpow_diff_work_vec(1, batchSize_),
-      xcone_genpow_diff_work_dim1(1, batchSize_),
-      xcone_genpow_rank3_diag(1, batchSize_),
-      xcone_genpow_rank3_left1(1, batchSize_),
-      xcone_genpow_rank3_right1(1, batchSize_),
-      xcone_genpow_rank3_left2(1, batchSize_),
-      xcone_genpow_rank3_right2(1, batchSize_),
-      xcone_genpow_rank3_left3(1, batchSize_),
-      xcone_genpow_rank3_c3(1, batchSize_),
-      xcone_soc_rank2_diag(1, batchSize_),
-      xcone_soc_rank2_v1(1, batchSize_),
-      xcone_soc_rank2_v2(1, batchSize_),
-      xcone_soc_rank2_c1(1, batchSize_),
-      xcone_soc_rank2_c2(1, batchSize_)
+      xcone_genpow_diff_work_vec(1, batchSize_, stream),
+      xcone_genpow_diff_work_dim1(1, batchSize_, stream),
+      xcone_genpow_rank3_diag(1, batchSize_, stream),
+      xcone_genpow_rank3_left1(1, batchSize_, stream),
+      xcone_genpow_rank3_right1(1, batchSize_, stream),
+      xcone_genpow_rank3_left2(1, batchSize_, stream),
+      xcone_genpow_rank3_right2(1, batchSize_, stream),
+      xcone_genpow_rank3_left3(1, batchSize_, stream),
+      xcone_genpow_rank3_c3(1, batchSize_, stream),
+      xcone_soc_rank2_diag(1, batchSize_, stream),
+      xcone_soc_rank2_v1(1, batchSize_, stream),
+      xcone_soc_rank2_v2(1, batchSize_, stream),
+      xcone_soc_rank2_c1(1, batchSize_, stream),
+      xcone_soc_rank2_c2(1, batchSize_, stream)
 {
     totalPsdHsEntries = cones.totalPsdHsEntries;
     totalPsdMatDim = cones.totalPsdMatDim;
@@ -224,13 +224,13 @@ ConeDerivatives::ConeDerivatives(
     totalSparseSocDim = sparseSocDim;
 
     // Resize SOC buffers
-    soc_H = BatchedVector(denseSocHs > 0 ? denseSocHs : 1, batchSize_);
+    soc_H = BatchedVector(denseSocHs > 0 ? denseSocHs : 1, batchSize_, stream);
     if (cones.numSparseSoc > 0) {
-        soc_sparse_diag = BatchedVector(sparseSocDim, batchSize_);
-        soc_sparse_v1 = BatchedVector(sparseSocDim, batchSize_);
-        soc_sparse_v2 = BatchedVector(sparseSocDim, batchSize_);
-        soc_sparse_c1 = BatchedVector(cones.numSparseSoc, batchSize_);
-        soc_sparse_c2 = BatchedVector(cones.numSparseSoc, batchSize_);
+        soc_sparse_diag = BatchedVector(sparseSocDim, batchSize_, stream);
+        soc_sparse_v1 = BatchedVector(sparseSocDim, batchSize_, stream);
+        soc_sparse_v2 = BatchedVector(sparseSocDim, batchSize_, stream);
+        soc_sparse_c1 = BatchedVector(cones.numSparseSoc, batchSize_, stream);
+        soc_sparse_c2 = BatchedVector(cones.numSparseSoc, batchSize_, stream);
     }
 
     // Build dense-only Hs offset array for the fused kernel
@@ -261,17 +261,17 @@ ConeDerivatives::ConeDerivatives(
         }
         totalGenpowDim = gpTotalDim;
 
-        genpow_sparse_diag = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_);
-        genpow_sparse_left1 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_);
-        genpow_sparse_right1 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_);
-        genpow_sparse_left2 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_);
-        genpow_sparse_right2 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_);
-        genpow_sparse_left3 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_);
-        genpow_sparse_c3 = BatchedVector(cones.numGenPowerCones, batchSize_);
+        genpow_sparse_diag = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_, stream);
+        genpow_sparse_left1 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_, stream);
+        genpow_sparse_right1 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_, stream);
+        genpow_sparse_left2 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_, stream);
+        genpow_sparse_right2 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_, stream);
+        genpow_sparse_left3 = BatchedVector(gpTotalDim > 0 ? gpTotalDim : 1, batchSize_, stream);
+        genpow_sparse_c3 = BatchedVector(cones.numGenPowerCones, batchSize_, stream);
 
         // Workspace for projection and derivative kernels
-        genpow_diff_work_vec = BatchedVector(cones.totalGenPowerDim, batchSize_);
-        genpow_diff_work_dim1 = BatchedVector(7 * cones.totalGenPowerAlphas, batchSize_);
+        genpow_diff_work_vec = BatchedVector(cones.totalGenPowerDim, batchSize_, stream);
+        genpow_diff_work_dim1 = BatchedVector(7 * cones.totalGenPowerAlphas, batchSize_, stream);
         genpow_diff_work_vec.setToConstant(0.0, stream);
         genpow_diff_work_dim1.setToConstant(0.0, stream);
     }
@@ -298,12 +298,12 @@ ConeDerivatives::ConeDerivatives(
         totalXExpKkt = exp_kkt;
         totalXPowKkt = pow_kkt;
         totalXGenPowKkt = gp_kkt;
-        xcone_nonneg_H = BatchedVector(nn      > 0 ? nn      : 1, batchSize_);
-        xcone_soc_H    = BatchedVector(soc_kkt > 0 ? soc_kkt : 1, batchSize_);
-        xcone_psd_H    = BatchedVector(psd_kkt > 0 ? psd_kkt : 1, batchSize_);
-        xcone_exp_H    = BatchedVector(exp_kkt > 0 ? exp_kkt : 1, batchSize_);
-        xcone_pow_H    = BatchedVector(pow_kkt > 0 ? pow_kkt : 1, batchSize_);
-        xcone_genpow_H = BatchedVector(gp_kkt  > 0 ? gp_kkt  : 1, batchSize_);
+        xcone_nonneg_H = BatchedVector(nn      > 0 ? nn      : 1, batchSize_, stream);
+        xcone_soc_H    = BatchedVector(soc_kkt > 0 ? soc_kkt : 1, batchSize_, stream);
+        xcone_psd_H    = BatchedVector(psd_kkt > 0 ? psd_kkt : 1, batchSize_, stream);
+        xcone_exp_H    = BatchedVector(exp_kkt > 0 ? exp_kkt : 1, batchSize_, stream);
+        xcone_pow_H    = BatchedVector(pow_kkt > 0 ? pow_kkt : 1, batchSize_, stream);
+        xcone_genpow_H = BatchedVector(gp_kkt  > 0 ? gp_kkt  : 1, batchSize_, stream);
         xcone_nonneg_H.setToConstant(0.0, stream);
         xcone_soc_H.setToConstant(0.0, stream);
         xcone_psd_H.setToConstant(0.0, stream);
@@ -315,15 +315,15 @@ ConeDerivatives::ConeDerivatives(
         if (cones.numXGenPowerCones > 0) {
             int64_t total_xg_dim    = cones.totalXGenPowerDim;
             int64_t total_xg_alphas = cones.totalXGenPowerAlphas;
-            xcone_genpow_diff_work_vec  = BatchedVector(total_xg_dim,    batchSize_);
-            xcone_genpow_diff_work_dim1 = BatchedVector(7 * total_xg_alphas, batchSize_);
-            xcone_genpow_rank3_diag   = BatchedVector(total_xg_dim, batchSize_);
-            xcone_genpow_rank3_left1  = BatchedVector(total_xg_dim, batchSize_);
-            xcone_genpow_rank3_right1 = BatchedVector(total_xg_dim, batchSize_);
-            xcone_genpow_rank3_left2  = BatchedVector(total_xg_dim, batchSize_);
-            xcone_genpow_rank3_right2 = BatchedVector(total_xg_dim, batchSize_);
-            xcone_genpow_rank3_left3  = BatchedVector(total_xg_dim, batchSize_);
-            xcone_genpow_rank3_c3     = BatchedVector(cones.numXGenPowerCones, batchSize_);
+            xcone_genpow_diff_work_vec  = BatchedVector(total_xg_dim, batchSize_, stream);
+            xcone_genpow_diff_work_dim1 = BatchedVector(7 * total_xg_alphas, batchSize_, stream);
+            xcone_genpow_rank3_diag   = BatchedVector(total_xg_dim, batchSize_, stream);
+            xcone_genpow_rank3_left1  = BatchedVector(total_xg_dim, batchSize_, stream);
+            xcone_genpow_rank3_right1 = BatchedVector(total_xg_dim, batchSize_, stream);
+            xcone_genpow_rank3_left2  = BatchedVector(total_xg_dim, batchSize_, stream);
+            xcone_genpow_rank3_right2 = BatchedVector(total_xg_dim, batchSize_, stream);
+            xcone_genpow_rank3_left3  = BatchedVector(total_xg_dim, batchSize_, stream);
+            xcone_genpow_rank3_c3     = BatchedVector(cones.numXGenPowerCones, batchSize_, stream);
             xcone_genpow_diff_work_vec.setToConstant(0.0, stream);
             xcone_genpow_diff_work_dim1.setToConstant(0.0, stream);
             xcone_genpow_rank3_diag.setToConstant(0.0, stream);
@@ -347,11 +347,11 @@ ConeDerivatives::ConeDerivatives(
         totalSparseXSocDim = total_xsoc_sparse_dim;
         numSparseXSoc      = num_xsoc_sparse;
         if (num_xsoc_sparse > 0) {
-            xcone_soc_rank2_diag = BatchedVector(total_xsoc_sparse_dim, batchSize_);
-            xcone_soc_rank2_v1   = BatchedVector(total_xsoc_sparse_dim, batchSize_);
-            xcone_soc_rank2_v2   = BatchedVector(total_xsoc_sparse_dim, batchSize_);
-            xcone_soc_rank2_c1   = BatchedVector(num_xsoc_sparse, batchSize_);
-            xcone_soc_rank2_c2   = BatchedVector(num_xsoc_sparse, batchSize_);
+            xcone_soc_rank2_diag = BatchedVector(total_xsoc_sparse_dim, batchSize_, stream);
+            xcone_soc_rank2_v1   = BatchedVector(total_xsoc_sparse_dim, batchSize_, stream);
+            xcone_soc_rank2_v2   = BatchedVector(total_xsoc_sparse_dim, batchSize_, stream);
+            xcone_soc_rank2_c1   = BatchedVector(num_xsoc_sparse, batchSize_, stream);
+            xcone_soc_rank2_c2   = BatchedVector(num_xsoc_sparse, batchSize_, stream);
             xcone_soc_rank2_diag.setToConstant(0.0, stream);
             xcone_soc_rank2_v1.setToConstant(0.0, stream);
             xcone_soc_rank2_v2.setToConstant(0.0, stream);
@@ -626,9 +626,9 @@ void compute_cone_derivative(
 void DiffState::resize_for_xcones(int64_t xn, cudaStream_t stream) {
     if (xn == totalXConeNumel) return;
     int64_t new_dim = n + 2 * m + xn + 1;
-    rhs = BatchedVector(new_dim, batchSize);
-    sol = BatchedVector(new_dim, batchSize);
-    z_x = BatchedVector(xn > 0 ? xn : 1, batchSize);
+    rhs = BatchedVector(new_dim, batchSize, stream);
+    sol = BatchedVector(new_dim, batchSize, stream);
+    z_x = BatchedVector(xn > 0 ? xn : 1, batchSize, stream);
     totalXConeNumel = xn;
     if (stream) {
         rhs.setToConstant(0.0, stream);
@@ -1339,7 +1339,7 @@ static void backward_impl(
     }
     if (dz_x_bar != nullptr && xn > 0) {
         // Equilibrate dz_x_bar (user frame) → dz_x_eq, then pass through.
-        dz_x_eq_buf = std::make_unique<BatchedVector>(xn, batchSize);
+        dz_x_eq_buf = std::make_unique<BatchedVector>(xn, batchSize, stream);
         equilibrate_dz_x(
             dz_x_eq_buf->data(), dz_x_bar->data(),
             state.dinv.data(), state.c_scale.data(),

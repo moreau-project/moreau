@@ -3,7 +3,7 @@
 #include <cudss.h>
 
 /**
- * cuDSS version compatibility (0.7 vs 0.8).
+ * cuDSS version compatibility (0.7 vs >= 0.8; wheels ship 1.0).
  *
  * cuDSS 0.8 introduced a dedicated cudssDataType_t for matrix creation
  * (no implicit conversion from cudaDataType_t), split the single CSR

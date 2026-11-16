@@ -158,6 +158,9 @@ cusparse = [
 nvjitlink = [
     { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+nvrtc = [
+    { name = "nvidia-cuda-nvrtc-cu12", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
 
 [[package]]
 name = "cvxpy"
@@ -514,7 +517,7 @@ requires-dist = [
     { name = "cuda-toolkit", extras = ["cusolver", "cusparse", "cudart", "nvjitlink"], specifier = "==12.*" },
     { name = "moreau", editable = "packages/moreau" },
     { name = "numpy", specifier = ">=1.19.0" },
-    { name = "nvidia-cudss-cu12", specifier = ">=0.7.1,<0.8" },
+    { name = "nvidia-cudss-cu12", specifier = ">=1.0,<1.1" },
     { name = "torch", marker = "extra == 'torch'", specifier = ">=2.4.0" },
 ]
 provides-extras = ["torch"]
@@ -672,6 +675,8 @@ version = "12.8.93"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/05/6b/32f747947df2da6994e999492ab306a903659555dddc0fbdeb9d71f75e52/nvidia_cuda_nvrtc_cu12-12.8.93-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:a7756528852ef889772a84c6cd89d41dfa74667e24cca16bb31f8f061e3e9994", size = 88040029, upload-time = "2025-03-07T01:42:13.562Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/d1/e50d0acaab360482034b84b6e27ee83c6738f7d32182b987f9c7a4e32962/nvidia_cuda_nvrtc_cu12-12.8.93-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:fc1fec1e1637854b4c0a65fb9a8346b51dd9ee69e61ebaccc82058441f15bce8", size = 43106076, upload-time = "2025-03-07T01:41:59.817Z" },
+    { url = "https://files.pythonhosted.org/packages/45/51/52a3d84baa2136cc8df15500ad731d74d3a1114d4c123e043cb608d4a32b/nvidia_cuda_nvrtc_cu12-12.8.93-py3-none-win_amd64.whl", hash = "sha256:7a4b6b2904850fe78e0bd179c4b655c404d4bb799ef03ddc60804247099ae909", size = 73586838, upload-time = "2025-03-07T01:52:13.483Z" },
 ]
 
 [[package]]
@@ -697,15 +702,17 @@ wheels = [
 
 [[package]]
 name = "nvidia-cudss-cu12"
-version = "0.7.1.6"
+version = "1.0.0.35"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cuda-toolkit", extra = ["cublas"] },
+    { name = "cuda-toolkit", extra = ["cublas", "nvrtc"] },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cuda-nvrtc-cu12" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/7f/0bb96031bdc421c5d2123c0570f7ba391e19c621862ceb20b2361a29ca94/nvidia_cudss_cu12-0.7.1.6-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:edf9a0d40463841a18e77e34071747ae7ae3145e0af65c976923a9ac125f97ac", size = 79845306, upload-time = "2025-11-04T21:45:12.625Z" },
-    { url = "https://files.pythonhosted.org/packages/b9/3b/bc2da119af8328b7096bced5632d3b1045dad9b40cb2f3c64717c535e89f/nvidia_cudss_cu12-0.7.1.6-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:8b7837d216e871bb9ac174300a62eb998344f0b5faa03cf8f93d37c28985b325", size = 79958151, upload-time = "2025-11-04T21:46:46.009Z" },
-    { url = "https://files.pythonhosted.org/packages/4d/67/13a8eb884b6cb314fffd8b9e4c60bcb18c8141e1a6ec9b51a95c84c87bde/nvidia_cudss_cu12-0.7.1.6-py3-none-win_amd64.whl", hash = "sha256:6cbe6f0c404259243faecf2ca13dfe282655d6296b97d5188995166190728435", size = 70856822, upload-time = "2025-11-04T21:36:25.936Z" },
+    { url = "https://files.pythonhosted.org/packages/17/47/0ddd3284aab045730e1c44e0d7852a93afb5bb0b6c8ca6f7188c7baecca4/nvidia_cudss_cu12-1.0.0.35-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:2fbf7007d56416fcd20485e066f0d1ee72c239119759c4c05763eb70ba5cef46", size = 220019384, upload-time = "2026-10-22T02:02:28.726Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/d4/c4730b99fde17792c6fde3f12e1898461c6b7096c605baad3a9c9f99a26b/nvidia_cudss_cu12-1.0.0.35-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:30716a74ccf9d43f361c21bb9ede101bd503f6189d9b791c8954e5a46a7ee9fc", size = 220074183, upload-time = "2026-10-22T02:01:15.335Z" },
+    { url = "https://files.pythonhosted.org/packages/57/d4/b95515f604ea238363f6079a6d2fde3e0b5ac13d022310e3859174435477/nvidia_cudss_cu12-1.0.0.35-py3-none-win_amd64.whl", hash = "sha256:8526cf87914a2f047f2e470778f4665bf76794e3e2ffc541e3847d25e8b82b07", size = 218489456, upload-time = "2026-10-22T02:03:29.917Z" },
 ]
 
 [[package]]

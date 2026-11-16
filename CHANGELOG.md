@@ -17,6 +17,16 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Changed
 
+- **Breaking:** `Settings`, `IPMSettings` and `ActiveSetSettings` reject
+  unknown fields with a pydantic `ValidationError` instead of ignoring them.
+  Remove or correct misspelled settings (#70).
+- **Breaking:** malformed CSR input and duplicate entries raise `ValueError`,
+  and complex, string or object arrays raise `TypeError`, instead of being
+  accepted. Call `.sum_duplicates()` on scipy matrices and pass real float
+  arrays (#70).
+- CUDA wheels build against cuDSS 1.0.0 and require `nvidia-cudss-cu12>=1.0,<1.1`
+  (or `-cu13`), which adds NVRTC as a runtime dependency. Julia (`CUDSS_jll`)
+  stays on cuDSS 0.7.1 until a 1.0 build is registered (#109).
 - `solver="auto"` always picks the IPM. Active-set is used only with
   `solver="active_set"`, so small dense QPs may be slower by default (#97).
 - On CPU, `CompiledSolver` with `direct_solve_method="auto"` lets the Rust core
@@ -25,6 +35,13 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Fixed
 
+- NaN or Inf in `P`, `A` or `q`, or NaN in `b`, raises `ValueError` instead of
+  returning `Solved` with a wrong or NaN solution. CUDA tensors are not
+  scanned (#70).
+- `Solver` and `CompiledSolver.setup()` copy their inputs, so editing the
+  caller's arrays afterwards no longer changes the next solve (#70).
+- CUDA backward passes could return zero or stale gradients when cached solves
+  or newly allocated workspaces crossed CUDA streams (#112).
 - CPU and CUDA HSDE derivatives could be biased in weakly constrained directions by
   the regularized differentiation solve. Apply defect correction to the
   unregularized equations in forward and adjoint differentiation, reusing
@@ -52,3 +69,9 @@ All notable changes to Moreau are documented here. The format follows
 - CUDA equilibration of problems with `P = 0` (LPs, SOCPs, SDPs) started each
   Ruiz iteration from stale column norms, so it scaled `A` differently from the
   CPU (#107).
+- Backward (`backward()`, PyTorch autograd, JAX `grad` on CPU) returned
+  meaningless gradients for problems that ended with no solution (e.g.
+  `PrimalInfeasible`, `NumericalError`). It now raises `RuntimeError` naming the
+  batch indices when such a problem has a nonzero upstream gradient. To migrate,
+  mask failed problems out of the loss using `solver.info.status`; JAX on CUDA
+  does not run this check yet (#74).
