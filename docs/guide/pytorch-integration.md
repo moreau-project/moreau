@@ -2,6 +2,8 @@
 
 Moreau provides a seamless integration with PyTorch, allowing you to use conic optimization as a differentiable layer in your neural networks. It supports full autograd and automatic device selection between CPU and CUDA.
 
+The PyTorch integration requires PyTorch 2.5.1 or newer.
+
 ## Quick Start
 
 ```python
