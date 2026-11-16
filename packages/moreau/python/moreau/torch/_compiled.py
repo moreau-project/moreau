@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import weakref
+from typing import List
 
 import numpy as np
 import torch
@@ -31,11 +32,12 @@ class _ImplHandle(np.ndarray):
 
     from_numpy retains this array until the last storage alias is released,
     including detach() aliases made by autograd's saved-tensor machinery.
-    A weak registry alone loses solvers constructed locally during forward.
+    Keep the handle one-dimensional: older Inductor versions copy scalar
+    inputs and can free the owner before the backward custom op runs.
     """
 
     def __new__(cls, solver):
-        handle = np.array(solver._impl_handle, dtype=np.int64).view(cls)
+        handle = np.array([solver._impl_handle], dtype=np.int64).view(cls)
         handle.impl = solver._impl
         return handle
 
@@ -48,6 +50,7 @@ def _register_solver(solver):
     return handle
 
 
+# Older Torch versions require typing.List when inferring Tensor[] schemas.
 @torch.library.custom_op("moreau::solve", mutates_args=())
 def _solve(
     P: torch.Tensor,
@@ -57,7 +60,7 @@ def _solve(
     handle: int,
     direct_dual_size: int,
     active_set: bool,
-    warm: list[torch.Tensor],
+    warm: List[torch.Tensor],
 ) -> tuple[
     torch.Tensor,
     torch.Tensor,
@@ -65,7 +68,7 @@ def _solve(
     torch.Tensor,
     torch.Tensor,
     torch.Tensor,
-    list[torch.Tensor],
+    List[torch.Tensor],
 ]:
     # Only native execution touches the solver or its diagnostic metadata.
     # Backward saves explicit data and solutions, never the latest solve state.
@@ -107,7 +110,7 @@ def _solve_fake(P, A, q, b, handle, direct_dual_size, active_set, warm):
         b.new_empty(b.shape),
         b.new_empty(b.shape),
         q.new_empty(zx_shape),
-        torch.empty((), dtype=torch.int64, device="cpu"),
+        torch.empty((1,), dtype=torch.int64, device="cpu"),
         torch.empty(q.shape[:-1], dtype=torch.int64, device="cpu"),
         state,
     )

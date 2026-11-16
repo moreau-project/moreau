@@ -37,7 +37,7 @@ dependencies = [
 cuda = ["moreau-cuda12==0.5.0"]
 cuda12 = ["moreau-cuda12==0.5.0"]
 cuda13 = ["moreau-cuda13==0.5.0"]
-torch = ["torch>=2.4.0"]
+torch = ["torch>=2.5.1"]
 test = ["pytest>=7.0.0", "cvxpy>=1.4.0"]
 all = ["moreau[cuda,torch]"]
 
