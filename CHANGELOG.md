@@ -8,6 +8,8 @@ All notable changes to Moreau are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-15
+
 ### Added
 
 - `torch.compile` support, including `fullgraph=True`, for CPU and CUDA solves
