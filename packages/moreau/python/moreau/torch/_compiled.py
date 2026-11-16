@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import weakref
+from typing import List
 
 import numpy as np
 import torch
@@ -48,6 +49,7 @@ def _register_solver(solver):
     return handle
 
 
+# Older Torch versions require typing.List when inferring Tensor[] schemas.
 @torch.library.custom_op("moreau::solve", mutates_args=())
 def _solve(
     P: torch.Tensor,
@@ -57,7 +59,7 @@ def _solve(
     handle: int,
     direct_dual_size: int,
     active_set: bool,
-    warm: list[torch.Tensor],
+    warm: List[torch.Tensor],
 ) -> tuple[
     torch.Tensor,
     torch.Tensor,
@@ -65,7 +67,7 @@ def _solve(
     torch.Tensor,
     torch.Tensor,
     torch.Tensor,
-    list[torch.Tensor],
+    List[torch.Tensor],
 ]:
     # Only native execution touches the solver or its diagnostic metadata.
     # Backward saves explicit data and solutions, never the latest solve state.
