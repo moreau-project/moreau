@@ -24,6 +24,7 @@ work=${2:?$usage}
 mkdir -p "$work"
 work=$(cd "$work" && pwd)
 source_dir=$(cd "$(dirname "$0")/.." && pwd)
+source "$source_dir/scripts/ci_upstream.sh"
 
 : "${CUDSS_ROOT:?must point at a cuDSS 1.0 build for CUDA 12}"
 export MOREAU_CUDA_ARCH=${MOREAU_CUDA_ARCH:-121}
@@ -47,8 +48,7 @@ setup() {
     uv pip install --python "$python" torch --index-url https://download.pytorch.org/whl/cu129
     uv pip install --python "$python" "maturin>=1.0,<2.0" numpy scipy "pydantic>=2" pytest \
         hypothesis networkx scikit-build-core nanobind "jax[cuda12]" \
-        "cvxpy @ git+https://github.com/cvxpy/cvxpy.git@release/1.8.x" \
-        "cvxpylayers @ git+https://github.com/cvxpy/cvxpylayers.git@v1.1.0"
+        "cvxpy==$UPSTREAM_CVXPY_VERSION" "cvxpylayers==$UPSTREAM_CVXPYLAYERS_VERSION"
 }
 
 build() {
@@ -86,16 +86,10 @@ test_python() {
 }
 
 test_upstream() {
-    rm -rf "$work/cvxpy" "$work/cvxpylayers"
-    git clone -q --depth 1 --branch release/1.8.x https://github.com/cvxpy/cvxpy.git "$work/cvxpy"
-    git clone -q --depth 1 --branch v1.1.0 https://github.com/cvxpy/cvxpylayers.git "$work/cvxpylayers"
-    # Run cvxpy's tests from outside its source tree so they import the installed package.
-    rm -rf "$work/cvxpy-tests"
-    cp -r "$work/cvxpy/cvxpy/tests" "$work/cvxpy-tests"
+    prepare_upstream_tests "$work" "$python"
     cd "$work"
     "$python" -m pytest cvxpy-tests/test_conic_solvers.py --tb=short -k Moreau
-    "$python" -m pytest cvxpylayers/tests/test_moreau.py \
-        cvxpylayers/tests/test_moreau_dual_variables.py --tb=short
+    run_cvxpylayers_tests "$work" "$python"
 }
 
 case "$stage" in

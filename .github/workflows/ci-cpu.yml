@@ -83,8 +83,8 @@ jobs:
         pip install pytest numpy scipy hypothesis
         pip install torch --index-url https://download.pytorch.org/whl/cpu
         pip install jax
-        pip install git+https://github.com/cvxpy/cvxpy.git@release/1.8.x
-        pip install git+https://github.com/cvxpy/cvxpylayers.git@v1.1.0
+        source scripts/ci_upstream.sh
+        pip install "cvxpy==$UPSTREAM_CVXPY_VERSION" "cvxpylayers==$UPSTREAM_CVXPYLAYERS_VERSION"
 
     - name: Test import
       run: |
@@ -96,10 +96,8 @@ jobs:
 
     - name: Clone upstream test repos
       run: |
-        git clone --depth 1 --branch release/1.8.x https://github.com/cvxpy/cvxpy.git /tmp/cvxpy
-        git clone --depth 1 --branch v1.1.0 https://github.com/cvxpy/cvxpylayers.git /tmp/cvxpylayers
-        # Copy cvxpy tests out so pytest doesn't shadow the installed package
-        cp -r /tmp/cvxpy/cvxpy/tests /tmp/cvxpy-tests
+        source scripts/ci_upstream.sh
+        prepare_upstream_tests /tmp/moreau-upstream python
 
     - name: Run moreau tests
       id: moreau_tests
@@ -111,8 +109,10 @@ jobs:
 
     - name: Run cvxpy Moreau tests
       if: always()
-      run: pytest /tmp/cvxpy-tests/test_conic_solvers.py -v --tb=short -k "Moreau"
+      run: python -m pytest /tmp/moreau-upstream/cvxpy-tests/test_conic_solvers.py -v --tb=short -k "Moreau"
 
     - name: Run cvxpylayers Moreau tests
       if: always()
-      run: pytest /tmp/cvxpylayers/tests/test_moreau.py /tmp/cvxpylayers/tests/test_moreau_dual_variables.py -v --tb=short -k "not cuda"
+      run: |
+        source scripts/ci_upstream.sh
+        run_cvxpylayers_tests /tmp/moreau-upstream python -k "not cuda"

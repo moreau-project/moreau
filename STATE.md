@@ -150,6 +150,8 @@ Julia MOI wrapper. Links against `moreau-c`. Released under Apache 2.0.
 | `packages/moreau/tests/python/*.py` | Unified-API integration tests |
 | `packages/moreau/tests/python/test_examples.py` | Runs each `examples/*.py` script; skips when its optional dependency is missing |
 | `packages/moreau/tests/python/bench/*.py` | Decision-gate benchmarks (checked-in artifacts) |
+| `scripts/ci_upstream.sh` | Shared CVXPY/CVXPYlayers release pins, verified test checkouts, and integration test selection for CPU/CUDA/Spark CI |
+| `scripts/patches/` | Explicit upstream test fixes backported to the pinned releases |
 
 Critical Rule 6 in CLAUDE.md: prefer C++/Rust tests for fast inner-loop
 verification; use Python tests for API/integration validation.
