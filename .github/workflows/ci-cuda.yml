@@ -11,12 +11,16 @@ on:
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
       - '.github/workflows/ci-cuda.yml'
+      - 'scripts/ci_upstream.sh'
+      - 'scripts/patches/**'
   pull_request:
     paths:
       - 'packages/moreau-cuda/**'
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
       - '.github/workflows/ci-cuda.yml'
+      - 'scripts/ci_upstream.sh'
+      - 'scripts/patches/**'
   workflow_dispatch:  # Manual trigger from GitHub UI
 
 concurrency:
@@ -201,11 +205,9 @@ jobs:
 
             # Install test dependencies and run Python tests (CUDA-enabled)
             pip install hypothesis
-            pip install git+https://github.com/cvxpy/cvxpy.git@release/1.8.x
-            pip install git+https://github.com/cvxpy/cvxpylayers.git@v1.1.0
-            git clone --depth 1 --branch release/1.8.x https://github.com/cvxpy/cvxpy.git /tmp/cvxpy
-            git clone --depth 1 --branch v1.1.0 https://github.com/cvxpy/cvxpylayers.git /tmp/cvxpylayers
-            cp -r /tmp/cvxpy/cvxpy/tests /tmp/cvxpy-tests
+            source scripts/ci_upstream.sh
+            pip install "cvxpy==$UPSTREAM_CVXPY_VERSION" "cvxpylayers==$UPSTREAM_CVXPYLAYERS_VERSION"
+            prepare_upstream_tests /tmp/moreau-upstream python3
             # Run each test file in its own process to prevent GPU OOM on T4 (16GB).
             # Accumulated CUDA memory from many tests in one process causes crashes.
             FAILED=0
@@ -223,8 +225,8 @@ jobs:
               echo "Failed test files:$FAILED_FILES"
               exit 1
             fi
-            pytest /tmp/cvxpy-tests/test_conic_solvers.py -v --tb=short -k "Moreau"
-            pytest /tmp/cvxpylayers/tests/test_moreau.py /tmp/cvxpylayers/tests/test_moreau_dual_variables.py -v --tb=short
+            python3 -m pytest /tmp/moreau-upstream/cvxpy-tests/test_conic_solvers.py -v --tb=short -k "Moreau"
+            run_cvxpylayers_tests /tmp/moreau-upstream python3
 
             # Fix permissions for cache (may fail if paths dont exist yet)
             chmod -R 777 /workspace/.cargo-cache /workspace/packages/moreau-cpu/target || echo "Note: chmod failed (ok if cache dirs dont exist)"

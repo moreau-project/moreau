@@ -13,6 +13,8 @@ on:
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
       - 'scripts/ci_spark.sh'
+      - 'scripts/ci_upstream.sh'
+      - 'scripts/patches/**'
       - '.github/workflows/ci-spark.yml'
   pull_request:
     paths:
@@ -20,6 +22,8 @@ on:
       - 'packages/moreau-cpu/**'
       - 'packages/moreau/**'
       - 'scripts/ci_spark.sh'
+      - 'scripts/ci_upstream.sh'
+      - 'scripts/patches/**'
       - '.github/workflows/ci-spark.yml'
   workflow_dispatch:
 

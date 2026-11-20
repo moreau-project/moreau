@@ -2,6 +2,24 @@
 
 Moreau provides utilities for generating test problems and verifying your installation.
 
+## Upstream Integration Tests
+
+CPU, CUDA, and DGX Spark CI use CVXPY 1.9.3 and CVXPYlayers 1.3.0. Shared
+pins in `scripts/ci_upstream.sh` keep installed versions and upstream test
+checkouts aligned; CI verifies the checkout commits and logs the versions
+and SHAs.
+
+The tests cover direct cones, reuse of one CVXPY problem across layers,
+and PyTorch compilation with solution and gradient checks. CVXPYlayers'
+compilation tests reject backend compiler failures, and the fullgraph tests
+exercise the complete layer. Test files run in separate processes to release
+compiled graphs and GPU memory between files.
+
+The CVXPY 1.9.3 test checkout receives the test-only fix from
+[CVXPY #3633](https://github.com/cvxpy/cvxpy/pull/3633), which removes the
+nonexistent `presolve_enable` option from a Moreau test. The test's solution
+assertions and the installed CVXPY package are preserved.
+
 ## Diagnostic CLI
 
 Verify your installation and backend availability:
