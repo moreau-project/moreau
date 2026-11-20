@@ -8,6 +8,12 @@ All notable changes to Moreau are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Updated examples to the current `moreau.torch.Solver.solve(P, A, q, b)`
+  signature and made them run on CPU-only machines. Corrected the quickstart
+  constraint signs and kept the basic-usage problem data consistent (#122).
+
 ## [0.5.0] - 2026-11-15
 
 ### Added
@@ -79,7 +85,3 @@ All notable changes to Moreau are documented here. The format follows
   batch indices when such a problem has a nonzero upstream gradient. To migrate,
   mask failed problems out of the loss using `solver.info.status`; JAX on CUDA
   does not run this check yet (#74).
-- The cvxpylayers docs now pin `cvxpy>=1.8.2,<1.9` and `cvxpylayers>=1.1,<1.2`:
-  cvxpylayers 1.2 with cvxpy 1.9 silently drops variable constraints such as
-  `x >= 0` with Moreau. The examples use the current `moreau.torch`
-  `solve(P, A, q, b)` signature and run on CPU-only machines.

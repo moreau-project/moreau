@@ -5,15 +5,11 @@
 :::{admonition} Requirements
 :class: tip
 
-Moreau support requires **cvxpy 1.8.x** and **cvxpylayers 1.1.x**:
+Moreau support requires **cvxpy >= 1.9.3** and **cvxpylayers >= 1.3.0**:
 
 ```bash
-pip install 'cvxpy>=1.8.2,<1.9' 'cvxpylayers>=1.1,<1.2'
+pip install 'cvxpy>=1.9.3' 'cvxpylayers>=1.3.0'
 ```
-
-cvxpylayers 1.2 with cvxpy 1.9 silently drops variable constraints such as `x >= 0` when using Moreau.
-
-Build one `CvxpyLayer` per `cp.Problem`: a second layer built from the same problem object gives wrong results.
 :::
 
 ## How It Works
@@ -218,9 +214,7 @@ print(grads.shape)  # (64, 5)
 Pass solver-specific options through `solver_args` — either at construction time (applied to every call) or per-call (overrides defaults). Top-level {py:class}`~moreau.Settings` fields are passed directly; IPM-specific settings go in a nested `ipm_settings` dict:
 
 ```python
-# At construction time (defaults for all forward calls).
-# A new cp.Problem, since each CvxpyLayer needs its own.
-problem = cp.Problem(objective, constraints)
+# At construction time (defaults for all forward calls)
 layer = CvxpyLayer(
     problem, parameters=[q], variables=[x],
     solver="MOREAU",
@@ -270,7 +264,7 @@ Both cvxpylayers and Moreau's native PyTorch/JAX APIs support differentiable opt
 Ensure you have the required versions:
 
 ```bash
-pip install 'cvxpy>=1.8.2,<1.9' 'cvxpylayers>=1.1,<1.2'
+pip install 'cvxpy>=1.9.3' 'cvxpylayers>=1.3.0'
 ```
 
 Verify:

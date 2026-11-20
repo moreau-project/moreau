@@ -11,7 +11,7 @@ Moreau support requires **cvxpy >= 1.8.2**:
 pip install 'cvxpy>=1.8.2'
 ```
 
-For cvxpylayers, see the version pins in [cvxpylayers Integration](cvxpylayers-integration.md).
+For cvxpylayers, see the requirements in [cvxpylayers Integration](cvxpylayers-integration.md).
 :::
 
 ## Quick Start

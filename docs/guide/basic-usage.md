@@ -147,10 +147,11 @@ A = sparse.csr_array([
 
 ## Cone Specification
 
-Cones define the constraint types. The order matters:
+Cones define the constraint types. This separate example illustrates a
+32-row constraint system; it does not match the three-row problem above:
 
 ```python
-mixed_cones = moreau.Cones(
+cones = moreau.Cones(
     num_zero_cones=1,      # Equality constraints (first)
     num_nonneg_cones=3,    # Inequality constraints
     so_cone_dims=[3, 5],   # Second-order cones (dim 3 and dim 5)
@@ -220,9 +221,16 @@ solution. Direct cones (`dir_cones`) constrain `x` directly and use no rows.
 
 ## Settings
 
-Customize solver behavior with `Settings`:
+Customize solver behavior with `Settings`. Return to the three-row problem
+from Single Problem Solving so that `A`, `b`, and `cones` agree:
 
 ```python
+P = sparse.diags([1.0, 2.0], format='csr')
+q = np.array([1.0, 1.0])
+A = sparse.csr_array([[1.0, 1.0], [-1.0, 0.0], [0.0, -1.0]])
+b = np.array([1.0, 0.0, 0.0])
+cones = moreau.Cones(num_zero_cones=1, num_nonneg_cones=2)
+
 settings = moreau.Settings(
     solver='auto',        # Solver algorithm ('auto', 'ipm', 'active_set')
     device='auto',        # 'auto', 'cpu', or 'cuda'
@@ -268,8 +276,10 @@ settings = moreau.Settings(enable_grad=True)
 solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
 solution = solver.solve()
 
-# Compute gradients of a scalar loss w.r.t. problem data
-# dl_dx, dl_dz, dl_ds are the gradients of your loss w.r.t. x, z, s
+# Compute gradients of loss = solution.x.sum() w.r.t. problem data
+dl_dx = np.ones_like(solution.x)
+dl_dz = np.zeros_like(solution.z)
+dl_ds = np.zeros_like(solution.s)
 grads = solver.backward(dl_dx, dl_dz, dl_ds)
 dl_dP = grads["dP_values"]  # w.r.t. P's CSR values
 dl_dq = grads["dq"]
