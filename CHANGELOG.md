@@ -8,6 +8,8 @@ All notable changes to Moreau are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-15
+
 ### Added
 
 - `torch.compile` support, including `fullgraph=True`, for CPU and CUDA solves
@@ -17,6 +19,8 @@ All notable changes to Moreau are documented here. The format follows
 
 ### Changed
 
+- The PyTorch extra now requires PyTorch 2.5.1 or newer. The Torch 2.4
+  custom-op API lacks a vmap registration method required by Moreau.
 - **Breaking:** `Settings`, `IPMSettings` and `ActiveSetSettings` reject
   unknown fields with a pydantic `ValidationError` instead of ignoring them.
   Remove or correct misspelled settings (#70).

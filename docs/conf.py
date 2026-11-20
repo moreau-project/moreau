@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath("../packages/moreau/python"))
 project = "Moreau"
 copyright = "2026, The Moreau Project"
 author = "The Moreau Project"
-release = "0.4.1"
+release = "0.5.0"
 
 # -- General configuration ---------------------------------------------------
 extensions = [

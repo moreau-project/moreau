@@ -67,10 +67,14 @@ if(DEFINED ENV{CUDSS_ROOT})
     set(CUDSS_ROOT $ENV{CUDSS_ROOT})
 endif()
 
-# Add cuDSS include/lib paths
+# Link the library from the same installation as the headers when one is selected.
+set(MOREAU_CUDSS_LINK cudss)
 if(CUDSS_ROOT)
-    include_directories(${CUDSS_ROOT}/include)
-    link_directories(${CUDSS_ROOT}/lib)
+    include_directories(BEFORE "${CUDSS_ROOT}/include")
+    find_library(MOREAU_CUDSS_LIBRARY NAMES cudss
+        PATHS "${CUDSS_ROOT}/lib" "${CUDSS_ROOT}/lib64"
+        NO_DEFAULT_PATH NO_CACHE REQUIRED)
+    set(MOREAU_CUDSS_LINK "${MOREAU_CUDSS_LIBRARY}")
 endif()
 
 # Also check /usr/local (common install location)
@@ -141,7 +145,8 @@ add_library(moreau_cuda_lib STATIC
 )
 target_include_directories(moreau_cuda_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-target_link_libraries(moreau_cuda_lib PUBLIC cudss CUDA::cudart CUDA::cusparse CUDA::cublas CUDA::cusolver suitesparse_amd)
+target_link_libraries(moreau_cuda_lib PUBLIC
+    "${MOREAU_CUDSS_LINK}" CUDA::cudart CUDA::cusparse CUDA::cublas CUDA::cusolver suitesparse_amd)
 set_property(TARGET moreau_cuda_lib PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET moreau_cuda_lib PROPERTY CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
 
