@@ -49,8 +49,8 @@ q = np.array([2.0, 1.0])                     # Linear term
 # Constraints: Ax + s = b, s in K
 A = sparse.csr_array([
     [1.0, 1.0],  # x1 + x2 = 1 (equality via zero cone)
-    [1.0, 0.0],  # x1 >= 0.7 (inequality via nonneg cone)
-    [0.0, 1.0],  # x2 >= 0.7
+    [1.0, 0.0],  # x1 <= 0.7 (inequality via nonneg cone)
+    [0.0, 1.0],  # x2 <= 0.7
 ])
 b = np.array([1.0, 0.7, 0.7])
 ```

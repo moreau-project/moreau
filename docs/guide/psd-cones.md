@@ -211,12 +211,26 @@ solutions = solver.solve(qs=qs, bs=bs)
 PSD cones support implicit differentiation through the backward pass,
 enabling gradient-based learning through SDP constraints.
 
+Rebuild the 3x3 problem from Quick Start; the preceding batch example uses
+4x4 matrices and a different cone dimension.
+
 ```python
+import moreau
+import numpy as np
+from scipy import sparse
+
+n = m = 6  # svec length for a 3x3 matrix
+P = sparse.eye(n, format='csr')
+A = sparse.eye(m, format='csr')
+q = np.zeros(n)
+b = np.array([1.0, 0.0, 1.0, 0.0, 0.0, 1.0])
+cones = moreau.Cones(psd_dims=[3])
+
 settings = moreau.Settings(enable_grad=True, device='cpu')
 solver = moreau.Solver(P, q, A, b, cones=cones, settings=settings)
 solution = solver.solve()
 
-# Compute gradients
+# Compute gradients of loss = solution.x.sum()
 grads = solver.backward(
     dx=np.ones(n),
     dz=np.zeros(m),
@@ -227,17 +241,30 @@ grads = solver.backward(
 
 ### PyTorch Integration
 
+Continue with the same 3x3 problem, converting its CSR values and vectors
+to double-precision tensors:
+
 ```python
+import torch
 from moreau.torch import Solver
 
+P_values_tensor = torch.tensor(P.data, dtype=torch.float64)
+A_values_tensor = torch.tensor(A.data, dtype=torch.float64)
+q_tensor = torch.tensor(q, dtype=torch.float64, requires_grad=True)
+b_tensor = torch.tensor(b, dtype=torch.float64)
+
 solver = Solver(
-    n=n, m=m,
-    P_row_offsets=P_ro, P_col_indices=P_ci,
-    A_row_offsets=A_ro, A_col_indices=A_ci,
-    cones=moreau.Cones(psd_dims=[3]),
+    n=P.shape[0], m=A.shape[0],
+    P_row_offsets=torch.tensor(P.indptr, dtype=torch.int64),
+    P_col_indices=torch.tensor(P.indices, dtype=torch.int64),
+    A_row_offsets=torch.tensor(A.indptr, dtype=torch.int64),
+    A_col_indices=torch.tensor(A.indices, dtype=torch.int64),
+    cones=cones,
+    settings=moreau.Settings(device='cpu'),
 )
 solution = solver.solve(P_values_tensor, A_values_tensor, q_tensor, b_tensor)
 solution.x.sum().backward()  # gradients flow through PSD projection
+print(q_tensor.grad)
 ```
 
 ---

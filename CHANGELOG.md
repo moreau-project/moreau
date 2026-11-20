@@ -8,6 +8,13 @@ All notable changes to Moreau are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Updated examples to the current `moreau.torch.Solver.solve(P, A, q, b)`
+  signature and made them run on CPU-only machines. Corrected the quickstart
+  constraint signs and kept the basic-usage and PSD guide problem data
+  consistent, including the PSD guide's PyTorch tensor setup (#122).
+
 ## [0.5.0] - 2026-11-15
 
 ### Added

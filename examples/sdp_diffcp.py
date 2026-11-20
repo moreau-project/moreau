@@ -104,14 +104,10 @@ def build_sdp_problem(n, p, seed=0):
     # Convert to CSR
     A_csr = sparse.csr_matrix(A_full)
 
-    # P = εI (small regularization for GPU numerical stability)
-    # Without this, the LP (P=0) case triggers a GPU initialization bug
-    # where the initial point appears converged at iteration 0.
-    reg = 1e-6
-    P_diag = sparse.eye(n_var, format="csr") * reg
-    P_ro = np.asarray(P_diag.indptr, dtype=np.int64)
-    P_ci = np.asarray(P_diag.indices, dtype=np.int64)
-    P_vals = np.asarray(P_diag.data, dtype=np.float64)
+    # P = 0 (linear objective): empty CSR
+    P_ro = np.zeros(n_var + 1, dtype=np.int64)
+    P_ci = np.zeros(0, dtype=np.int64)
+    P_vals = np.zeros(0)
 
     A_ro = np.asarray(A_csr.indptr, dtype=np.int64)
     A_ci = np.asarray(A_csr.indices, dtype=np.int64)

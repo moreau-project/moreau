@@ -81,12 +81,6 @@ b_batch = torch.tensor(
     device=device,
 )  # Shape (batch, m)
 
-# Bounds (unbounded: use -inf/+inf)
-l_single = torch.full((1, n), float("-inf"), dtype=dtype, device=device)
-u_single = torch.full((1, n), float("inf"), dtype=dtype, device=device)
-l_batch = torch.full((batch_size, n), float("-inf"), dtype=dtype, device=device)
-u_batch = torch.full((batch_size, n), float("inf"), dtype=dtype, device=device)
-
 # Cones: nonnegative cone for inequality constraints
 cones = moreau.Cones(num_nonneg_cones=m)
 
@@ -128,8 +122,7 @@ solver1 = Solver(
     cones=cones,
     settings=settings1,
 )
-solver1.setup(P_values_single, A_values_single)
-result = solver1.solve(q_single, b_single, l_single, u_single)
+result = solver1.solve(P_values_single, A_values_single, q_single, b_single)
 info = solver1.info
 print_result("1. Batch=1 -> Single problem via batched interface", result, info)
 
@@ -146,8 +139,7 @@ solver = Solver(
     cones=cones,
     settings=settings,
 )
-solver.setup(P_values_batch, A_values_batch)
-result = solver.solve(q_batch, b_batch, l_batch, u_batch)
+result = solver.solve(P_values_batch, A_values_batch, q_batch, b_batch)
 info = solver.info
 print_result("2. Full batch -> Batch with per-problem P/A", result, info)
 
@@ -158,19 +150,19 @@ print("\n3. Repeated solves (tests caching)")
 print("-" * 50)
 
 # First solve
-result1 = solver.solve(q_batch, b_batch, l_batch, u_batch)
+result1 = solver.solve(P_values_batch, A_values_batch, q_batch, b_batch)
 info1 = solver.info
 print(f"  First solve: obj_vals = {info1.obj_val.cpu().numpy()}")
 
 # Second solve with different q/b but same P/A
 q_batch_2x = q_batch * 2
 b_batch_2x = b_batch * 2
-result2 = solver.solve(q_batch_2x, b_batch_2x, l_batch, u_batch)
+result2 = solver.solve(P_values_batch, A_values_batch, q_batch_2x, b_batch_2x)
 info2 = solver.info
 print(f"  Second solve (2x q/b): obj_vals = {info2.obj_val.cpu().numpy()}")
 
 # Third solve back to original
-result3 = solver.solve(q_batch, b_batch, l_batch, u_batch)
+result3 = solver.solve(P_values_batch, A_values_batch, q_batch, b_batch)
 info3 = solver.info
 print(f"  Third solve (original): obj_vals = {info3.obj_val.cpu().numpy()}")
 print("  OK: Caching works - setup skipped when P/A unchanged")
@@ -183,8 +175,7 @@ print("-" * 50)
 
 # Enable gradients on inputs
 q_grad = q_batch.clone().requires_grad_(True)
-solver.setup(P_values_batch, A_values_batch)
-result = solver.solve(q_grad, b_batch, l_batch, u_batch)
+result = solver.solve(P_values_batch, A_values_batch, q_grad, b_batch)
 
 # Compute loss and backward
 loss = result.x.sum()

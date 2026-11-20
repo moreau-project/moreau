@@ -289,8 +289,7 @@ For maximum GPU throughput:
    ```python
    from moreau.torch import Solver
    # Tensors stay on GPU throughout
-   solver.setup(P_values.cuda(), A_values.cuda())
-   solution = solver.solve(q.cuda(), b.cuda())
+   solution = solver.solve(P_values.cuda(), A_values.cuda(), q.cuda(), b.cuda())
    ```
 
 ---

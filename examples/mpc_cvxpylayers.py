@@ -11,9 +11,8 @@ Double-integrator MPC (nx=12, nu=6, T=20):
 Compares:
   1. cvxpylayers + MOREAU: high-level CVXPY formulation
   2. moreau.torch native: manual CSR + cones (same problem)
-  3. cvxpylayers + SCS: baseline comparison
 
-All three compute forward + backward pass and report timing.
+Both compute forward + backward pass and report timing.
 """
 
 import time
@@ -188,18 +187,23 @@ def build_moreau_native_mpc():
 # ============================================================================
 
 
+def sync():
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+
+
 def benchmark(name, fn, warmup=3, iters=10):
     """Run fn() with warmup, return median time."""
     for _ in range(warmup):
         fn()
-    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    sync()
 
     times = []
     for _ in range(iters):
-        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        sync()
         t0 = time.perf_counter()
         fn()
-        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        sync()
         times.append(time.perf_counter() - t0)
 
     times.sort()
@@ -226,28 +230,24 @@ if __name__ == "__main__":
     print("\n--- cvxpylayers + MOREAU ---")
     problem, x0_param, x_vars, u_vars = build_cvxpy_mpc()
 
-    try:
-        layer_moreau = CvxpyLayer(
-            problem,
-            parameters=[x0_param],
-            variables=[x_vars[0], u_vars[0]],
-            solver="MOREAU",
-            solver_args={"max_iter": 1},
-        )
+    layer_moreau = CvxpyLayer(
+        problem,
+        parameters=[x0_param],
+        variables=[x_vars[0], u_vars[0]],
+        solver="MOREAU",
+    )
 
-        def run_cvxpylayers_moreau():
-            x0_t = x0_torch.detach().requires_grad_(True)
-            x_opt, u_opt = layer_moreau(x0_t)
-            loss = x_opt.sum() + u_opt.sum()
-            loss.backward()
-            return x_opt, u_opt, x0_t.grad
+    def run_cvxpylayers_moreau():
+        x0_t = x0_torch.detach().requires_grad_(True)
+        x_opt, u_opt = layer_moreau(x0_t)
+        loss = x_opt.sum() + u_opt.sum()
+        loss.backward()
+        return x_opt, u_opt, x0_t.grad
 
-        x_opt, u_opt, grad = run_cvxpylayers_moreau()
-        print(f"  x[0] shape: {x_opt.shape}, u[0] shape: {u_opt.shape}")
-        print(f"  obj (first problem): x[0]={x_opt[0,:3].detach().cpu().numpy()}")
-        benchmark("forward+backward", run_cvxpylayers_moreau)
-    except Exception as e:
-        print(f"  SKIPPED: {e}")
+    x_opt, u_opt, grad = run_cvxpylayers_moreau()
+    print(f"  x[0] shape: {x_opt.shape}, u[0] shape: {u_opt.shape}")
+    print(f"  obj (first problem): x[0]={x_opt[0,:3].detach().cpu().numpy()}")
+    benchmark("forward+backward", run_cvxpylayers_moreau)
 
     # ------------------------------------------------------------------
     # Native moreau.torch
@@ -259,10 +259,9 @@ if __name__ == "__main__":
     A_csr = A.tocsr()
 
     settings = moreau.Settings(
-        verbose=True,
+        verbose=False,
         batch_size=batch_size,
         device=str(device),
-        max_iter=1,
     )
 
     solver = MoreauTorchSolver(
@@ -283,8 +282,6 @@ if __name__ == "__main__":
     P_values_batch = P_values.unsqueeze(0).expand(batch_size, -1)
     A_values_batch = A_values.unsqueeze(0).expand(batch_size, -1)
 
-    solver.setup(P_values_batch, A_values_batch)
-
     # Build q and b for each batch element
     # q is zero for all; b has x0 in the first nx entries
     q_batch = torch.zeros(batch_size, n_vars, dtype=torch.float64, device=device)
@@ -297,21 +294,19 @@ if __name__ == "__main__":
     # Set initial conditions
     b_batch[:, :nx] = x0_torch.detach()
 
-    b_grad = b_batch.clone().requires_grad_(True)
-
     def run_moreau_native():
-        torch.cuda.synchronize()
+        sync()
         t0 = time.perf_counter()
         b_t = b_batch.detach().clone().requires_grad_(True)
         b_t.data[:, :nx] = x0_torch.detach()
-        torch.cuda.synchronize()
+        sync()
         t1 = time.perf_counter()
-        result = solver.solve(q_batch, b_t)
-        torch.cuda.synchronize()
+        result = solver.solve(P_values_batch, A_values_batch, q_batch, b_t)
+        sync()
         t2 = time.perf_counter()
         loss = result.x.sum()
         loss.backward()
-        torch.cuda.synchronize()
+        sync()
         t3 = time.perf_counter()
         return result, b_t.grad, (t1 - t0, t2 - t1, t3 - t2)
 

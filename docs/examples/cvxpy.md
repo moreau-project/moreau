@@ -11,10 +11,10 @@ For comprehensive documentation, see the [CVXPY Integration Guide](../guide/cvxp
 :::{admonition} Requirements
 :class: tip
 
-Moreau support requires **cvxpy >= 1.8.2** and **cvxpylayers >= 1.0.4**:
+Moreau support requires **cvxpy >= 1.9.3** and **cvxpylayers >= 1.3.0**:
 
 ```bash
-pip install 'cvxpy>=1.8.2' 'cvxpylayers>=1.0.4'
+pip install 'cvxpy>=1.9.3' 'cvxpylayers>=1.3.0'
 ```
 :::
 
