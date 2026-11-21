@@ -114,3 +114,27 @@ cp -r cvxpy/cvxpy/tests cvxpy-tests
 "$python" -m pytest cvxpy-tests/test_conic_solvers.py -v --tb=short -rs -k Moreau
 "$python" -m pytest cvxpylayers/tests/test_moreau.py \
     cvxpylayers/tests/test_moreau_dual_variables.py -v --tb=short -rs
+
+# A successful register_ffi_target() can merely queue registration. Execute
+# forward, warm-start, and backward handlers on older supported JAX runtimes
+# as well as the latest runtime tested above. JAX 0.6 predates CUDA 13 support.
+jax_versions=(0.10.2)
+if [[ "$cuda" == 12 ]]; then
+    jax_versions=(0.6.1 "${jax_versions[@]}")
+fi
+for jax_version in "${jax_versions[@]}"; do
+    uv pip install --python "$python" "jax[cuda$cuda]==$jax_version"
+    "$python" - <<'PY'
+import jax
+import moreau
+from moreau._backend import jax_available
+from moreau_cuda.jax import ffi_available
+
+assert moreau.device_available("cuda"), moreau.device_error("cuda")
+assert jax_available("cuda"), "Moreau's JAX CUDA adapter is unavailable"
+assert jax.devices("cuda"), "JAX CUDA is unavailable"
+assert ffi_available(), "Moreau JAX FFI extension is unavailable"
+PY
+    "$python" -m pytest "$source_dir/packages/moreau/tests/python/test_jax_ffi.py" \
+        --device=cuda -v --tb=short -rs
+done
